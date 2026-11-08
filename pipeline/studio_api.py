@@ -1368,11 +1368,31 @@ def prepare_voice(payload: dict, folder: Path, variant: int = 0, job_id: str | N
         default_voice = "vi-VN-NamMinhNeural"
         narrator_rate = "-5%"
 
-    segments, cast = (
-        parse_dialogue(payload["script"], default_voice)
-        if payload.get("multiVoice", True)
-        else ([{"speaker": "Narrator", "text": payload["script"], "voice": default_voice, "character": "narrator", "location": "munich-1914"}], [])
-    )
+    from pipeline.universal.v5_story_director import V5UniversalStoryDirector
+    director = V5UniversalStoryDirector()
+    v5_pkg = director.analyze_script(payload.get("script", ""))
+    
+    cast = [
+        {"name": c.get("canonicalName", "Actor"), "voice": c.get("voiceId", default_voice), "character": c.get("characterId", f"char_{i+1}")}
+        for i, c in enumerate(v5_pkg.get("characters", []))
+    ]
+    
+    segments = []
+    for beat in v5_pkg.get("storyBeats", []):
+        dlg = beat.get("dialogue", {})
+        if dlg and dlg.get("text"):
+            spk = dlg.get("speaker", "Narrator")
+            vc = dlg.get("voiceId") or next((c["voice"] for c in cast if c["name"] == spk), default_voice)
+            segments.append({
+                "speaker": spk,
+                "text": dlg.get("text"),
+                "voice": vc,
+                "character": spk,
+                "location": v5_pkg.get("locations", [{}])[0].get("category", "NEOCLASSICAL")
+            })
+    
+    if not segments:
+        segments = [{"speaker": "Narrator", "text": payload.get("script", ""), "voice": default_voice, "character": "narrator", "location": "NEOCLASSICAL"}]
 
     for s in segments:
         if s.get("character") == "narrator":
@@ -1863,26 +1883,27 @@ def upload_video_and_remove_local(file_path: Path, folder_id: str = DEFAULT_GDRI
 
 
 def run_production_render_service(payload: dict, duration: float, voice_path: Path, out_path: Path, mode: str = "final"):
-    """V4.2.1 Authoritative Production Render Service (Three.js WebGL + Motion Canvas 2D Vector Compositor)."""
-    script_low = str(payload.get("script", "")).lower()
-    if "cầu" in script_low or "thư" in script_low or "edo" in script_low:
-        scene_type = "edo_bridge"
-    elif "nhà" in script_low or "đèn lồng" in script_low or "aiko" in script_low:
-        scene_type = "edo_house"
-    else:
-        scene_type = "modern_lab"
+    """V5 Authoritative Production Render Service (Three.js WebGL + Motion Canvas 2D Vector Compositor)."""
+    from pipeline.universal.v5_story_director import V5UniversalStoryDirector
+    director = V5UniversalStoryDirector()
+    v5_pkg = director.analyze_script(str(payload.get("script", "")))
+    runner_pkg = director.compile_to_runner_package(v5_pkg)
+    runner_pkg["total_sequence_duration_seconds"] = duration
+    
+    pkg_file = out_path.parent / f"v5_package_{out_path.stem}.json"
+    pkg_file.write_text(json.dumps(runner_pkg, ensure_ascii=False, indent=2), encoding="utf-8")
 
     cmd = [
         "node",
         str(ROOT / "scripts" / "production_render_service.mjs"),
-        "--scene", scene_type,
+        "--package", str(pkg_file),
         "--duration", str(min(15.0 if mode == "preview" else 30.0, max(5.0, duration))),
         "--audio", str(voice_path),
         "--out", str(out_path),
     ]
     res = subprocess.run(cmd, cwd=str(ROOT), capture_output=True, text=True, encoding="utf-8")
     if res.returncode != 0 or not out_path.exists():
-        raise RuntimeError(f"ProductionRenderService V4.2.1 failed: {res.stderr or res.stdout}")
+        raise RuntimeError(f"ProductionRenderService V5 failed: {res.stderr or res.stdout}")
 
 
 def final_worker(job_id: str, winner: int):
@@ -2214,82 +2235,85 @@ class Handler(BaseHTTPRequestHandler):
                 script = str(data.get("script", "")).strip()
                 if len(script) < 10:
                     return self.send_json({"error": "Kịch bản quá ngắn"}, 400)
-                from dataclasses import asdict
-                from pipeline.universal.universal_engine_v42 import UniversalStoryIntelligenceV42
-                engine = UniversalStoryIntelligenceV42()
-                pkg = engine.analyze_script(script)
+                from pipeline.universal.v5_story_director import V5UniversalStoryDirector
+                director = V5UniversalStoryDirector()
+                v5_pkg = director.analyze_script(script)
 
                 scenes = []
-                for i, beat in enumerate(pkg.story_beats):
-                    dur = beat.time_range[1] - beat.time_range[0]
+                for i, beat in enumerate(v5_pkg.get("storyBeats", [])):
+                    tr = beat.get("timeRange", [0.0, 5.0])
+                    dur = round(tr[1] - tr[0], 1)
+                    dlg = beat.get("dialogue", {})
                     scenes.append({
-                        "id": beat.beat_id,
-                        "text": beat.what_happens,
-                        "emotion": beat.protagonist_internal_state.lower(),
-                        "shot": beat.shot_type,
+                        "id": beat.get("beatId", f"BEAT_{i+1:02d}"),
+                        "text": dlg.get("text") or beat.get("whatHappens", ""),
+                        "speaker": dlg.get("speaker", ""),
+                        "voice": dlg.get("voiceId", "vieneu-Thiện Minh"),
+                        "emotion": beat.get("emotion", "focused"),
+                        "shot": beat.get("shotType", "MEDIUM_SHOT"),
                         "duration": dur,
                         "sfx": "contextual",
-                        "locationId": pkg.locations[0].location_id if pkg.locations else "LOC_01",
-                        "action": [beat.primary_verb],
+                        "locationId": v5_pkg.get("locations", [{}])[0].get("locationId", "LOC_01"),
+                        "action": [beat.get("primaryVerb", "speak")],
                     })
 
                 cast = [
                     {
-                        "name": c.canonical_name,
-                        "character": c.character_id,
-                        "voice": c.voice_id,
-                        "isPov": c.is_pov_protagonist,
-                        "role": c.role,
-                        "identityAnchors": [c.personality, c.hair_silhouette, c.costume_silhouette]
+                        "name": c.get("canonicalName", "Actor"),
+                        "character": c.get("characterId", f"char_{i+1}"),
+                        "voice": c.get("voiceId", "vieneu-Thiện Minh"),
+                        "role": c.get("role", "LEAD"),
+                        "archetypeId": c.get("archetypeId", "young_courier"),
+                        "identityAnchors": [c.get("personality", ""), c.get("headContour", ""), c.get("costumePrimaryColor", "")]
                     }
-                    for c in pkg.characters
+                    for i, c in enumerate(v5_pkg.get("characters", []))
                 ]
 
                 locations = [
                     {
-                        "location_id": l.location_id,
-                        "canonical_name": l.canonical_name,
-                        "period_year": l.period_year,
-                        "grounding_class": l.historical_grounding_class,
-                        "weather": l.ambient_weather
+                        "location_id": l.get("locationId", "LOC_01"),
+                        "canonical_name": l.get("name", "Scene"),
+                        "category": l.get("category", "NEOCLASSICAL"),
+                        "weather": l.get("weather", "CLEAR"),
+                        "period_year": l.get("periodYear", "V5")
                     }
-                    for l in pkg.locations
+                    for l in v5_pkg.get("locations", [])
                 ]
 
                 return self.send_json({
-                    "title": pkg.title,
-                    "duration": pkg.total_duration_seconds,
+                    "title": v5_pkg.get("title", "Kịch Bản V5"),
+                    "duration": v5_pkg.get("durationSeconds", 25.0),
                     "resolution": "1920x1080",
                     "aspectRatio": "16:9",
                     "scenes": scenes,
                     "cast": cast,
                     "locations": locations,
-                    "visualPlan": [asdict(v) for v in pkg.visual_plan],
-                    "soundPlan": [asdict(s) for s in pkg.sound_cues],
-                    "storyWorldModel": asdict(pkg),
+                    "visualPlan": v5_pkg.get("visualPlan", []),
+                    "soundPlan": v5_pkg.get("soundCues", []),
+                    "storyWorldModel": v5_pkg,
                     "status": "APPROVED",
-                    "engineVersion": "V4.2 Universal Cinematic Pipeline"
+                    "engineVersion": "Premium Stickman Cinematic — V5"
                 })
             except Exception as e:
-                return self.send_json({"error": f"Không thể phân tích StoryWorld V4.2: {e}"}, 500)
-        if self.path == "/api/v42/test-submission":
+                return self.send_json({"error": f"Không thể phân tích StoryWorld V5: {e}"}, 500)
+        if self.path in ("/api/v42/test-submission", "/api/v5/test-submission"):
             try:
                 data = json.loads(self.rfile.read(int(self.headers.get("Content-Length", "0"))))
                 script = str(data.get("script", "")).strip() or "Munich, tháng 8 năm 1914. Tôi đứng lẫn trong đám đông quảng trường Odeonsplatz..."
-                from pipeline.universal.universal_engine_v42 import UniversalStoryIntelligenceV42
-                engine = UniversalStoryIntelligenceV42()
-                pkg = engine.analyze_script(script)
+                from pipeline.universal.v5_story_director import V5UniversalStoryDirector
+                director = V5UniversalStoryDirector()
+                v5_pkg = director.analyze_script(script)
                 return self.send_json({
                     "status": "SUCCESS",
-                    "engine": "UniversalStoryIntelligenceV42",
+                    "engine": "Premium Stickman Cinematic — V5",
                     "script_received": script[:60] + "...",
-                    "discovered_characters": len(pkg.characters),
-                    "protagonist": pkg.protagonist_id,
-                    "discovered_locations": len(pkg.locations),
-                    "discovered_beats": len(pkg.story_beats),
-                    "on_screen_graphics_elements": len(pkg.visual_plan),
-                    "sound_cues": len(pkg.sound_cues),
-                    "total_duration_sec": pkg.total_duration_seconds,
+                    "discovered_characters": len(v5_pkg.get("characters", [])),
+                    "protagonist": v5_pkg.get("characters", [{}])[0].get("canonicalName", "Protagonist"),
+                    "discovered_locations": len(v5_pkg.get("locations", [])),
+                    "discovered_beats": len(v5_pkg.get("storyBeats", [])),
+                    "on_screen_graphics_elements": len(v5_pkg.get("visualPlan", [])),
+                    "sound_cues": len(v5_pkg.get("soundCues", [])),
+                    "total_duration_sec": v5_pkg.get("durationSeconds", 25.0),
                     "verified_audio_synced": True,
                     "health": "PASS"
                 })
@@ -2364,7 +2388,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_HEAD(self):
         url = urlparse(self.path)
-        if url.path == "/health":
+        if url.path in ["/health", "/api/health"]:
             self.send_response(200)
             self.cors()
             self.send_header("Content-Type", "application/json")
@@ -2376,7 +2400,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         url = urlparse(self.path)
-        if url.path == "/health":
+        if url.path in ["/health", "/api/health"]:
             return self.send_json({
                 "ok": True,
                 "service": "ai-clip-studio-renderer",
@@ -2390,6 +2414,8 @@ class Handler(BaseHTTPRequestHandler):
                 "voices": sorted(VOICES),
                 "storageCleanup": LAST_CLEANUP,
             })
+        if url.path in ["/api/story-world", "/api/story-world/"]:
+            return self.send_json({"ok": True, "service": "StoryWorld V4.2", "usage": "POST JSON with 'script' field"})
         if url.path == "/api/status":
             return self.send_json(STATE.get(parse_qs(url.query).get("id", [""])[0], {"status": "missing", "message": "Không tìm thấy job"}))
         if url.path.startswith("/videos/"):

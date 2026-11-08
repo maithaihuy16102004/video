@@ -101,11 +101,31 @@ export class UniversalWorldEngine {
   // ============================================================================
   // SEMANTIC ENVIRONMENT CLASSIFIER
   // ============================================================================
-  private getSemanticIntent(): 'CAFE' | 'ANTARCTIC' | 'VICTORIAN_THAMES' | 'EDO_BRIDGE' | 'EDO_HOUSE' | 'NEOCLASSICAL' | 'ROBOTICS_LAB' | 'GENERIC_RURAL' {
+  private getSemanticIntent():
+    | 'CAFE'
+    | 'ANTARCTIC'
+    | 'VICTORIAN_THAMES'
+    | 'EDO_BRIDGE'
+    | 'EDO_HOUSE'
+    | 'NEOCLASSICAL'
+    | 'ROBOTICS_LAB'
+    | 'RAIL_STATION'
+    | 'HOSPITAL_ER'
+    | 'DESERT_STATION'
+    | 'GENERIC_RURAL' {
     const text = `${this.dna.location_id} ${this.dna.name} ${this.dna.architecture || ''} ${this.dna.region || ''} ${JSON.stringify(this.dna.props || [])}`.toLowerCase();
 
     if (text.includes('cafe') || text.includes('coffee') || text.includes('cà phê') || text.includes('quán') || text.includes('bàn') || text.includes('espresso')) {
       return 'CAFE';
+    }
+    if (text.includes('train') || text.includes('rail') || text.includes('tàu') || text.includes('ga') || text.includes('station') || text.includes('shanghai') || text.includes('thượng hải')) {
+      return 'RAIL_STATION';
+    }
+    if (text.includes('hospital') || text.includes('bệnh viện') || text.includes('cấp cứu') || text.includes('chợ rẫy') || text.includes('bác sĩ') || text.includes('clinic') || text.includes('er')) {
+      return 'HOSPITAL_ER';
+    }
+    if (text.includes('desert') || text.includes('sa mạc') || text.includes('sahara') || text.includes('dune') || text.includes('cát') || text.includes('storm')) {
+      return 'DESERT_STATION';
     }
     if (text.includes('antarctic') || text.includes('nam cực') || text.includes('vostok') || text.includes('aurora') || text.includes('cực quang') || text.includes('polar') || text.includes('băng')) {
       return 'ANTARCTIC';
@@ -164,6 +184,18 @@ export class UniversalWorldEngine {
       case 'ROBOTICS_LAB':
         skyColorHex = 0x546678; // Clean tech architectural background
         fogDensity = 0.001;
+        break;
+      case 'RAIL_STATION':
+        skyColorHex = 0x485260; // 1930s Shanghai noir steam night sky
+        fogDensity = 0.004;
+        break;
+      case 'HOSPITAL_ER':
+        skyColorHex = 0xDDE4EB; // Clean surgical/clinical envelope
+        fogDensity = 0.001;
+        break;
+      case 'DESERT_STATION':
+        skyColorHex = 0xC8A878; // Luminous amber Sahara dust sky
+        fogDensity = 0.004;
         break;
       default:
         skyColorHex = 0x768898;
@@ -259,6 +291,30 @@ export class UniversalWorldEngine {
         groundColor = 0x334155;
         ambientIntensity = 1.65;
         break;
+      case 'RAIL_STATION':
+        sunColor = 0xFFD28A; // Warm incandescent platform lanterns
+        sunIntensity = 2.3;
+        sunPos = [3, 9, 5];
+        skyColor = 0x68788C;
+        groundColor = 0x3A3632;
+        ambientIntensity = 1.50;
+        break;
+      case 'HOSPITAL_ER':
+        sunColor = 0xF8FAFC; // Soft clinical overhead lighting
+        sunIntensity = 2.5;
+        sunPos = [0, 12, 4];
+        skyColor = 0xCBD5E1;
+        groundColor = 0x64748B;
+        ambientIntensity = 1.70;
+        break;
+      case 'DESERT_STATION':
+        sunColor = 0xFFF3D0; // Blazing desert sun
+        sunIntensity = 2.8;
+        sunPos = [10, 18, 12];
+        skyColor = 0xD4A373;
+        groundColor = 0xBC6C25;
+        ambientIntensity = 1.55;
+        break;
     }
 
     const keyLight = new THREE.DirectionalLight(sunColor, sunIntensity);
@@ -298,6 +354,15 @@ export class UniversalWorldEngine {
         break;
       case 'NEOCLASSICAL':
         this.buildNeoclassicalEnvironment();
+        break;
+      case 'RAIL_STATION':
+        this.buildRailStationEnvironment();
+        break;
+      case 'HOSPITAL_ER':
+        this.buildHospitalErEnvironment();
+        break;
+      case 'DESERT_STATION':
+        this.buildDesertStationEnvironment();
         break;
       case 'ROBOTICS_LAB':
       default:
@@ -743,6 +808,206 @@ export class UniversalWorldEngine {
       this.scene.add(ledLight);
       this.animatedLights.push({ light: ledLight, baseIntensity: 1.8, freq: 4.0, phase: Math.abs(x) });
     }
+  }
+
+  // ----------------------------------------------------------------------------
+  // 8. RAILWAY STATION ENVIRONMENT (Shanghai 1930s Night Train Platform)
+  // ----------------------------------------------------------------------------
+  private buildRailStationEnvironment() {
+    // 1. Wet Platform Floor (Flagstone with specular rain sheen)
+    const platGeo = new THREE.PlaneGeometry(36, 12);
+    const platMat = new THREE.MeshStandardMaterial({ color: 0x505860, roughness: 0.38, metalness: 0.25 });
+    const platform = new THREE.Mesh(platGeo, platMat);
+    platform.rotation.x = -Math.PI / 2;
+    platform.position.set(0, 0.45, 1.5);
+    this.scene.add(platform);
+
+    // Platform edge coping stones
+    const edgeMat = new THREE.MeshStandardMaterial({ color: 0xD4B886, roughness: 0.5 });
+    const edge = new THREE.Mesh(new THREE.BoxGeometry(36, 0.5, 0.4), edgeMat);
+    edge.position.set(0, 0.25, -4.3);
+    this.scene.add(edge);
+
+    // 2. Track Ballast Bed & Steel Railway Tracks
+    const ballastMat = new THREE.MeshStandardMaterial({ color: 0x32353A, roughness: 0.9 });
+    const ballast = new THREE.Mesh(new THREE.PlaneGeometry(36, 8), ballastMat);
+    ballast.rotation.x = -Math.PI / 2;
+    ballast.position.set(0, 0.0, -8.2);
+    this.scene.add(ballast);
+
+    // Wooden railway cross-ties (sleepers)
+    const sleeperMat = new THREE.MeshStandardMaterial({ color: 0x3A2B20, roughness: 0.85 });
+    for (let x = -16; x <= 16; x += 1.2) {
+      const sleeper = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.15, 3.2), sleeperMat);
+      sleeper.position.set(x, 0.08, -8.0);
+      this.scene.add(sleeper);
+    }
+
+    // Steel rails
+    const railMat = new THREE.MeshStandardMaterial({ color: 0xA8B2BC, roughness: 0.25, metalness: 0.85 });
+    for (const rz of [-8.9, -7.1]) {
+      const rail = new THREE.Mesh(new THREE.BoxGeometry(36, 0.2, 0.12), railMat);
+      rail.position.set(0, 0.22, rz);
+      this.scene.add(rail);
+    }
+
+    // 3. Station Brick Wall & Canopy Columns
+    const brickMat = new THREE.MeshStandardMaterial({ color: 0x5C382C, roughness: 0.8 });
+    const backWall = new THREE.Mesh(new THREE.BoxGeometry(36, 8.0, 0.5), brickMat);
+    backWall.position.set(0, 4.4, 7.2);
+    this.scene.add(backWall);
+
+    // Cast-iron canopy columns
+    const ironMat = new THREE.MeshStandardMaterial({ color: 0x242830, roughness: 0.45, metalness: 0.7 });
+    for (const cx of [-10, 0, 10]) {
+      const col = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.26, 6.0, 16), ironMat);
+      col.position.set(cx, 3.45, 1.2);
+      this.scene.add(col);
+
+      // Hanging vintage lantern
+      const lanternMat = new THREE.MeshStandardMaterial({ color: 0xD4A017, metalness: 0.8 });
+      const lantern = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.8, 0.6), lanternMat);
+      lantern.position.set(cx, 5.2, 0.6);
+      this.scene.add(lantern);
+
+      const lampLight = new THREE.PointLight(0xFFB042, 2.2, 12);
+      lampLight.position.set(cx, 4.8, 0.6);
+      this.scene.add(lampLight);
+      this.animatedLights.push({ light: lampLight, baseIntensity: 2.2, freq: 5.0, phase: Math.abs(cx) });
+    }
+
+    // Vintage leather luggage trunks
+    const trunkMat = new THREE.MeshStandardMaterial({ color: 0x5A3825, roughness: 0.6 });
+    const trunk1 = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.8, 0.9), trunkMat);
+    trunk1.position.set(-3.5, 0.85, 3.2);
+    this.scene.add(trunk1);
+  }
+
+  // ----------------------------------------------------------------------------
+  // 9. HOSPITAL EMERGENCY ROOM (Chợ Rẫy Hospital ER / Modern Medical)
+  // ----------------------------------------------------------------------------
+  private buildHospitalErEnvironment() {
+    // 1. Clinical Reflective Terrazzo Floor
+    const floorGeo = new THREE.PlaneGeometry(36, 26);
+    const floorMat = new THREE.MeshStandardMaterial({ color: 0xD8DFE6, roughness: 0.25, metalness: 0.20 });
+    const floor = new THREE.Mesh(floorGeo, floorMat);
+    floor.rotation.x = -Math.PI / 2;
+    floor.position.set(0, 0, 0);
+    this.scene.add(floor);
+
+    // 2. Hospital Partition Wall & Dado Rail
+    const wallMat = new THREE.MeshStandardMaterial({ color: 0xF0F4F8, roughness: 0.7 });
+    const backWall = new THREE.Mesh(new THREE.BoxGeometry(32, 7.5, 0.2), wallMat);
+    backWall.position.set(0, 3.75, -5.5);
+    this.scene.add(backWall);
+
+    // Mint green hygienic bumper rail
+    const bumperMat = new THREE.MeshStandardMaterial({ color: 0x52B788, roughness: 0.4 });
+    const bumper = new THREE.Mesh(new THREE.BoxGeometry(32, 0.35, 0.1), bumperMat);
+    bumper.position.set(0, 1.8, -5.35);
+    this.scene.add(bumper);
+
+    // 3. Hospital Patient Bed / Gurney
+    const bedFrameMat = new THREE.MeshStandardMaterial({ color: 0xE2E8F0, roughness: 0.3, metalness: 0.6 });
+    const bed = new THREE.Mesh(new THREE.BoxGeometry(4.2, 0.6, 2.2), bedFrameMat);
+    bed.position.set(-3.5, 1.1, -2.5);
+    this.scene.add(bed);
+
+    // White mattress & pillow
+    const linenMat = new THREE.MeshStandardMaterial({ color: 0xFFFFFF, roughness: 0.8 });
+    const mattress = new THREE.Mesh(new THREE.BoxGeometry(4.0, 0.35, 2.0), linenMat);
+    mattress.position.set(-3.5, 1.55, -2.5);
+    this.scene.add(mattress);
+
+    const pillow = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.25, 1.4), linenMat);
+    pillow.position.set(-5.0, 1.8, -2.5);
+    this.scene.add(pillow);
+
+    // 4. Stainless Steel IV Drip Stand
+    const steelMat = new THREE.MeshStandardMaterial({ color: 0xD0D7DE, roughness: 0.2, metalness: 0.85 });
+    const ivPole = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 4.5, 12), steelMat);
+    ivPole.position.set(-1.0, 2.25, -2.2);
+    this.scene.add(ivPole);
+
+    const salineBagMat = new THREE.MeshStandardMaterial({ color: 0xE0F2FE, transparent: true, opacity: 0.75 });
+    const salineBag = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.5, 0.15), salineBagMat);
+    salineBag.position.set(-1.0, 4.0, -2.2);
+    this.scene.add(salineBag);
+
+    // 5. Vital Signs Telemetry Monitor (ECG Waveform Screen)
+    const monitorMat = new THREE.MeshStandardMaterial({ color: 0x1E293B, roughness: 0.3 });
+    const monitor = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.9, 0.3), monitorMat);
+    monitor.position.set(-0.2, 2.8, -3.2);
+    this.scene.add(monitor);
+
+    // Glowing green screen
+    const screenMat = new THREE.MeshBasicMaterial({ color: 0x00FF88 });
+    const screen = new THREE.Mesh(new THREE.PlaneGeometry(1.0, 0.7), screenMat);
+    screen.position.set(-0.2, 2.8, -3.04);
+    this.scene.add(screen);
+
+    const monitorLight = new THREE.PointLight(0x00FF88, 1.5, 5);
+    monitorLight.position.set(-0.2, 2.8, -2.8);
+    this.scene.add(monitorLight);
+    this.animatedLights.push({ light: monitorLight, baseIntensity: 1.5, freq: 3.0, phase: 0.5 });
+  }
+
+  // ----------------------------------------------------------------------------
+  // 10. DESERT OBSERVATION STATION (Sahara 2050 Weather Station)
+  // ----------------------------------------------------------------------------
+  private buildDesertStationEnvironment() {
+    // 1. Undulating Golden Sand Dune Terrain
+    const sandGeo = new THREE.PlaneGeometry(50, 40, 24, 24);
+    const pos = sandGeo.attributes.position;
+    for (let i = 0; i < pos.count; i++) {
+      const u = pos.getX(i);
+      const v = pos.getY(i);
+      const duneHeight = Math.sin(u * 0.15) * 1.8 + Math.cos(v * 0.2) * 1.2;
+      pos.setZ(i, duneHeight);
+    }
+    sandGeo.computeVertexNormals();
+
+    const sandMat = new THREE.MeshStandardMaterial({ color: 0xD4A373, roughness: 0.9, metalness: 0.05 });
+    const terrain = new THREE.Mesh(sandGeo, sandMat);
+    terrain.rotation.x = -Math.PI / 2;
+    terrain.position.set(0, 0, 0);
+    this.scene.add(terrain);
+
+    // 2. Futuristic Geodesic Weather Dome
+    const domeMat = new THREE.MeshStandardMaterial({ color: 0xEEF2F6, roughness: 0.35, metalness: 0.5 });
+    const dome = new THREE.Mesh(new THREE.SphereGeometry(5.2, 24, 16, 0, Math.PI * 2, 0, Math.PI * 0.5), domeMat);
+    dome.position.set(-7.5, 0.5, -6.5);
+    this.scene.add(dome);
+
+    // Panoramic observation port
+    const glassMat = new THREE.MeshStandardMaterial({ color: 0x0EA5E9, roughness: 0.1, metalness: 0.85 });
+    const windowBand = new THREE.Mesh(new THREE.CylinderGeometry(4.2, 4.8, 1.2, 24, 1, true, 0, Math.PI), glassMat);
+    windowBand.position.set(-7.5, 3.2, -6.5);
+    this.scene.add(windowBand);
+
+    // 3. Solar Photovoltaic Array
+    const panelMat = new THREE.MeshStandardMaterial({ color: 0x1E3A8A, roughness: 0.2, metalness: 0.8 });
+    for (const sx of [3.5, 7.5]) {
+      const panel = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.1, 2.0), panelMat);
+      panel.rotation.x = 0.45;
+      panel.position.set(sx, 1.8, -4.5);
+      this.scene.add(panel);
+
+      const stand = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 1.8), domeMat);
+      stand.position.set(sx, 0.9, -4.5);
+      this.scene.add(stand);
+    }
+
+    // 4. Telemetry Sensor Mast with Flashing Beacon
+    const mastMat = new THREE.MeshStandardMaterial({ color: 0x64748B, roughness: 0.4, metalness: 0.7 });
+    const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.18, 9.0, 12), mastMat);
+    mast.position.set(6.5, 4.5, -7.0);
+    this.scene.add(mast);
+
+    const beaconLight = new THREE.PointLight(0xEF4444, 2.5, 15);
+    beaconLight.position.set(6.5, 9.2, -7.0);
+    this.scene.add(beaconLight);
+    this.animatedLights.push({ light: beaconLight, baseIntensity: 2.5, freq: 6.0, phase: 0.0 });
   }
 
   // ============================================================================

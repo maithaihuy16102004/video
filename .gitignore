@@ -27,3 +27,12 @@ output/studio-jobs/**/*.webm
 output/studio-jobs/**/*.mov
 output/studio-jobs/**/*.wav
 output/studio-voice-cache/
+cache/
+logs/
+scratch/
+tts/models/
+*.wav
+*.mp4
+step_*.txt
+user_prompt_*.txt
+

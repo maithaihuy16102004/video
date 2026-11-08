@@ -1,0 +1,2 @@
+const backend=()=>process.env.RENDER_BACKEND_URL||"http://127.0.0.1:8787";
+export async function GET(request:Request){const u=new URL(request.url),id=u.searchParams.get("id")||"",file=u.searchParams.get("file")||"draft.mp4";try{const r=await fetch(`${backend()}/videos/${encodeURIComponent(id)}/${encodeURIComponent(file)}`);return new Response(r.body,{status:r.status,headers:{"content-type":"video/mp4","content-disposition":`inline; filename=${file}`}})}catch{return new Response("Render backend unavailable",{status:503})}}

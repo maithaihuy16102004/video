@@ -1,0 +1,179 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "V5_ProductionScenePackage",
+  "description": "Universal declarative schema for the Premium Stickman Cinematic V5 Production Engine",
+  "type": "object",
+  "required": [
+    "packageVersion",
+    "storyMetadata",
+    "characters",
+    "locations",
+    "storyBeats",
+    "timeline"
+  ],
+  "properties": {
+    "packageVersion": {
+      "type": "string",
+      "const": "5.0.0"
+    },
+    "visualStyle": {
+      "type": "string",
+      "const": "Premium Stickman Cinematic — V5"
+    },
+    "storyMetadata": {
+      "type": "object",
+      "required": ["title", "genre", "language", "durationSeconds"],
+      "properties": {
+        "title": { "type": "string" },
+        "genre": { "type": "string" },
+        "language": { "type": "string", "default": "vi-VN" },
+        "historicalPeriod": { "type": "string" },
+        "durationSeconds": { "type": "number", "minimum": 1.0 }
+      }
+    },
+    "characters": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["characterId", "canonicalName", "archetypeId", "voiceId", "proportions", "face", "hair", "costume"],
+        "properties": {
+          "characterId": { "type": "string" },
+          "canonicalName": { "type": "string" },
+          "archetypeId": {
+            "type": "string",
+            "enum": ["young_courier", "noblewoman", "detective_scholar", "tech_founder", "polar_scientist", "custom"]
+          },
+          "voiceId": { "type": "string" },
+          "proportions": {
+            "type": "object",
+            "required": ["headRatio", "standingHeightPx", "shoulderWidthPx", "limbThicknessPx"],
+            "properties": {
+              "headRatio": { "type": "number", "minimum": 0.20, "maximum": 0.35 },
+              "standingHeightPx": { "type": "number", "minimum": 200, "maximum": 320 },
+              "shoulderWidthPx": { "type": "number", "minimum": 35, "maximum": 75 },
+              "limbThicknessPx": { "type": "number", "minimum": 7, "maximum": 16 }
+            }
+          },
+          "face": {
+            "type": "object",
+            "required": ["headContour", "skinTone", "eyeType", "eyebrowStyle"],
+            "properties": {
+              "headContour": {
+                "type": "string",
+                "enum": ["round_youth", "delicate_heart", "oval_gaunt", "square_jaw", "athletic_lean"]
+              },
+              "skinTone": { "type": "string" },
+              "eyeType": { "type": "string" },
+              "eyebrowStyle": { "type": "string" },
+              "facialHair": { "type": "string" }
+            }
+          },
+          "hair": {
+            "type": "object",
+            "required": ["style", "color"],
+            "properties": {
+              "style": { "type": "string" },
+              "color": { "type": "string" },
+              "accessory": { "type": "string" }
+            }
+          },
+          "costume": {
+            "type": "object",
+            "required": ["archetype", "primaryColor", "pantsColor", "footwear"],
+            "properties": {
+              "archetype": { "type": "string" },
+              "primaryColor": { "type": "string" },
+              "secondaryColor": { "type": "string" },
+              "accentColor": { "type": "string" },
+              "pantsColor": { "type": "string" },
+              "footwear": { "type": "string" }
+            }
+          },
+          "heldProps": {
+            "type": "object",
+            "properties": {
+              "leftHand": { "type": "string" },
+              "rightHand": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "locations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["locationId", "name", "category"],
+        "properties": {
+          "locationId": { "type": "string" },
+          "name": { "type": "string" },
+          "category": {
+            "type": "string",
+            "enum": ["CAFE", "ANTARCTIC", "VICTORIAN_THAMES", "EDO_BRIDGE", "EDO_HOUSE", "NEOCLASSICAL", "ROBOTICS_LAB", "RAIL_STATION", "HOSPITAL_ER", "DESERT_STATION", "GENERIC_RURAL"]
+          },
+          "weather": { "type": "string" },
+          "lightingPreset": { "type": "string" },
+          "cameraInitial": {
+            "type": "object",
+            "properties": {
+              "position": { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3 },
+              "target": { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3 },
+              "fov": { "type": "number" }
+            }
+          }
+        }
+      }
+    },
+    "storyBeats": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["beatId", "timeRange", "locationId", "characterActions", "dialogueOrNarration"],
+        "properties": {
+          "beatId": { "type": "string" },
+          "timeRange": {
+            "type": "array",
+            "items": { "type": "number" },
+            "minItems": 2,
+            "maxItems": 2
+          },
+          "locationId": { "type": "string" },
+          "shotType": { "type": "string" },
+          "characterActions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["characterId", "action", "emotion"],
+              "properties": {
+                "characterId": { "type": "string" },
+                "action": { "type": "string" },
+                "emotion": { "type": "string" },
+                "targetCoords": { "type": "array", "items": { "type": "number" } },
+                "propState": { "type": "string" }
+              }
+            }
+          },
+          "dialogueOrNarration": {
+            "type": "object",
+            "required": ["speaker", "text", "voiceId"],
+            "properties": {
+              "speaker": { "type": "string" },
+              "text": { "type": "string" },
+              "voiceId": { "type": "string" },
+              "audioFile": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "timeline": {
+      "type": "object",
+      "required": ["totalFrames", "fps", "timebase"],
+      "properties": {
+        "totalFrames": { "type": "integer", "minimum": 1 },
+        "fps": { "type": "integer", "enum": [24, 30, 60] },
+        "timebase": { "type": "string", "enum": ["24fps", "30fps", "60fps"] }
+      }
+    }
+  }
+}
