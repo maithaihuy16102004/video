@@ -1888,17 +1888,35 @@ def run_production_render_service(payload: dict, duration: float, voice_path: Pa
     director = V5UniversalStoryDirector()
     v5_pkg = director.analyze_script(str(payload.get("script", "")))
     runner_pkg = director.compile_to_runner_package(v5_pkg)
-    runner_pkg["total_sequence_duration_seconds"] = duration
+    effective_duration = min(15.0 if mode == "preview" else 30.0, max(5.0, duration))
+    runner_pkg["total_sequence_duration_seconds"] = effective_duration
     
     pkg_file = out_path.parent / f"v5_package_{out_path.stem}.json"
     pkg_file.write_text(json.dumps(runner_pkg, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    # Generate multi-track audio with Foley & Contextual Ambience
+    effective_audio = voice_path
+    try:
+        from pipeline.universal.v5_audio_director import V5UniversalAudioDirector
+        audio_dir = V5UniversalAudioDirector()
+        mixed_audio = out_path.parent / f"{out_path.stem}_mixed_master.wav"
+        audio_dir.compose_scene_audio(
+            scene_pkg=v5_pkg,
+            total_duration_sec=effective_duration,
+            out_master_wav=mixed_audio,
+            voice_wav_path=voice_path
+        )
+        if mixed_audio.exists() and mixed_audio.stat().st_size > 1000:
+            effective_audio = mixed_audio
+    except Exception as e:
+        print(f"[V5 Render Service] Audio director notice ({e}), using voice track")
 
     cmd = [
         "node",
         str(ROOT / "scripts" / "production_render_service.mjs"),
         "--package", str(pkg_file),
-        "--duration", str(min(15.0 if mode == "preview" else 30.0, max(5.0, duration))),
-        "--audio", str(voice_path),
+        "--duration", str(effective_duration),
+        "--audio", str(effective_audio),
         "--out", str(out_path),
     ]
     res = subprocess.run(cmd, cwd=str(ROOT), capture_output=True, text=True, encoding="utf-8")
@@ -1996,21 +2014,23 @@ def variants_worker(job_id: str, payload: dict):
                 contact = folder / f"draft-{i + 1}-contact.png"
                 subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(out), "-vf", "fps=1/4,scale=480:-1,tile=4x3", "-frames:v", "1", str(contact)], check=False)
                 
-                # Upload to primary Drive folder
+                # Upload to primary Drive folder if configured
                 g_info = upload_to_gdrive(out, DEFAULT_GDRIVE_FOLDER_ID)
-                # Also upload to Episode01 test folder if different
                 if DEFAULT_GDRIVE_FOLDER_ID != "1m0t0_mw2dU2ryUrlQWM7nP7joLyuFrDQ":
                     try:
                         upload_to_gdrive(out, "1m0t0_mw2dU2ryUrlQWM7nP7joLyuFrDQ")
                     except Exception:
                         pass
-                out.unlink(missing_ok=True)
+                # Do NOT unlink local out so frontend can stream it directly!
 
+                local_stream_url = f"/videos/{job_id}/draft-{i + 1}.mp4"
                 variants.append({
                     "index": i,
                     "label": label,
                     "duration": round(duration, 2),
-                    "video": g_info.get("url", "") if g_info else "",
+                    "video": local_stream_url,
+                    "localVideo": local_stream_url,
+                    "gdriveUrl": g_info.get("url", "") if g_info else "",
                     "spec": spec.name,
                     "gdrive": g_info,
                     "contactSheet": f"/videos/{job_id}/draft-{i + 1}-contact.png",

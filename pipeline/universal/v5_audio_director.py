@@ -146,7 +146,8 @@ class V5UniversalAudioDirector:
         self,
         scene_pkg: Dict[str, Any],
         total_duration_sec: float,
-        out_master_wav: Path
+        out_master_wav: Path,
+        voice_wav_path: Optional[Path] = None
     ) -> Dict[str, Any]:
         """Composes and renders multi-track mixed audio for the entire scene."""
         sr = 48000
@@ -169,45 +170,53 @@ class V5UniversalAudioDirector:
 
         is_monologue_narration = "draft_2" in scene_pkg.get("project_id", "").lower()
 
-        # 1. Synthesize and layer voice lines
-        current_voice_t = 0.5
-        for i, beat in enumerate(beats):
-            dlg = beat.get("dialogue", {})
-            dlg_text = dlg.get("text") or beat.get("whatHappens", "")
-            if not dlg_text:
-                continue
-            
-            speaker = dlg.get("speaker") or "Haru"
-            voice_id = dlg.get("voiceId") or "vieneu-Thiện Minh"
-            emotion = beat.get("emotion") or "neutral"
-            
-            line = VoiceLine(
-                line_id=f"line_{i+1}",
-                speaker=speaker,
-                voice_id=voice_id,
-                text=dlg_text,
-                start_time=current_voice_t,
-                emotion=emotion
-            )
-            line_wav = temp_dir / f"line_{i+1}.wav"
-            line_dur = self.synthesize_speech_segment(line, line_wav)
+        # 1. Load pre-synthesized voice or synthesize lines
+        if voice_wav_path and Path(voice_wav_path).exists():
+            v_data = self._load_wav(Path(voice_wav_path), sr)
+            n_copy = min(n_total_samples, len(v_data))
+            voice_track = np.zeros((n_total_samples, 2), dtype=np.float32)
+            voice_track[:n_copy] = v_data[:n_copy]
+            dialogue_track[:n_copy] = v_data[:n_copy]
+            voice_active_mask[:n_copy] = (np.abs(v_data[:n_copy, 0]) > 0.02)
+        else:
+            current_voice_t = 0.5
+            for i, beat in enumerate(beats):
+                dlg = beat.get('dialogue', {})
+                dlg_text = dlg.get('text') or beat.get('whatHappens', '')
+                if not dlg_text:
+                    continue
+                
+                speaker = dlg.get('speaker') or 'Haru'
+                voice_id = dlg.get('voiceId') or 'vieneu-Thiện Minh'
+                emotion = beat.get('emotion') or 'neutral'
+                
+                line = VoiceLine(
+                    line_id=f'line_{i+1}',
+                    speaker=speaker,
+                    voice_id=voice_id,
+                    text=dlg_text,
+                    start_time=current_voice_t,
+                    emotion=emotion
+                )
+                line_wav = temp_dir / f'line_{i+1}.wav'
+                line_dur = self.synthesize_speech_segment(line, line_wav)
 
-            # Load into appropriate voice track
-            s_start = int(current_voice_t * sr)
-            s_end = min(n_total_samples, s_start + int(line_dur * sr))
-            if line_wav.exists() and s_start < n_total_samples:
-                line_data = self._load_wav(line_wav, sr)
-                n_copy = min(s_end - s_start, len(line_data))
-                if is_monologue_narration or speaker.lower() in ("người dẫn", "narrator", "voiceover"):
-                    narration_track[s_start:s_start + n_copy] += line_data[:n_copy]
-                else:
-                    dialogue_track[s_start:s_start + n_copy] += line_data[:n_copy]
-                voice_active_mask[s_start:s_start + n_copy] = True
+                # Load into appropriate voice track
+                s_start = int(current_voice_t * sr)
+                s_end = min(n_total_samples, s_start + int(line_dur * sr))
+                if line_wav.exists() and s_start < n_total_samples:
+                    line_data = self._load_wav(line_wav, sr)
+                    n_copy = min(s_end - s_start, len(line_data))
+                    if is_monologue_narration or speaker.lower() in ('người dẫn', 'narrator', 'voiceover'):
+                        narration_track[s_start:s_start + n_copy] += line_data[:n_copy]
+                    else:
+                        dialogue_track[s_start:s_start + n_copy] += line_data[:n_copy]
+                    voice_active_mask[s_start:s_start + n_copy] = True
 
-            current_voice_t += line_dur + 0.5
+                current_voice_t += line_dur + 0.5
 
-        # Combined voice track for ducking & mixing
-        voice_track = dialogue_track + narration_track
+            # Combined voice track for ducking & mixing
+            voice_track = dialogue_track + narration_track
 
         # 2. Add Background Ambience (Rain / River / Cafe)
         cat = scene_pkg.get("scene_world", {}).get("architecture_style") or scene_pkg.get("locations", [{}])[0].get("category", "EDO_BRIDGE")

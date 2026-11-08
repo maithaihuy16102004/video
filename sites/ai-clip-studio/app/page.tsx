@@ -826,14 +826,34 @@ export default function Home() {
                       <div className="mb-2 text-xs font-black">
                         #{v.index + 1} · {v.label}
                       </div>
-                      <a
-                        href={v.video}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="flex aspect-video w-full items-center justify-center rounded-lg border border-white/30 bg-white/10 text-center text-sm font-black"
-                      >
-                        Xem Draft trên Google Drive
-                      </a>
+                      {v.video.startsWith("/videos/") || v.video.endsWith(".mp4") ? (
+                        <div className="space-y-1">
+                          <video
+                            src={v.video}
+                            controls
+                            className="aspect-video w-full rounded-lg bg-black border border-white/20"
+                          />
+                          {(v as any).gdriveUrl && (
+                            <a
+                              href={(v as any).gdriveUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="block text-center text-[10px] text-[#51d8e5] underline"
+                            >
+                              Mở trên Google Drive ↗
+                            </a>
+                          )}
+                        </div>
+                      ) : (
+                        <a
+                          href={v.video}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="flex aspect-video w-full items-center justify-center rounded-lg border border-white/30 bg-white/10 text-center text-sm font-black"
+                        >
+                          Xem Draft trên Google Drive
+                        </a>
+                      )}
                       <button
                         type="button"
                         onClick={() => chooseWinner(v.index)}

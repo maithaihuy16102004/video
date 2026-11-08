@@ -118,37 +118,52 @@ export class UniversalWorldEngine {
     | 'GENERIC_RURAL' {
     const text = `${this.dna.location_id} ${this.dna.name} ${this.dna.architecture || ''} ${this.dna.region || ''} ${JSON.stringify(this.dna.props || [])}`.toLowerCase();
 
-    if (text.includes('cafe') || text.includes('coffee') || text.includes('cà phê') || text.includes('quán') || text.includes('bàn') || text.includes('espresso')) {
+    // 1. Explicit Category Anchor (highest reliability)
+    const locId = (this.dna.location_id || '').toUpperCase();
+    const arch = (this.dna.architecture || '').toUpperCase();
+    if (locId.includes('CAFE') || arch === 'CAFE') return 'CAFE';
+    if (locId.includes('EDO_HOUSE') || locId.includes('HOUSE') || arch === 'EDO_HOUSE') return 'EDO_HOUSE';
+    if (locId.includes('EDO_BRIDGE') || locId.includes('BRIDGE') || arch === 'EDO_BRIDGE') return 'EDO_BRIDGE';
+    if (locId.includes('ANTARCTIC') || arch === 'ANTARCTIC') return 'ANTARCTIC';
+    if (locId.includes('VICTORIAN_THAMES') || locId.includes('THAMES') || arch === 'VICTORIAN_THAMES') return 'VICTORIAN_THAMES';
+    if (locId.includes('RAIL_STATION') || locId.includes('TRAIN') || arch === 'RAIL_STATION') return 'RAIL_STATION';
+    if (locId.includes('HOSPITAL_ER') || locId.includes('HOSPITAL') || arch === 'HOSPITAL_ER') return 'HOSPITAL_ER';
+    if (locId.includes('DESERT_STATION') || locId.includes('DESERT') || arch === 'DESERT_STATION') return 'DESERT_STATION';
+    if (locId.includes('ROBOTICS_LAB') || arch === 'ROBOTICS_LAB') return 'ROBOTICS_LAB';
+    if (locId.includes('NEOCLASSICAL') || arch === 'NEOCLASSICAL') return 'NEOCLASSICAL';
+
+    // 2. Strict Compound Semantic Matching (prevents substring collision like "yêu cầu" -> bridge or "tham gia" -> rail)
+    if (/(cà phê|cafe|coffee|espresso|quán cà phê)/i.test(text)) {
       return 'CAFE';
     }
-    if (text.includes('train') || text.includes('rail') || text.includes('tàu') || text.includes('ga') || text.includes('station') || text.includes('shanghai') || text.includes('thượng hải')) {
+    if (/(nhà ga|ga tàu|ga xe lửa|tàu hỏa|đường ray|railway|train station|shanghai 1930)/i.test(text)) {
       return 'RAIL_STATION';
     }
-    if (text.includes('hospital') || text.includes('bệnh viện') || text.includes('cấp cứu') || text.includes('chợ rẫy') || text.includes('bác sĩ') || text.includes('clinic') || text.includes('er')) {
+    if (/(bệnh viện|cấp cứu|phòng cấp cứu|chợ rẫy|phòng mổ|y tá|doctor)/i.test(text)) {
       return 'HOSPITAL_ER';
     }
-    if (text.includes('desert') || text.includes('sa mạc') || text.includes('sahara') || text.includes('dune') || text.includes('cát') || text.includes('storm')) {
+    if (/(sa mạc|sahara|bão cát|đụn cát|dune)/i.test(text)) {
       return 'DESERT_STATION';
     }
-    if (text.includes('antarctic') || text.includes('nam cực') || text.includes('vostok') || text.includes('aurora') || text.includes('cực quang') || text.includes('polar') || text.includes('băng')) {
+    if (/(nam cực|antarctica|băng tuyết|cực quang|aurora|vostok)/i.test(text)) {
       return 'ANTARCTIC';
     }
-    if (text.includes('thames') || (text.includes('london') && (text.includes('river') || text.includes('sông') || text.includes('gas') || text.includes('khí gas')))) {
+    if (/(sông thames|thames|bến cảng london|bờ sông london|victorian)/i.test(text)) {
       return 'VICTORIAN_THAMES';
     }
-    if (text.includes('bridge') || text.includes('cầu') || text.includes('cầu gỗ') || text.includes('canal') || text.includes('kênh')) {
+    if (/(cây cầu|cầu gỗ|qua cầu|bắc qua kênh|kênh nước|edo bridge)/i.test(text)) {
       return 'EDO_BRIDGE';
     }
-    if (text.includes('machiya') || text.includes('nhà') || text.includes('hiên') || text.includes('shoji') || text.includes('tatami') || text.includes('đèn lồng')) {
+    if (/(nhà cổ|chiếu tatami|tatami|vách shoji|shoji|hiên nhà|nhà aiko|machiya)/i.test(text)) {
       return 'EDO_HOUSE';
     }
-    if (text.includes('odeon') || text.includes('feldherrnhalle') || text.includes('munich') || text.includes('colonnade') || text.includes('neoclassical')) {
+    if (/(quảng trường|odeon|feldherrnhalle|munich|colonnade|neoclassical)/i.test(text)) {
       return 'NEOCLASSICAL';
     }
-    if (text.includes('robot') || text.includes('lab') || text.includes('server') || text.includes('startup') || text.includes('workcell')) {
+    if (/(phòng lab robot|robotics|máy chủ server|phòng thí nghiệm robot)/i.test(text)) {
       return 'ROBOTICS_LAB';
     }
-    return 'GENERIC_RURAL';
+    return 'NEOCLASSICAL';
   }
 
   // ============================================================================

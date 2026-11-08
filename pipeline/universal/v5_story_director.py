@@ -104,7 +104,7 @@ class V5UniversalStoryDirector:
                 with open(cache_path, "r", encoding="utf-8") as f:
                     data = json.load(f)
                 print(f"[V5 Director] Loaded from disk cache: {cache_path.name}")
-                return data
+                return self._normalize_package(data, clean_text)
             except Exception as e:
                 print(f"[V5 Director] Cache read exception ({e}), generating fresh analysis...")
 
@@ -313,53 +313,94 @@ TRẢ VỀ DUY NHẤT MỘT JSON OBJECT THEO CẤU TRÚC:
 
         flush()
 
-        # 2. Discover semantic location
+        # 2. Discover semantic location with strict word boundaries and compound phrases
+        # Eliminates false-positives: 'yêu cầu' != bridge, 'tham gia' != rail station, 'cơ bản' != cafe
         lower_script = script_text.lower()
         matched_loc_cat = "NEOCLASSICAL"
         loc_name = "Khu Phố Lịch Sử"
 
-        if any(w in lower_script for w in ["cà phê", "cafe", "coffee", "quán", "bàn", "espresso"]):
-            matched_loc_cat = "CAFE"
-            loc_name = "Quán Cà Phê"
-        elif any(w in lower_script for w in ["nam cực", "antarctica", "vostok", "băng", "cực quang", "tuyết"]):
-            matched_loc_cat = "ANTARCTIC"
-            loc_name = "Trạm Nghiên Cứu Nam Cực"
-        elif any(w in lower_script for w in ["thames", "london", "sông", "gas", "cảng"]):
-            matched_loc_cat = "VICTORIAN_THAMES"
-            loc_name = "Bến Cảng Sông Thames"
-        elif any(w in lower_script for w in ["cầu", "cầu gỗ", "kênh", "edo", "mưa", "dép", "nhật bản"]):
-            matched_loc_cat = "EDO_BRIDGE"
-            loc_name = "Cầu Gỗ Phố Cổ"
-        elif any(w in lower_script for w in ["tàu", "ga", "xe lửa", "rail", "thượng hải", "shanghai"]):
-            matched_loc_cat = "RAIL_STATION"
-            loc_name = "Sân Ga Xe Lửa"
-        elif any(w in lower_script for w in ["bệnh viện", "cấp cứu", "bác sĩ", "chợ rẫy", "y tá", "máu", "tim"]):
-            matched_loc_cat = "HOSPITAL_ER"
-            loc_name = "Phòng Cấp Cứu Bệnh Viện"
-        elif any(w in lower_script for w in ["sa mạc", "sahara", "cát", "bão cát", "nắng", "đụn cát"]):
-            matched_loc_cat = "DESERT_STATION"
-            loc_name = "Trạm Quan Sát Sa Mạc"
-        elif any(w in lower_script for w in ["robot", "phòng lab", "máy chủ", "công nghệ"]):
+        if re.search(r'\b(robot|robotics|phòng thí nghiệm robot|phòng lab công nghệ)\b', lower_script):
             matched_loc_cat = "ROBOTICS_LAB"
             loc_name = "Phòng Nghiên Cứu Công Nghệ"
+        elif re.search(r'\b(nam cực|antarctica|băng tuyết cực địa|trạm nghiên cứu nam cực|trạm vostok)\b', lower_script):
+            matched_loc_cat = "ANTARCTIC"
+            loc_name = "Trạm Nghiên Cứu Nam Cực"
+        elif re.search(r'\b(bệnh viện|phòng cấp cứu|khoa cấp cứu|chợ rẫy|bác sĩ cấp cứu)\b', lower_script):
+            matched_loc_cat = "HOSPITAL_ER"
+            loc_name = "Phòng Cấp Cứu Bệnh Viện"
+        elif re.search(r'\b(sa mạc|sahara|bão cát|đụn cát|hoang mạc cát)\b', lower_script):
+            matched_loc_cat = "DESERT_STATION"
+            loc_name = "Trạm Quan Sát Sa Mạc"
+        elif re.search(r'\b(nhà gỗ edo|nhà của aiko|gian phòng tatami|chiếu tatami|đèn lồng giấy)\b', lower_script):
+            matched_loc_cat = "EDO_HOUSE"
+            loc_name = "Ngôi Nhà Gỗ Edo"
+        elif re.search(r'\b(cây cầu|cầu gỗ|bắc qua (?:con )?kênh|mặt cầu|thanh lan can|nước chảy qua mặt cầu|qua cầu|nhật bản thời edo|edo)\b', lower_script):
+            matched_loc_cat = "EDO_BRIDGE"
+            loc_name = "Cầu Gỗ Phố Cổ Edo"
+        elif re.search(r'\b(nhà ga|ga tàu|ga xe lửa|đoàn tàu|đường ray|sân ga|chuyến tàu)\b', lower_script):
+            matched_loc_cat = "RAIL_STATION"
+            loc_name = "Sân Ga Xe Lửa"
+        elif re.search(r'\b(sông thames|bến cảng london|thames|victorian london)\b', lower_script):
+            matched_loc_cat = "VICTORIAN_THAMES"
+            loc_name = "Bến Cảng Sông Thames"
+        elif re.search(r'\b(quán cà phê|tiệm cà phê|tách cà phê|ly cà phê|quán cafe|tiệm cafe|cốc cà phê|espresso)\b', lower_script):
+            matched_loc_cat = "CAFE"
+            loc_name = "Quán Cà Phê"
 
-        # 3. Construct Cast
+        # Determine context eras
+        is_edo = matched_loc_cat in ("EDO_BRIDGE", "EDO_HOUSE") or any(w in lower_script for w in ["edo", "nhật bản thời edo", "haru", "aiko", "trạm thư"])
+        is_historical = is_edo or matched_loc_cat in ("VICTORIAN_THAMES", "NEOCLASSICAL") or any(w in lower_script for w in ["1800", "1905", "1914", "1916", "1918", "1919", "1930", "thế kỷ 19", "thượng hải 1930"])
+
+        # 3. Construct Cast with Semantic Compatibility
         characters: List[Dict[str, Any]] = []
         if raw_speakers:
             for idx, spk in enumerate(raw_speakers):
                 voice_tuple = VIENEU_VOICE_POOL[idx % len(VIENEU_VOICE_POOL)]
-                # Heuristic archetype assignment
-                archetype = "tech_founder"
-                contour = "square_jaw"
-                if "nữ" in spk.lower() or "cô" in spk.lower() or spk.lower() in {"aiko", "mai", "lan", "linh", "elena"}:
-                    archetype = "noblewoman" if "edo" in matched_loc_cat.lower() else "polar_scientist"
-                    contour = "delicate_heart" if archetype == "noblewoman" else "athletic_lean"
-                elif "thám tử" in spk.lower() or "học giả" in spk.lower() or "ông" in spk.lower() or "bác sĩ" in spk.lower():
-                    archetype = "detective_scholar"
-                    contour = "oval_gaunt"
-                elif "lính" in spk.lower() or "thư" in spk.lower() or "trẻ" in spk.lower() or "haru" in spk.lower():
-                    archetype = "young_courier"
-                    contour = "round_youth"
+                spk_low = spk.lower()
+
+                # Female detection
+                is_female = any(w in spk_low for w in ["aiko", "cô", "nữ", "bà", "chị", "em gái", "linh", "mai", "lan", "elena"])
+                if is_female:
+                    archetype = "noblewoman"
+                    contour = "delicate_heart"
+                    hair = "edo_shimada" if is_edo else "ponytail_athletic"
+                    prop = "folded_parchment" if is_historical else "none"
+                elif is_historical:
+                    # Historical Era: Strictly FORBID tech_founder and modern gadgets
+                    if any(w in spk_low for w in ["chủ", "trạm thư", "ông", "thầy", "già", "bác sĩ", "sĩ quan", "thám tử", "học giả", "quan chức", "lão"]):
+                        archetype = "detective_scholar"
+                        contour = "oval_gaunt"
+                        hair = "edo_topknot" if is_edo else "side_sweep_1914"
+                        has_letter = bool(re.search(r'\b(bức thư|lá thư|phong thư|trạm thư|đưa thư)\b', lower_script))
+                        prop = "letter_scroll_sealed" if has_letter else "folded_parchment" if is_edo else "walking_cane"
+                    elif any(w in spk_low for w in ["haru", "lính", "trẻ", "liên lạc", "giao hàng", "chạy"]) or re.search(r'\b(người đưa thư|giao thư)\b', spk_low):
+                        archetype = "young_courier"
+                        contour = "round_youth"
+                        hair = "edo_topknot" if is_edo else "side_sweep_1914"
+                        has_letter = bool(re.search(r'\b(bức thư|lá thư|phong thư|trạm thư|đưa thư)\b', lower_script))
+                        prop = "letter_scroll_sealed" if has_letter else "none"
+                    else:
+                        archetype = "detective_scholar"
+                        contour = "square_jaw"
+                        hair = "edo_topknot" if is_edo else "side_sweep_1914"
+                        prop = "folded_parchment" if is_edo else "none"
+                else:
+                    # Modern / Sci-Fi Era
+                    if matched_loc_cat in ("CAFE", "ROBOTICS_LAB") or any(w in lower_script for w in ["startup", "công nghệ", "founder", "lập trình"]):
+                        archetype = "tech_founder"
+                        contour = "square_jaw"
+                        hair = "modern_crop"
+                        prop = "tablet_computer"
+                    elif matched_loc_cat == "ANTARCTIC":
+                        archetype = "polar_scientist"
+                        contour = "athletic_lean"
+                        hair = "ponytail_athletic"
+                        prop = "scientific_scanner"
+                    else:
+                        archetype = "detective_scholar"
+                        contour = "square_jaw"
+                        hair = "side_sweep_1914"
+                        prop = "none"
 
                 characters.append({
                     "characterId": f"char_{idx + 1:02d}",
@@ -369,23 +410,40 @@ TRẢ VỀ DUY NHẤT MỘT JSON OBJECT THEO CẤU TRÚC:
                     "voiceId": voice_tuple[0],
                     "personality": "Tự nhiên, chân thực",
                     "headContour": contour,
-                    "hairStyle": "modern_crop" if archetype == "tech_founder" else "edo_topknot" if archetype == "young_courier" else "side_sweep_1914",
+                    "hairStyle": hair,
                     "costumePrimaryColor": "#1B3B6F" if idx == 0 else "#2B2D42",
-                    "heldProp": "letter_scroll_sealed" if archetype == "young_courier" else "tablet_computer" if archetype == "tech_founder" else "none"
+                    "heldProp": prop
                 })
         else:
             # Monologue / Narrator mode
+            if is_historical:
+                narrator_archetype = "young_courier" if is_edo else "detective_scholar"
+                narrator_hair = "edo_topknot" if is_edo else "side_sweep_1914"
+                narrator_prop = "letter_scroll_sealed" if is_edo else "none"
+            elif matched_loc_cat in ("CAFE", "ROBOTICS_LAB"):
+                narrator_archetype = "tech_founder"
+                narrator_hair = "modern_crop"
+                narrator_prop = "tablet_computer"
+            elif matched_loc_cat == "ANTARCTIC":
+                narrator_archetype = "polar_scientist"
+                narrator_hair = "ponytail_athletic"
+                narrator_prop = "scientific_scanner"
+            else:
+                narrator_archetype = "detective_scholar"
+                narrator_hair = "side_sweep_1914"
+                narrator_prop = "none"
+
             characters.append({
                 "characterId": "char_01",
                 "canonicalName": "Người Kể Chuyện",
                 "role": "PROTAGONIST_STORYTELLER",
-                "archetypeId": "tech_founder" if "CAFE" in matched_loc_cat or "ROBOTICS" in matched_loc_cat else "young_courier",
+                "archetypeId": narrator_archetype,
                 "voiceId": "vieneu-Thiện Minh",
                 "personality": "Sâu lắng, truyền cảm",
-                "headContour": "square_jaw",
-                "hairStyle": "modern_crop",
+                "headContour": "round_youth" if narrator_archetype == "young_courier" else "square_jaw",
+                "hairStyle": narrator_hair,
                 "costumePrimaryColor": "#1B3B6F",
-                "heldProp": "tablet_computer"
+                "heldProp": narrator_prop
             })
 
         # 4. Construct Story Beats (4 to 8 beats)
@@ -496,20 +554,59 @@ TRẢ VỀ DUY NHẤT MỘT JSON OBJECT THEO CẤU TRÚC:
         return self._normalize_package(package, script_text)
 
     def _normalize_package(self, pkg: Dict[str, Any], raw_script: str) -> Dict[str, Any]:
-        """Normalizes and validates fields against V5 contract."""
+        """Normalizes and validates fields against V5 contract and Semantic Compatibility Matrix."""
         pkg["packageVersion"] = "5.0.0"
         pkg["visualStyle"] = "Premium Stickman Cinematic — V5"
         pkg["rawScript"] = raw_script
 
-        # Enforce valid location categories
+        raw_lower = raw_script.lower()
+        is_edo = any(loc.get("category") in ("EDO_BRIDGE", "EDO_HOUSE") for loc in pkg.get("locations", [])) or any(w in raw_lower for w in ["edo", "nhật bản thời edo", "haru", "aiko", "trạm thư"])
+        is_historical = is_edo or any(loc.get("category") in ("VICTORIAN_THAMES", "NEOCLASSICAL") for loc in pkg.get("locations", [])) or any(y in raw_lower for y in ["1800", "1905", "1914", "1916", "1918", "1919", "1930", "thế kỷ 19", "thượng hải 1930"])
+
+        # Enforce valid location categories & semantic era compatibility
         for loc in pkg.get("locations", []):
             if loc.get("category") not in V5_LOCATION_CATEGORIES:
                 loc["category"] = "NEOCLASSICAL"
+            # Prevent Edo scenarios from being mapped to modern rail stations or robotics labs
+            if is_edo and loc.get("category") in ("RAIL_STATION", "ROBOTICS_LAB", "ANTARCTIC", "DESERT_STATION", "NEOCLASSICAL", "CAFE"):
+                loc["category"] = "EDO_BRIDGE"
+                if "nhà" in loc.get("name", "").lower():
+                    loc["category"] = "EDO_HOUSE"
 
-        # Enforce valid character archetypes
+        # Enforce valid character archetypes & semantic compatibility
         for char in pkg.get("characters", []):
-            if char.get("archetypeId") not in {"young_courier", "noblewoman", "detective_scholar", "tech_founder", "polar_scientist"}:
-                char["archetypeId"] = "tech_founder"
+            name_low = char.get("canonicalName", "").lower()
+            arch = char.get("archetypeId", "young_courier" if is_edo else "detective_scholar")
+
+            # Gender check
+            is_female = any(w in name_low for w in ["aiko", "cô", "nữ", "bà", "chị", "em gái", "linh", "mai", "lan", "elena"])
+            if is_female:
+                arch = "noblewoman"
+                char["headContour"] = "delicate_heart"
+                char["hairStyle"] = "edo_shimada" if is_edo else "ponytail_athletic"
+            elif is_historical:
+                # Historical setting: tech_founder and polar_scientist are STRICTLY FORBIDDEN
+                if arch in ("tech_founder", "polar_scientist"):
+                    if any(w in name_low for w in ["haru", "lính", "trẻ", "liên lạc", "giao hàng", "chạy"]) or re.search(r'\b(người đưa thư|giao thư)\b', name_low):
+                        arch = "young_courier"
+                        char["headContour"] = "round_youth"
+                        char["hairStyle"] = "edo_topknot" if is_edo else "side_sweep_1914"
+                    else:
+                        arch = "detective_scholar"
+                        char["headContour"] = "oval_gaunt"
+                        char["hairStyle"] = "edo_topknot" if is_edo else "side_sweep_1914"
+            else:
+                if arch not in {"young_courier", "noblewoman", "detective_scholar", "tech_founder", "polar_scientist"}:
+                    arch = "tech_founder"
+
+            char["archetypeId"] = arch
+
+            # Sanitize held props
+            prop = char.get("heldProp", "none")
+            if is_historical and prop in ("tablet_computer", "scientific_scanner", "smartphone"):
+                has_letter = bool(re.search(r'\b(bức thư|lá thư|phong thư|trạm thư|đưa thư)\b', raw_lower))
+                char["heldProp"] = "letter_scroll_sealed" if has_letter else ("folded_parchment" if is_edo else "none")
+
             if not char.get("voiceId") or "vieneu" not in char.get("voiceId"):
                 char["voiceId"] = "vieneu-Thiện Minh"
 
@@ -712,6 +809,18 @@ TRẢ VỀ DUY NHẤT MỘT JSON OBJECT THEO CẤU TRÚC:
 
             prop_r = char.get("heldProp") or d_arch["prop"]
 
+            # Cultural adaptation for Edo setting
+            costume_arch = d_arch["costume"]
+            hair_arch = char.get("hairStyle", d_arch["hairStyle"])
+            footwear_arch = d_arch["footwear"]
+            pants_arch = d_arch["pantsColor"]
+            if cat in ("EDO_BRIDGE", "EDO_HOUSE"):
+                if arch_id == "detective_scholar":
+                    costume_arch = "edo_kimono_formal"
+                    hair_arch = "edo_topknot"
+                    footwear_arch = "geta_clogs"
+                    pants_arch = "#283648"
+
             dna = {
                 "id": char.get("characterId", f"char_{idx+1}"),
                 "name": char.get("canonicalName", "Actor"),
@@ -725,16 +834,16 @@ TRẢ VỀ DUY NHẤT MỘT JSON OBJECT THEO CẤU TRÚC:
                     "facialHair": "none"
                 },
                 "hair": {
-                    "style": char.get("hairStyle", d_arch["hairStyle"]),
+                    "style": hair_arch,
                     "color": "#1C1D21",
                     "accessory": "none"
                 },
                 "costume": {
-                    "archetype": d_arch["costume"],
+                    "archetype": costume_arch,
                     "primaryColor": char.get("costumePrimaryColor", d_arch["primaryColor"]),
                     "accentColor": d_arch["accentColor"],
-                    "pantsColor": d_arch["pantsColor"],
-                    "footwear": d_arch["footwear"],
+                    "pantsColor": pants_arch,
+                    "footwear": footwear_arch,
                     "footwearColor": "#1A1A1A"
                 },
                 "heldProps": {
