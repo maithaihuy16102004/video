@@ -133,41 +133,41 @@ export class UniversalWorldEngine {
   // ============================================================================
   private setupAtmosphereAndSky() {
     const intent = this.getSemanticIntent();
-    let skyColorHex = 0x4A5868;
-    let fogDensity = 0.012;
+    let skyColorHex = 0x7E92A2;
+    let fogDensity = 0.005;
 
     switch (intent) {
       case 'CAFE':
-        skyColorHex = 0x2A221C; // Warm interior ceiling / street dusk
-        fogDensity = 0.005;
+        skyColorHex = 0x6E5848; // Warm interior cafe wall and ceiling envelope
+        fogDensity = 0.001; // Zero dark fog indoors
         break;
       case 'ANTARCTIC':
-        skyColorHex = 0x08121E; // Polar night sky for glowing aurora
-        fogDensity = 0.008;
+        skyColorHex = 0x1A3854; // Luminous cyan/emerald polar sky glow
+        fogDensity = 0.004;
         break;
       case 'VICTORIAN_THAMES':
-        skyColorHex = 0x242E38; // Thames misty night with gas glow
-        fogDensity = 0.016;
+        skyColorHex = 0x586A7A; // Luminous river mist under gaslight and twilight
+        fogDensity = 0.005;
         break;
       case 'EDO_BRIDGE':
-        skyColorHex = 0x36424E; // Rainy overcast Edo sky (brightened from V4.2.1)
-        fogDensity = 0.014;
+        skyColorHex = 0x7E92A2; // Airy overcast daylight storm sky (bright & clear)
+        fogDensity = 0.004;
         break;
       case 'EDO_HOUSE':
-        skyColorHex = 0x3C3228; // Warm wooden interior/eaves
-        fogDensity = 0.006;
+        skyColorHex = 0x685444; // Warm wooden interior/eaves
+        fogDensity = 0.002;
         break;
       case 'NEOCLASSICAL':
-        skyColorHex = 0x627080; // August 1914 Munich sky
-        fogDensity = 0.010;
+        skyColorHex = 0x8DA4BE; // Airy historical daylight
+        fogDensity = 0.004;
         break;
       case 'ROBOTICS_LAB':
-        skyColorHex = 0x1A222C;
-        fogDensity = 0.006;
+        skyColorHex = 0x546678; // Clean tech architectural background
+        fogDensity = 0.001;
         break;
       default:
-        skyColorHex = 0x5C6A78;
-        fogDensity = 0.012;
+        skyColorHex = 0x768898;
+        fogDensity = 0.005;
         break;
     }
 
@@ -190,66 +190,66 @@ export class UniversalWorldEngine {
   private setupLighting() {
     const intent = this.getSemanticIntent();
     let sunColor = 0xFDF5E6;
-    let sunIntensity = 1.75;
+    let sunIntensity = 2.2;
     let sunPos: [number, number, number] = [8, 16, 12];
-    let skyColor = 0x7A8E9F;
-    let groundColor = 0x3A3228;
-    let ambientIntensity = 1.15;
+    let skyColor = 0x8E9EA8;
+    let groundColor = 0x54483C;
+    let ambientIntensity = 1.45;
 
     switch (intent) {
       case 'CAFE':
-        sunColor = 0xFFE0B2; // Warm interior golden key
-        sunIntensity = 1.65;
+        sunColor = 0xFFE8CC; // Warm interior golden key
+        sunIntensity = 2.4;
         sunPos = [2, 10, 5];
-        skyColor = 0x8D6E63;
-        groundColor = 0x4E342E;
-        ambientIntensity = 1.25;
+        skyColor = 0xD4B89C;
+        groundColor = 0x7A583E;
+        ambientIntensity = 1.65;
         break;
       case 'ANTARCTIC':
-        sunColor = 0x80D8FF; // Cold polar blue key
-        sunIntensity = 1.35;
+        sunColor = 0xB0F0FF; // Cold polar blue key
+        sunIntensity = 2.0;
         sunPos = [6, 12, 10];
-        skyColor = 0x00E5FF; // Emerald/cyan aurora bounce
-        groundColor = 0x0D47A1;
-        ambientIntensity = 1.20;
+        skyColor = 0x64FFDA; // Emerald/cyan aurora bounce
+        groundColor = 0x2A5288;
+        ambientIntensity = 1.45;
         break;
       case 'VICTORIAN_THAMES':
-        sunColor = 0xFFD59E; // Gaslight key
-        sunIntensity = 1.55;
+        sunColor = 0xFFE0B0; // Gaslight key
+        sunIntensity = 2.2;
         sunPos = [4, 12, 6];
-        skyColor = 0x455A64;
-        groundColor = 0x263238;
-        ambientIntensity = 1.05;
+        skyColor = 0x78909C;
+        groundColor = 0x455A64;
+        ambientIntensity = 1.45;
         break;
       case 'EDO_BRIDGE':
-        sunColor = 0xDDE6EE; // Overcast rain key
-        sunIntensity = 1.55;
+        sunColor = 0xF0F8FF; // Bright daylight rain key
+        sunIntensity = 2.4;
         sunPos = [-6, 16, 10];
-        skyColor = 0x607282;
-        groundColor = 0x2D2722;
-        ambientIntensity = 1.10;
+        skyColor = 0x90A4AE;
+        groundColor = 0x54483C;
+        ambientIntensity = 1.55;
         break;
       case 'EDO_HOUSE':
-        sunColor = 0xFFB74D; // Warm paper lantern key
-        sunIntensity = 1.80;
-        skyColor = 0x6D4C41;
-        groundColor = 0x3E2723;
-        ambientIntensity = 1.20;
+        sunColor = 0xFFC46B; // Warm paper lantern key
+        sunIntensity = 2.4;
+        skyColor = 0xBCAAA4;
+        groundColor = 0x6D4C41;
+        ambientIntensity = 1.55;
         break;
       case 'NEOCLASSICAL':
         // The Odeonsplatz limestone formula:
-        sunColor = 0xF5E6D3;
-        sunIntensity = 1.85;
-        skyColor = 0x6B7D90;
-        groundColor = 0x423830;
-        ambientIntensity = 1.15;
+        sunColor = 0xFFF5E6;
+        sunIntensity = 2.4;
+        skyColor = 0x90CAF9;
+        groundColor = 0x616161;
+        ambientIntensity = 1.45;
         break;
       case 'ROBOTICS_LAB':
-        sunColor = 0xE0F2FE;
-        sunIntensity = 1.80;
-        skyColor = 0x38BDF8;
-        groundColor = 0x0F172A;
-        ambientIntensity = 1.20;
+        sunColor = 0xF0F9FF;
+        sunIntensity = 2.6;
+        skyColor = 0x7DD3FC;
+        groundColor = 0x334155;
+        ambientIntensity = 1.65;
         break;
     }
 
