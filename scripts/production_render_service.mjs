@@ -107,7 +107,7 @@ export async function renderProductionVideo({
     '-pix_fmt', 'yuv420p',
     '-c:a', 'aac',
     '-b:a', '192k',
-    '-af', 'alimiter=limit=0.64:level=false',
+    '-af', 'loudnorm=I=-16:TP=-2.5:LRA=7',
     '-movflags', '+faststart',
     outputPath,
   ];

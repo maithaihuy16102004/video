@@ -403,8 +403,8 @@ class V5UniversalAudioDirector:
         # Linear headroom target: 0.80 (-1.94 dBFS) to guarantee AAC compressed True-Peak <= -1.5 dBFS
         master = voice_track * 1.0 + ambience_track * 0.70 + foley_track * 0.85 + sfx_track * 0.88 + music_track * 0.65
         peak = np.max(np.abs(master)) + 1e-6
-        if peak > 0.80:
-            master = master * (0.80 / peak)
+        if peak > 0.65:
+            master = master * (0.65 / peak)
 
         def save_stem_wav(track_data: np.ndarray, path: Path):
             trk_peak = np.max(np.abs(track_data)) + 1e-6
