@@ -1,0 +1,307 @@
+"""Closed generic vocabularies shared by reasoning, director, character and world engines.
+
+Nothing in this file refers to a particular story, person, place or period.
+Reasoning output (Gemini or offline) is normalised onto these vocabularies by
+``validation.py``; renderers only ever see these values.
+"""
+from __future__ import annotations
+
+from enum import Enum
+
+
+class StrEnum(str, Enum):
+    @classmethod
+    def values(cls) -> list[str]:
+        return [m.value for m in cls]
+
+    @classmethod
+    def coerce(cls, value: object, default: "StrEnum") -> "StrEnum":
+        if isinstance(value, cls):
+            return value
+        v = str(value or "").strip().upper().replace(" ", "_").replace("-", "_")
+        return cls.__members__.get(v, default)
+
+
+# ---------------------------------------------------------------- story level
+class StorytellingMode(StrEnum):
+    FIRST_PERSON_ROLEPLAY = "FIRST_PERSON_ROLEPLAY"          # PROJECT DEFAULT: Protagonist tells their own story
+    FIRST_PERSON_CHARACTER = "FIRST_PERSON_CHARACTER"        # Backward-compat alias
+    THIRD_PERSON_DOCUMENTARY = "THIRD_PERSON_DOCUMENTARY"    # Traditional external documentary narrator
+    MULTI_POV = "MULTI_POV"                                  # Multiple perspective shifts
+    NARRATOR = "NARRATOR"                                    # Legacy alias
+    DIALOGUE_HEAVY = "DIALOGUE_HEAVY"
+    DOCUMENTARY = "DOCUMENTARY"
+    OTHER = "OTHER"
+
+
+class RenderMode(StrEnum):
+    DRAFT_FAST = "DRAFT_FAST"
+    DRAFT_VISUAL = "DRAFT_VISUAL"
+    STANDARD_FREE = "STANDARD_FREE"
+    MASTER_FREE = "MASTER_FREE"
+
+
+class HistoricalConfidence(StrEnum):
+    CONFIRMED = "CONFIRMED"
+    WELL_SUPPORTED = "WELL_SUPPORTED"
+    PLAUSIBLE_RECONSTRUCTION = "PLAUSIBLE_RECONSTRUCTION"
+    DRAMATIC_RECONSTRUCTION = "DRAMATIC_RECONSTRUCTION"
+    UNCERTAIN = "UNCERTAIN"
+
+
+class BeatType(StrEnum):
+    HOOK = "HOOK"
+    SETUP = "SETUP"
+    EXPOSITION = "EXPOSITION"
+    CONFLICT = "CONFLICT"
+    ESCALATION = "ESCALATION"
+    REVERSAL = "REVERSAL"
+    PAYOFF = "PAYOFF"
+    COMEDY = "COMEDY"
+    REVEAL = "REVEAL"
+    REFLECTION = "REFLECTION"
+    TRANSITION = "TRANSITION"
+    CLIFFHANGER = "CLIFFHANGER"
+
+
+class ResearchCategory(StrEnum):
+    YEAR = "YEAR"
+    COUNTRY = "COUNTRY"
+    POLITICAL_CONTEXT = "POLITICAL_CONTEXT"
+    CHARACTER_AGE = "CHARACTER_AGE"
+    ROLE = "ROLE"
+    RANK = "RANK"
+    UNIFORM = "UNIFORM"
+    COSTUME = "COSTUME"
+    WEAPON = "WEAPON"
+    VEHICLE = "VEHICLE"
+    TECHNOLOGY = "TECHNOLOGY"
+    ARCHITECTURE = "ARCHITECTURE"
+    FLAG = "FLAG"
+    SYMBOL = "SYMBOL"
+    PROP = "PROP"
+    EVENT = "EVENT"
+
+
+class CharacterRole(StrEnum):
+    PROTAGONIST = "PROTAGONIST"
+    ANTAGONIST = "ANTAGONIST"
+    SUPPORTING = "SUPPORTING"
+    MINOR = "MINOR"
+    NARRATOR = "NARRATOR"
+    CROWD = "CROWD"
+
+
+class DetailLevel(StrEnum):
+    HERO = "HERO"
+    SUPPORT = "SUPPORT"
+    BACKGROUND = "BACKGROUND"
+
+
+# ---------------------------------------------------------------- cinematic
+class ShotPurpose(StrEnum):
+    LOCATION = "LOCATION"
+    ACTION = "ACTION"
+    INFORMATION = "INFORMATION"
+    REACTION = "REACTION"
+    EMOTION = "EMOTION"
+    COMEDY = "COMEDY"
+    TENSION = "TENSION"
+    SCALE = "SCALE"
+    HISTORICAL_CONTEXT = "HISTORICAL_CONTEXT"
+    REVEAL = "REVEAL"
+    PAYOFF = "PAYOFF"
+    TRANSITION = "TRANSITION"
+
+
+class CameraShot(StrEnum):
+    EXTREME_WIDE = "EXTREME_WIDE"
+    WIDE = "WIDE"
+    MEDIUM_WIDE = "MEDIUM_WIDE"
+    MEDIUM = "MEDIUM"
+    TWO_SHOT = "TWO_SHOT"
+    CLOSE_UP = "CLOSE_UP"
+    EXTREME_CLOSE_UP = "EXTREME_CLOSE_UP"
+    OTS = "OTS"
+    POV = "POV"
+    TOP_DOWN = "TOP_DOWN"
+    LOW_ANGLE = "LOW_ANGLE"
+    HIGH_ANGLE = "HIGH_ANGLE"
+    GROUND_LEVEL = "GROUND_LEVEL"
+    OBJECT_INSERT = "OBJECT_INSERT"
+    SILHOUETTE = "SILHOUETTE"
+    ENVIRONMENT_ESTABLISHING = "ENVIRONMENT_ESTABLISHING"
+    DEEP_PERSPECTIVE = "DEEP_PERSPECTIVE"
+
+
+class CameraHeight(StrEnum):
+    GROUND = "GROUND"
+    LOW = "LOW"
+    EYE = "EYE"
+    HIGH = "HIGH"
+    OVERHEAD = "OVERHEAD"
+
+
+class Lens(StrEnum):
+    WIDE = "WIDE"
+    NORMAL = "NORMAL"
+    TELE = "TELE"
+
+
+class Perspective(StrEnum):
+    ONE_POINT = "ONE_POINT"
+    TWO_POINT = "TWO_POINT"
+    THREE_POINT = "THREE_POINT"
+    FLAT = "FLAT"
+
+
+class DepthLayout(StrEnum):
+    FG_FRAMED = "FG_FRAMED"
+    DEEP = "DEEP"
+    LAYERED = "LAYERED"
+    FLAT = "FLAT"
+
+
+class CameraMotion(StrEnum):
+    STATIC = "STATIC"
+    PUSH_IN = "PUSH_IN"
+    PULL_OUT = "PULL_OUT"
+    PAN_LEFT = "PAN_LEFT"
+    PAN_RIGHT = "PAN_RIGHT"
+    TRACK = "TRACK"
+    PARALLAX_DRIFT = "PARALLAX_DRIFT"
+    HANDHELD_SHAKE = "HANDHELD_SHAKE"
+    CRANE_UP = "CRANE_UP"
+    CRANE_DOWN = "CRANE_DOWN"
+
+
+class DepthPlane(StrEnum):
+    NEAR_FG = "NEAR_FG"
+    FG = "FG"
+    MG = "MG"
+    BG = "BG"
+    FAR_BG = "FAR_BG"
+
+
+# ---------------------------------------------------------------- performance
+class ActionVerb(StrEnum):
+    STAND = "STAND"; WALK = "WALK"; RUN = "RUN"; TURN = "TURN"; LOOK = "LOOK"
+    OBSERVE = "OBSERVE"; LISTEN = "LISTEN"; SPEAK = "SPEAK"; ARGUE = "ARGUE"
+    POINT = "POINT"; GESTURE = "GESTURE"; READ = "READ"; WRITE = "WRITE"
+    REACH = "REACH"; GRIP = "GRIP"; HOLD = "HOLD"; CARRY = "CARRY"; PULL = "PULL"
+    PUSH = "PUSH"; PLACE = "PLACE"; PICK_UP = "PICK_UP"; HAND_OVER = "HAND_OVER"
+    RECEIVE = "RECEIVE"; OPEN = "OPEN"; CLOSE = "CLOSE"; LEAN = "LEAN"; SIT = "SIT"
+    RISE = "RISE"; CROUCH = "CROUCH"; KNEEL = "KNEEL"; LIE = "LIE"; DUCK = "DUCK"
+    BRACE = "BRACE"; HIDE = "HIDE"; CLIMB = "CLIMB"; FALL = "FALL"
+    SUPPORT = "SUPPORT"; HELP = "HELP"; OPERATE = "OPERATE"; SALUTE = "SALUTE"
+    REACT = "REACT"; FLINCH = "FLINCH"; FREEZE = "FREEZE"
+
+
+# Verbs whose performance needs a physical / visual target.
+TARGETED_VERBS = {
+    "POINT", "REACH", "GRIP", "HOLD", "CARRY", "PULL", "PUSH", "PLACE", "PICK_UP",
+    "HAND_OVER", "RECEIVE", "OPEN", "CLOSE", "LEAN", "SIT", "LIE", "SUPPORT",
+    "HELP", "OPERATE", "OBSERVE", "LOOK", "READ", "WRITE",
+}
+
+# Generic English (+ common multilingual) synonyms -> canonical verbs.
+VERB_SYNONYMS = {
+    "STANDING": "STAND", "WAIT": "STAND", "WAITING": "STAND", "IDLE": "STAND",
+    "WALKING": "WALK", "MARCH": "WALK", "ENTER": "WALK", "ENTERS": "WALK", "EXIT": "WALK", "ARRIVE": "WALK",
+    "RUNNING": "RUN", "FLEE": "RUN", "SPRINT": "RUN", "CHARGE": "RUN",
+    "WATCH": "OBSERVE", "EXAMINE": "OBSERVE", "INSPECT": "OBSERVE", "STUDY": "OBSERVE", "STARE": "LOOK",
+    "GLANCE": "LOOK", "SEE": "LOOK", "HEAR": "LISTEN", "TALK": "SPEAK", "SAY": "SPEAK", "ASK": "SPEAK",
+    "ANSWER": "SPEAK", "REPLY": "SPEAK", "SHOUT": "ARGUE", "YELL": "ARGUE", "DEBATE": "ARGUE", "ORATE": "GESTURE",
+    "GIVE_SPEECH": "GESTURE", "EXPLAIN": "GESTURE", "WAVE": "GESTURE", "NOTE": "WRITE", "SCRIBBLE": "WRITE",
+    "TAKE": "PICK_UP", "GRAB": "GRIP", "GIVE": "HAND_OVER", "DELIVER": "HAND_OVER", "ACCEPT": "RECEIVE",
+    "USE": "OPERATE", "ADJUST": "OPERATE", "REPAIR": "OPERATE", "TYPE": "OPERATE", "FIRE": "OPERATE",
+    "SIT_DOWN": "SIT", "STAND_UP": "RISE", "GET_UP": "RISE", "LIE_DOWN": "LIE", "SLEEP": "LIE", "REST": "LIE",
+    "TAKE_COVER": "DUCK", "COWER": "CROUCH", "KNEELING": "KNEEL", "FALLS": "FALL", "COLLAPSE": "FALL",
+    "WOUNDED": "FALL", "STARTLE": "FLINCH", "JUMP_BACK": "FLINCH", "RECOIL": "FLINCH", "SHOCK": "REACT",
+    "GASP": "REACT", "NOD": "LISTEN", "COMFORT": "SUPPORT", "TEND": "HELP", "NURSE": "HELP", "AID": "HELP",
+}
+
+EMOTIONS = [
+    "CALM", "CONFIDENT", "NERVOUS", "AFRAID", "ANGRY", "CONFUSED", "EXHAUSTED", "SAD",
+    "RELIEVED", "SUSPICIOUS", "SURPRISED", "DETERMINED", "AWKWARD", "ATTENTIVE",
+    "HAPPY", "AMUSED", "PAIN", "PROUD",
+]
+EMOTION_SYNONYMS = {
+    "NEUTRAL": "CALM", "SERENE": "CALM", "HOPEFUL": "CONFIDENT", "OPTIMISTIC": "CONFIDENT",
+    "ANXIOUS": "NERVOUS", "WORRIED": "NERVOUS", "TENSE": "NERVOUS", "SCARED": "AFRAID",
+    "TERRIFIED": "AFRAID", "FEARFUL": "AFRAID", "FURIOUS": "ANGRY", "BITTER": "ANGRY", "RAGE": "ANGRY",
+    "PUZZLED": "CONFUSED", "TIRED": "EXHAUSTED", "WEARY": "EXHAUSTED", "GRIEF": "SAD", "DESPAIR": "SAD",
+    "DEVASTATED": "SAD", "SHOCKED": "SURPRISED", "AMAZED": "SURPRISED", "CURIOUS": "ATTENTIVE",
+    "FOCUSED": "ATTENTIVE", "INTERESTED": "ATTENTIVE", "RESOLVED": "DETERMINED", "SARCASTIC": "AMUSED",
+    "IRONIC": "AMUSED", "DRY": "AMUSED", "JOYFUL": "HAPPY", "EXCITED": "HAPPY", "HURT": "PAIN",
+    "IN_PAIN": "PAIN", "DISTRESSED": "PAIN", "ARROGANT": "PROUD", "SMUG": "PROUD", "EMBARRASSED": "AWKWARD",
+    "DOUBTFUL": "SUSPICIOUS", "SKEPTICAL": "SUSPICIOUS",
+}
+
+BODY_WEIGHTS = ["CENTERED", "LEFT", "RIGHT", "FORWARD", "BACKWARD", "SUPPORTED", "SEATED",
+                "CROUCHED", "KNEELING", "LYING", "BRACED"]
+ORIENTATIONS = ["FRONT", "BACK", "PROFILE_LEFT", "PROFILE_RIGHT", "THREE_QUARTER_LEFT",
+                "THREE_QUARTER_RIGHT", "THREE_QUARTER_BACK_LEFT", "THREE_QUARTER_BACK_RIGHT"]
+
+# ---------------------------------------------------------------- character DNA vocab
+HAIR_SHAPES = ["FLAT_COMB", "SWEPT_SIDE", "SWEPT_BACK", "CURLY", "WAVY", "SPIKY", "BUN", "PONYTAIL",
+               "BOB", "CROPPED", "MESSY", "BALD", "LONG_STRAIGHT", "TOPKNOT"]
+HAIRLINES = ["LOW", "MEDIUM", "HIGH", "RECEDING", "BALD"]
+HAIR_PARTS = ["NONE", "LEFT", "RIGHT", "CENTER"]
+HAIR_LENGTHS = ["BUZZ", "SHORT", "MEDIUM", "LONG", "VERY_LONG"]
+FRINGES = ["NONE", "SIDE_SWEEP", "STRAIGHT_BANGS", "FORELOCK", "WISPY"]
+JAW_SHAPES = ["ROUND", "SQUARE", "POINTED", "LONG", "SOFT"]
+EYE_SHAPES = ["DOT", "ROUND", "NARROW", "HEAVY_LID", "WIDE"]
+BROW_SHAPES = ["FLAT", "ARCHED", "HEAVY", "SLANTED", "THIN"]
+NOSE_STYLES = ["BUTTON", "POINTED", "LONG", "HOOKED", "BROAD", "NONE"]
+MOUTH_STYLES = ["LINE", "SMALL", "WIDE", "THIN", "FULL"]
+EAR_STYLES = ["SMALL", "NORMAL", "LARGE", "HIDDEN"]
+FACIAL_HAIR = ["NONE", "STUBBLE", "MUSTACHE_SMALL", "MUSTACHE_THICK", "MUSTACHE_HANDLEBAR",
+               "MUSTACHE_TOOTHBRUSH", "GOATEE", "FULL_BEARD", "SIDEBURNS", "MUTTON_CHOPS"]
+FACE_ANCHORS = ["SPECTACLES_ROUND", "SPECTACLES_RECT", "MONOCLE", "SCAR", "EYEPATCH", "FRECKLES",
+                "WRINKLES", "DIMPLES", "MOLE"]
+BUILDS = ["THIN", "AVERAGE", "STOCKY", "HEAVY"]
+POSTURES = ["UPRIGHT", "SLOUCHED", "STIFF", "RELAXED", "HUNCHED"]
+CONDITIONS = ["NONE", "EYE_BANDAGE", "HEAD_BANDAGE", "ARM_SLING", "LEG_BANDAGE", "EXHAUSTED",
+              "DIRTY", "WET", "INJURED"]
+
+HEADWEAR = ["NONE", "PEAKED_CAP", "FIELD_CAP", "SPIKED_HELMET", "STEEL_HELMET", "BRIMMED_HAT",
+            "BOWLER", "TOP_HAT", "FLAT_CAP", "BERET", "NURSE_VEIL", "HEADSCARF", "HOOD", "CROWN",
+            "TURBAN", "STRAW_HAT", "BANDAGE_WRAP"]
+UPPER_GARMENTS = ["SHIRT", "TUNIC", "MILITARY_TUNIC", "JACKET", "SUIT_JACKET", "VEST", "DRESS",
+                  "ROBE", "SWEATER", "HOSPITAL_GOWN", "APRON_DRESS", "BLOUSE", "KIMONO", "TOGA"]
+OUTERWEAR = ["NONE", "GREATCOAT", "TRENCH_COAT", "CAPE", "OVERCOAT", "SHAWL", "LAB_COAT", "APRON"]
+LOWER_GARMENTS = ["TROUSERS", "BREECHES", "SKIRT", "LONG_SKIRT", "SHORTS", "NONE_COVERED"]
+FOOTWEAR = ["BOOTS", "TALL_BOOTS", "SHOES", "SANDALS", "BAREFOOT"]
+EQUIPMENT = ["RIFLE", "BACKPACK", "SATCHEL", "BELT_POUCHES", "CANTEEN", "CANE", "BRIEFCASE",
+             "CLIPBOARD", "TOOLBAG", "SWORD", "BOOK", "LANTERN", "DOCUMENT", "BASKET"]
+ACCESSORIES = ["TIE", "BOW_TIE", "ARMBAND", "SCARF", "MEDAL", "NECKERCHIEF", "GLOVES", "BELT",
+               "POCKET_WATCH", "NECKLACE", "COLLAR_TABS", "SHOULDER_BOARDS", "BUTTONS_DOUBLE_ROW",
+               "RED_CROSS"]
+COSTUME_CONDITIONS = ["CLEAN", "WORN", "MUDDY", "TORN", "DUSTY", "WET"]
+
+# ---------------------------------------------------------------- location DNA vocab
+ENCLOSURES = ["INTERIOR", "EXTERIOR", "SUNKEN_EXTERIOR", "COVERED_EXTERIOR"]
+CEILINGS = ["SKY", "FLAT", "BEAMED", "VAULTED", "TENT", "ROCK"]
+WALL_TREATMENTS = ["PLAIN", "WAINSCOT", "PANELED", "TILED", "BRICK", "STONE_BLOCK",
+                   "TIMBER_REVETMENT", "EARTH_BANK", "NONE"]
+FLOOR_FEATURES = ["PLANKS", "COBBLES", "TILES", "DUCKBOARD_PATH", "RUG", "BARE", "GRASS", "SAND"]
+OPENINGS = ["WINDOWS_TALL", "WINDOWS_SMALL", "ARCHES", "DOORWAY", "NONE"]
+HORIZON_FEATURES = ["NONE", "RUINED_RIDGE", "HILLS", "CITY_SKYLINE", "TREELINE", "SEA", "DUNES", "MOUNTAINS"]
+LIGHTING_BEHAVIORS = ["WINDOW_SHAFTS", "WARM_POOLS", "OVERCAST", "HARSH_SUN", "NIGHT_MOON",
+                      "FIRELIGHT", "COLD_ARTIFICIAL", "CANDLELIGHT", "GOLDEN_HOUR"]
+WEATHER = ["NONE_INTERIOR", "CLEAR", "RAIN", "SNOW", "FOG", "STORM", "DUST"]
+ATMOSPHERE_FX = ["HAZE", "DUST_MOTES", "SMOKE_PLUMES", "RAIN", "SPARKS", "STEAM", "SNOW", "FOG",
+                 "TOBACCO_SMOKE", "EMBERS", "LIGHT_SHAFTS"]
+MATERIALS = ["WOOD", "METAL", "STONE", "PLASTER", "FABRIC", "GLASS", "PAPER", "MUD", "BRICK",
+             "EARTH", "LEATHER"]
+DENSITIES = ["SPARSE", "BALANCED", "DENSE"]
+PROP_ROLES = ["HERO", "DRESSING", "FOREGROUND", "WALL", "CEILING", "BACKGROUND"]
+PROP_CATEGORIES = [
+    "TABLE", "DESK", "CHAIR", "BENCH", "BED", "SHELF", "CABINET", "CRATE", "BARREL", "APPARATUS",
+    "LAMP", "WINDOW", "DOOR", "BANNER", "PODIUM", "FENCE", "BARRIER", "DEBRIS", "TREE", "DOCUMENTS",
+    "VESSEL", "BOARD", "WALL_STRUCTURE", "SANDBAGS", "WIRE", "CHANDELIER", "STOVE", "VEHICLE",
+    "WEAPON_RACK", "PLANT", "POST", "CLOCK",
+]
+BACKGROUND_ACTIVITY = ["DISTANT_FIGURES", "SMOKE_COLUMNS", "BIRDS", "FLAG_WAVING", "CROWD_MURMUR",
+                       "FLASHES", "WORKERS", "NONE"]

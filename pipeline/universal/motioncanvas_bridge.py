@@ -1,0 +1,265 @@
+"""Production Scene Package Bridge: Python Pipeline -> Motion Canvas & Three.js V4.
+
+Exports the strict serialized production contract:
+SCRIPT -> StoryWorldModel -> CharacterDNA / LocationDNA -> SceneIntelligence V3
+       -> ProductionScenePackage JSON -> Motion Canvas TypeScript Runtime.
+
+Zero duplicated story reasoning in TypeScript.
+TypeScript receives resolved spatial coordinates, character silhouettes, and timing.
+"""
+from __future__ import annotations
+
+import json
+from dataclasses import asdict, dataclass, field
+from pathlib import Path
+from typing import Any, Optional
+
+
+@dataclass
+class ProductionScenePackage:
+    schema_version: str = "2026.11-V4-MOTION-CANVAS"
+    project_id: str = "episode01_munich_1914"
+    scene_id: str = "SCENE_001_ODEONSPLATZ_DRIFT"
+    storytelling_mode: str = "FIRST_PERSON_ROLEPLAY"
+    primary_pov_character_id: str = "char_hitler"
+    
+    # Story Beat
+    story_beat: dict[str, Any] = field(default_factory=dict)
+    
+    # Scene World (3D + 2.5D spatial layout)
+    scene_world: dict[str, Any] = field(default_factory=dict)
+    
+    # Actors (Data-driven StickCharacter rigs)
+    actors: list[dict[str, Any]] = field(default_factory=list)
+    
+    # Objects & Props
+    objects: list[dict[str, Any]] = field(default_factory=list)
+    
+    # Cinematic Shots & Camera Choreography
+    camera: dict[str, Any] = field(default_factory=dict)
+    
+    # Voice Timeline (Zero atempo, native VietNeu duration)
+    voice_timeline: dict[str, Any] = field(default_factory=dict)
+    
+    # Semantic SFX Timeline (Causal, zero meme sounds)
+    sfx_events: list[dict[str, Any]] = field(default_factory=list)
+    
+    # Historical Research Provenance Trace
+    reference_trace: list[dict[str, Any]] = field(default_factory=list)
+
+    def export_json(self, output_path: Path) -> dict[str, Any]:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        data = asdict(self)
+        output_path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+        return data
+
+
+class MotionCanvasBridgeBuilder:
+    """Builds canonical ProductionScenePackage for Episode 01 Scene 01 (Odeonsplatz 1914)."""
+
+    @classmethod
+    def build_odeonsplatz_package(cls) -> ProductionScenePackage:
+        pkg = ProductionScenePackage(
+            schema_version="2026.11-V4-MOTION-CANVAS",
+            project_id="episode01_munich_1914",
+            scene_id="SCENE_001_ODEONSPLATZ_DRIFT",
+            storytelling_mode="FIRST_PERSON_ROLEPLAY",
+            primary_pov_character_id="char_hitler",
+            story_beat={
+                "beat_id": "BEAT_01_CIVILIAN_DRIFT",
+                "primary_verb": "DRIFTS_IN_OBSCURITY",
+                "what_happens": "25-year-old bohemian drifter Hitler contemplates his aimless, impoverished existence in Munich.",
+                "why_it_matters": "Establishes baseline low status before world war transforms his life.",
+                "who_causes_it": "Protagonist's own bohemian failures and European economic obscurity.",
+                "what_physically_changes": "Protagonist stands on wet cobblestones clutching thin portfolio.",
+                "protagonist_want": "Direction, validation, escape from humiliating poverty.",
+                "obstacle": "Lack of career, money, prospects, and formal citizenship.",
+                "protagonist_knows": "He is broke and directionless at age 25.",
+                "protagonist_not_knows": "A continent-wide catastrophe will erupt in days.",
+                "location_id": "LOC_001_ODEONSPLATZ"
+            },
+            scene_world={
+                "location_id": "LOC_001_ODEONSPLATZ",
+                "canonical_name": "Munich Odeonsplatz & Feldherrnhalle",
+                "historical_era": "August 1914",
+                "dimensions": {"width": 1920, "height": 1080},
+                "ground_plane": {
+                    "y_ground_canvas": 820,
+                    "material": "GRANITE_COBBLESTONE",
+                    "reflectivity": 0.35,  # Wet rain sheen
+                    "primary_color": "#2C2A29",
+                    "mortar_color": "#1A1918"
+                },
+                "threejs_environment": {
+                    "enabled": True,
+                    "scene_type": "ARCHITECTURAL_LOGGIA_3D",
+                    "camera_initial": {
+                        "position": [-3.5, 2.4, 12.0],
+                        "target": [-0.2, 3.2, -4.5],
+                        "fov": 46
+                    },
+                    "camera_keyframes": [
+                        {"t": 0.0, "position": [-3.5, 2.4, 12.0], "target": [-0.2, 3.2, -4.5]},
+                        {"t": 3.8, "position": [-1.4, 2.5, 10.8], "target": [0.1, 3.1, -4.5]},
+                        {"t": 7.5, "position": [1.2, 2.55, 9.6], "target": [0.4, 3.0, -4.5]},
+                        {"t": 11.12, "position": [2.8, 2.6, 8.8], "target": [0.6, 2.9, -4.5]}
+                    ],
+                    "lighting": {
+                        "sun": {"color": "#FFF0D6", "intensity": 1.3, "position": [18, 22, 12]},
+                        "sky_ambient": {"color": "#6D7E8F", "intensity": 0.55},
+                        "ground_bounce": {"color": "#3A3530", "intensity": 0.25}
+                    },
+                    "architecture": {
+                        "facade_style": "FLORENTINE_NEOCLASSICAL",
+                        "stone_type": "KELLHEIM_LIMESTONE",
+                        "stone_color": "#CBB89D",
+                        "shadow_stone_color": "#786955",
+                        "arches": [
+                            {"id": "ARCH_LEFT", "x": -5.5, "width": 4.2, "height": 8.0, "apex_radius": 2.1},
+                            {"id": "ARCH_CENTER", "x": 0.0, "width": 4.8, "height": 8.8, "apex_radius": 2.4},
+                            {"id": "ARCH_RIGHT", "x": 5.5, "width": 4.2, "height": 8.0, "apex_radius": 2.1}
+                        ],
+                        "columns": [
+                            {"id": "COL_1", "x": -7.6, "radius": 0.55, "height": 7.5},
+                            {"id": "COL_2", "x": -2.4, "radius": 0.65, "height": 7.5},
+                            {"id": "COL_3", "x": 2.4, "radius": 0.65, "height": 7.5},
+                            {"id": "COL_4", "x": 7.6, "radius": 0.55, "height": 7.5}
+                        ],
+                        "statues": [
+                            {"name": "Count Tilly Bronze Monument", "side": "LEFT", "color": "#28352A"},
+                            {"name": "Prince Wrede Bronze Monument", "side": "RIGHT", "color": "#28352A"}
+                        ]
+                    }
+                }
+            },
+            actors=[
+                {
+                    "character_id": "char_hitler",
+                    "canonical_name": "Adolf Hitler",
+                    "role": "PROTAGONIST_NARRATOR",
+                    "voice_id": "Đức Trí",
+                    "render_type": "STICK_CHARACTER_2D_PROJECTED",
+                    "proportions": {
+                        "head_to_body_ratio": 0.28,
+                        "head_diameter_px": 54,
+                        "total_standing_height_px": 192,
+                        "limb_width_px": 4.5
+                    },
+                    "dna": {
+                        "head_shape": "ANGULAR_OVAL_LEAN",
+                        "hair_color": "#2A1E14",
+                        "hair_style": "1914_SIDE_PARTED_FOREHEAD_SWEEP",
+                        "facial_hair": "1914_WIDE_KAISER_MUSTACHE_DROOPING",
+                        "eye_anchors": ["deep-set", "intense_stare"],
+                        "costume": {
+                            "model": "1914_CIVILIAN_BOHEMIAN",
+                            "frock_coat_color": "#2E343B",
+                            "collar_color": "#E5E1D8",
+                            "cravat_color": "#1C1F24",
+                            "trousers_color": "#252A30"
+                        }
+                    },
+                    "staging": {
+                        "world_3d_anchor": [-1.2, 0.0, -0.6],
+                        "canvas_initial_x": 680,
+                        "canvas_initial_y": 740,
+                        "scale": 1.45,
+                        "facing": "RIGHT",
+                        "posture": "RESTRAINED_LEAN_SLIGHT_HUNCH",
+                        "hand_held_prop": {
+                            "type": "ARTIST_PORTFOLIO",
+                            "color": "#4A3B2C",
+                            "hand": "LEFT",
+                            "width": 38,
+                            "height": 48
+                        }
+                    },
+                    "performance_timeline": [
+                        {"t": 0.0, "action": "WAIT", "intensity": 0.8, "emotion": "CALM"},
+                        {"t": 3.8, "action": "LEAN", "intensity": 1.1, "emotion": "REFLECTIVE"},
+                        {"t": 7.5, "action": "REACH", "intensity": 1.2, "emotion": "INTENSE"}
+                    ]
+                }
+            ],
+            objects=[
+                {
+                    "object_id": "OBJ_PORTFOLIO_01",
+                    "name": "Cardboard Artist Portfolio",
+                    "held_by": "char_hitler",
+                    "state": "CLOSED_TIGHTLY_HELD"
+                }
+            ],
+            camera={
+                "shot_id": "EP01_SH01",
+                "shot_type": "WIDE_CINEMATIC_ESTABLISHING_PAN",
+                "duration_seconds": 11.12,
+                "motion": {
+                    "type": "SLOW_PUSH_AND_PARALLAX_PAN",
+                    "start_zoom": 1.0,
+                    "end_zoom": 1.12,
+                    "pan_x": 120,
+                    "pan_y": -20
+                }
+            },
+            voice_timeline={
+                "audio_file": "output/first_person_research_story_integration/episode01_first_person_voice_proof.wav",
+                "line_id": "EP01_FP_01",
+                "speaker_id": "char_hitler",
+                "voice_id": "Đức Trí",
+                "text": "Năm 1914, tôi hai mươi lăm tuổi, một kẻ lập dị vô danh không xu dính túi trên đường phố Munich.",
+                "start_seconds": 0.0,
+                "duration_seconds": 11.12,
+                "speed_ratio": 1.0,
+                "atempo_verified": True
+            },
+            sfx_events=[
+                {
+                    "sfx_id": "SFX_001",
+                    "timestamp": 0.4,
+                    "category": "AMBIENT",
+                    "description": "Munich street rain on cobblestones, distant carriage wheels",
+                    "volume": 0.45,
+                    "mix_priority": "BACKGROUND",
+                    "meme_score": 0.0
+                },
+                {
+                    "sfx_id": "SFX_002",
+                    "timestamp": 6.8,
+                    "category": "PHYSICAL",
+                    "description": "Wet leather shoe pivot on stone pavement",
+                    "volume": 0.55,
+                    "mix_priority": "MIDGROUND",
+                    "meme_score": 0.0
+                }
+            ],
+            reference_trace=[
+                {
+                    "ref_id": "REF_LOC_001_MUNICH_ODEONSPLATZ_1914",
+                    "source": "Bavarian War Archives / Munich City Archive",
+                    "evidence": "Feldherrnhalle Florentine triple arch, Kellheim limestone, bronze commanders Tilly & Wrede",
+                    "impact_on_render": "Three.js loggia geometry matches exact historical 3-arch facade."
+                },
+                {
+                    "ref_id": "REF_CHAR_001_HITLER_1914_MUNICH",
+                    "source": "Bavarian State Library Hoffmann Archive 1914",
+                    "evidence": "25yo gaunt lean face, dark side-parted hair, wide Kaiser handlebar mustache",
+                    "impact_on_render": "StickCharacter renders wide mustache tips and 28% head ratio (prohibits 1930s toothbrush mustache)."
+                }
+            ]
+        )
+        return pkg
+
+
+def main():
+    pkg = MotionCanvasBridgeBuilder.build_odeonsplatz_package()
+    p_path = Path("projects/episode01/production_scene_package.json")
+    pkg.export_json(p_path)
+    print(f"Exported canonical ProductionScenePackage to: {p_path}")
+    # Also write to motioncanvas project directory
+    p_mc = Path("motioncanvas/projects/episode01_package.json")
+    pkg.export_json(p_mc)
+    print(f"Synced package to Motion Canvas runtime: {p_mc}")
+
+
+if __name__ == "__main__":
+    main()

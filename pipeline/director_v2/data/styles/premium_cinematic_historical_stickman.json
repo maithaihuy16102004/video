@@ -1,0 +1,28 @@
+{
+  "id": "premium_cinematic_historical_stickman",
+  "name": "Premium Cinematic Historical Stickman",
+  "description": "OverSimplified meets Valiant Hearts: expressive 2D stickman characters with solid vector silhouettes, period uniforms/props, set in rich atmospheric historical environments with cinematic lighting and multi-plane depth.",
+  "palette": [
+    "#141416",
+    "#2d2d34",
+    "#5c5d67",
+    "#a49988",
+    "#d8cca3",
+    "#b84a39",
+    "#4a6b82",
+    "#2e4a3e"
+  ],
+  "line_style": "Clean variable-width vector contour, dark charcoal outline, no harsh pure black wires",
+  "character_style": "2D animated stickman rig with expressive postures, accurate period hats/helmets, medals, face emotion cues, and tinted torso attire",
+  "environment_style": "Layered historical backgrounds with architectural perspective, volumetric fog/haze, directional key lighting, distinct foreground occluders, and soft atmospheric distance fade",
+  "negative": [
+    "photorealistic human face",
+    "3D uncanny CGI",
+    "anime glossy eyes",
+    "modern elements",
+    "disjointed floating stick limbs",
+    "flat single-color empty background",
+    "cluttered watermark",
+    "text captions rendered into image"
+  ]
+}

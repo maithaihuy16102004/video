@@ -1,0 +1,69 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "SceneDirectorSchema",
+  "type": "object",
+  "required": ["video_metadata", "timeline"],
+  "properties": {
+    "video_metadata": {
+      "type": "object",
+      "required": ["topic", "target_pace", "global_bgm"],
+      "properties": {
+        "topic": { "type": "string" },
+        "target_pace": {
+          "type": "string",
+          "enum": ["slow", "normal", "fast_paced", "hyper"]
+        },
+        "global_bgm": { "type": "string" }
+      }
+    },
+    "timeline": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["scene_id", "voiceover", "visual_director", "climax_score"],
+        "properties": {
+          "scene_id": { "type": "integer" },
+          "timestamp_start": { "type": "string" },
+          "voiceover": {
+            "type": "object",
+            "required": ["text", "emotion_tag", "pitch_modifier", "speed"],
+            "properties": {
+              "text": { "type": "string" },
+              "emotion_tag": {
+                "type": "string",
+                "enum": ["neutral", "curious", "surprised", "tense", "excited", "serious"]
+              },
+              "pitch_modifier": { "type": "number", "minimum": 0.8, "maximum": 1.3 },
+              "speed": { "type": "number", "minimum": 0.8, "maximum": 1.3 }
+            }
+          },
+          "visual_director": {
+            "type": "object",
+            "required": ["avatar_action", "b_roll_prompt", "b_roll_overlay_ratio", "camera_effect", "transition_effect"],
+            "properties": {
+              "avatar_action": { "type": "string" },
+              "b_roll_prompt": { "type": "string" },
+              "b_roll_overlay_ratio": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+              "camera_effect": {
+                "type": "string",
+                "enum": ["static", "zoom_in_slow", "zoom_in_fast", "pan_left", "pan_right", "glitch_shake"]
+              },
+              "transition_effect": {
+                "type": "string",
+                "enum": ["cut", "fade_to_black", "whip_pan", "zoom_blur"]
+              }
+            }
+          },
+          "audio_fx": {
+            "type": "object",
+            "properties": {
+              "sfx_insert": { "type": "string" },
+              "sfx_timestamp": { "type": "number" }
+            }
+          },
+          "climax_score": { "type": "integer", "minimum": 1, "maximum": 10 }
+        }
+      }
+    }
+  }
+}

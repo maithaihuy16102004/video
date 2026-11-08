@@ -1,0 +1,97 @@
+{
+  "video_metadata": {
+    "topic": "5 Thói Quen Buổi Sáng Thay Đổi Cuộc Đời Bạn",
+    "target_pace": "fast_paced",
+    "global_bgm": "cinematic_epic"
+  },
+  "timeline": [
+    {
+      "scene_id": 1,
+      "timestamp_start": "00:00",
+      "voiceover": {
+        "text": "Bạn có biết rằng, chỉ cần thay đổi 30 phút đầu tiên mỗi sáng, cuộc đời bạn sẽ rẽ sang một hướng hoàn toàn khác?",
+        "emotion_tag": "curious",
+        "pitch_modifier": 1.0,
+        "speed": 1.0
+      },
+      "visual_director": {
+        "avatar_action": "explaining_and_gesturing",
+        "b_roll_prompt": "sunrise golden light morning routine healthy lifestyle",
+        "b_roll_overlay_ratio": 0.0,
+        "camera_effect": "zoom_in_slow",
+        "transition_effect": "cut"
+      },
+      "audio_fx": {
+        "sfx_insert": "subtle_whoosh",
+        "sfx_timestamp": 0.2
+      },
+      "climax_score": 3
+    },
+    {
+      "scene_id": 2,
+      "timestamp_start": "00:05",
+      "voiceover": {
+        "text": "Thói quen đầu tiên là thiền định mười phút. Nghiên cứu từ Đại học Harvard đã chứng minh nó giúp giảm căng thẳng tới bốn mươi phần trăm.",
+        "emotion_tag": "serious",
+        "pitch_modifier": 1.0,
+        "speed": 1.0
+      },
+      "visual_director": {
+        "avatar_action": "explaining_seriously",
+        "b_roll_prompt": "peaceful meditation person sitting cross legged morning light",
+        "b_roll_overlay_ratio": 0.7,
+        "camera_effect": "zoom_in_slow",
+        "transition_effect": "fade_to_black"
+      },
+      "audio_fx": {
+        "sfx_insert": "chime",
+        "sfx_timestamp": 0.1
+      },
+      "climax_score": 5
+    },
+    {
+      "scene_id": 3,
+      "timestamp_start": "00:12",
+      "voiceover": {
+        "text": "Thói quen thứ hai: viết ba điều biết ơn mỗi sáng. Nghe đơn giản nhưng nó tái lập trình bộ não bạn theo hướng tích cực!",
+        "emotion_tag": "excited",
+        "pitch_modifier": 1.0,
+        "speed": 1.0
+      },
+      "visual_director": {
+        "avatar_action": "enthusiastic_gesture",
+        "b_roll_prompt": "person writing journal notebook morning coffee close up",
+        "b_roll_overlay_ratio": 0.8,
+        "camera_effect": "glitch_shake",
+        "transition_effect": "whip_pan"
+      },
+      "audio_fx": {
+        "sfx_insert": "cinematic_boom_bass",
+        "sfx_timestamp": 0.0
+      },
+      "climax_score": 8
+    },
+    {
+      "scene_id": 4,
+      "timestamp_start": "00:18",
+      "voiceover": {
+        "text": "Hãy bắt đầu ngay từ ngày mai. Lưu video này lại và chia sẻ cho người bạn cần thay đổi nhất nhé!",
+        "emotion_tag": "excited",
+        "pitch_modifier": 1.0,
+        "speed": 1.0
+      },
+      "visual_director": {
+        "avatar_action": "call_to_action_wave",
+        "b_roll_prompt": "person smiling confident starting new day sunrise",
+        "b_roll_overlay_ratio": 0.0,
+        "camera_effect": "zoom_in_slow",
+        "transition_effect": "fade_to_black"
+      },
+      "audio_fx": {
+        "sfx_insert": "chime",
+        "sfx_timestamp": 0.1
+      },
+      "climax_score": 4
+    }
+  ]
+}

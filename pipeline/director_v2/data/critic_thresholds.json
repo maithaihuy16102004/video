@@ -1,0 +1,16 @@
+{
+  "_doc": "Visual critic minimum quality thresholds [0.0..1.0]. Any score below threshold triggers an attempt retry (up to max_critic_retries = 2).",
+  "thresholds": {
+    "character_identity": 0.88,
+    "historical_accuracy": 0.90,
+    "stickman_style": 0.95,
+    "camera_compliance": 0.75,
+    "perspective": 0.80,
+    "depth": 0.70,
+    "pose_compliance": 0.85,
+    "lighting": 0.80,
+    "continuity": 0.88,
+    "no_unintended_repetition": 0.80
+  },
+  "max_retries": 2
+}

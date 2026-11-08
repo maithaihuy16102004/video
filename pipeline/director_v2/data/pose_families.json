@@ -1,0 +1,33 @@
+{
+  "_doc": "action_verb -> pose_family. Keywords are matched (lower-case, accent-sensitive) against beat text / action verbs in order; first match wins. Contrapposto is ONLY allowed for POSE_RELAXED_STAND_CONTRAPPOSTO. 'default' is used when nothing matches.",
+  "default": "POSE_ALERT_STAND",
+  "families": [
+    {"id": "POSE_POV_HANDS", "keywords": [], "weight": "CENTER_50_50", "spine_lean": 0, "arms": "hands_in_frame", "legs": "none", "contrapposto": false},
+    {"id": "POSE_FALL_COLLAPSE", "keywords": ["ngã", "gục", "đổ gục", "trúng đạn", "bị thương", "fall", "collapse", "wounded", "shot down"], "weight": "OFF_BALANCE_BACK", "spine_lean": -35, "arms": "flail", "legs": "buckled", "contrapposto": false},
+    {"id": "POSE_DUCK_COVER", "keywords": ["nổ", "pháo", "ẩn nấp", "núp", "cúi xuống", "explosion", "shell", "take cover", "duck", "bomb"], "weight": "LOW_CROUCH_FRONT_60", "spine_lean": 40, "arms": "protect_head", "legs": "crouch", "contrapposto": false},
+    {"id": "POSE_AIM_CROUCH", "keywords": ["bắn", "ngắm", "nổ súng", "aim", "shoot", "fire at", "rifle"], "weight": "FRONT_FOOT_60", "spine_lean": 15, "arms": "aim_two_hands", "legs": "kneel_one", "contrapposto": false},
+    {"id": "POSE_RUN_SPRINT", "keywords": ["chạy", "lao", "bỏ chạy", "tháo chạy", "run", "sprint", "flee", "rush", "charge"], "weight": "FRONT_FOOT_85", "spine_lean": 22, "arms": "pump", "legs": "stride_long", "contrapposto": false},
+    {"id": "POSE_MARCH", "keywords": ["hành quân", "diễu hành", "nhập ngũ", "march", "parade", "enlist"], "weight": "FRONT_FOOT_60", "spine_lean": 2, "arms": "swing_stiff", "legs": "stride", "contrapposto": false},
+    {"id": "POSE_WALK_STRIDE", "keywords": ["đi", "bước", "đến", "tới", "rời", "trở về", "lang thang", "walk", "arrive", "leave", "wander", "return", "enter"], "weight": "FRONT_FOOT_60", "spine_lean": 5, "arms": "swing", "legs": "stride", "contrapposto": false},
+    {"id": "POSE_SALUTE", "keywords": ["chào", "giơ tay chào", "salute"], "weight": "CENTER_50_50", "spine_lean": -2, "arms": "salute_right", "legs": "heels_together", "contrapposto": false},
+    {"id": "POSE_ORATE_FIST", "keywords": ["diễn thuyết", "hô hào", "hét", "gào", "kêu gọi", "speech", "shout", "rally", "proclaim"], "weight": "FRONT_FOOT_65", "spine_lean": 10, "arms": "fist_raised", "legs": "planted_wide", "contrapposto": false},
+    {"id": "POSE_ARGUE_LEAN", "keywords": ["cãi", "tranh luận", "phản đối", "argue", "debate", "protest", "object"], "weight": "FRONT_FOOT_70", "spine_lean": 14, "arms": "jab_point", "legs": "planted", "contrapposto": false},
+    {"id": "POSE_POINT_DIRECT", "keywords": ["chỉ", "ra lệnh", "chỉ huy", "point", "order", "command", "direct"], "weight": "FRONT_FOOT_60", "spine_lean": 6, "arms": "point_forward", "legs": "planted", "contrapposto": false},
+    {"id": "POSE_HANDSHAKE_REACH", "keywords": ["gặp", "bắt tay", "đưa", "nhận", "trao", "meet", "shake hands", "hand over", "receive", "give"], "weight": "FRONT_FOOT_55", "spine_lean": 8, "arms": "reach_forward", "legs": "step", "contrapposto": false},
+    {"id": "POSE_SIT_UPRIGHT_WRITE", "keywords": ["viết", "vẽ", "tô màu", "ký", "write", "paint", "draw", "sign"], "weight": "SEATED", "spine_lean": 12, "arms": "work_surface", "legs": "seated", "contrapposto": false},
+    {"id": "POSE_READ_HOLD", "keywords": ["đọc", "thư", "tờ báo", "read", "letter", "newspaper"], "weight": "CENTER_50_50", "spine_lean": 6, "arms": "hold_paper", "legs": "planted", "contrapposto": false},
+    {"id": "POSE_CARRY_LOAD", "keywords": ["mang", "vác", "khiêng", "xách", "carry", "haul", "lift"], "weight": "BACK_FOOT_60", "spine_lean": 12, "arms": "carry", "legs": "braced", "contrapposto": false},
+    {"id": "POSE_LIE_BED", "keywords": ["nằm", "ngủ", "giường bệnh", "hôn mê", "lie", "sleep", "bedridden"], "weight": "RECLINED", "spine_lean": -90, "arms": "rest", "legs": "extended", "contrapposto": false},
+    {"id": "POSE_KNEEL_GRIEF", "keywords": ["quỳ", "khóc", "than khóc", "kneel", "cry", "weep", "mourn"], "weight": "KNEEL", "spine_lean": 25, "arms": "cover_face", "legs": "kneel_both", "contrapposto": false},
+    {"id": "POSE_SIT_SLUMP", "keywords": ["ngồi", "sit", "seated"], "weight": "SEATED", "spine_lean": 18, "arms": "on_knees", "legs": "seated", "contrapposto": false},
+    {"id": "POSE_RECOIL_SURPRISE", "keywords": ["bất ngờ", "sốc", "giật mình", "kinh ngạc", "surprise", "shock", "startle", "stunned"], "weight": "BACK_FOOT_75", "spine_lean": -12, "arms": "hands_up_open", "legs": "step_back", "contrapposto": false},
+    {"id": "POSE_SLUMP_DEFEAT", "keywords": ["thất bại", "tuyệt vọng", "bị từ chối", "trượt", "chán nản", "defeat", "despair", "rejected", "failed"], "weight": "CENTER_50_50", "spine_lean": 20, "arms": "hang_limp", "legs": "planted_narrow", "contrapposto": false},
+    {"id": "POSE_CELEBRATE", "keywords": ["ăn mừng", "reo hò", "vui mừng", "hân hoan", "celebrate", "cheer", "rejoice"], "weight": "CENTER_50_50", "spine_lean": -8, "arms": "both_up", "legs": "hop", "contrapposto": false},
+    {"id": "POSE_LOOK_UP_AWE", "keywords": ["ngước", "nhìn lên", "choáng ngợp", "xa lạ", "look up", "gaze up", "awe", "overwhelmed", "strange"], "weight": "BACK_FOOT_55", "spine_lean": -10, "arms": "at_sides_loose", "legs": "planted", "contrapposto": false},
+    {"id": "POSE_THINK_CHIN", "keywords": ["nghĩ", "suy nghĩ", "tự hỏi", "băn khoăn", "think", "wonder", "consider", "ponder"], "weight": "CENTER_50_50", "spine_lean": 4, "arms": "hand_on_chin", "legs": "planted", "contrapposto": false},
+    {"id": "POSE_SPEAK_GESTURE", "keywords": ["nói", "kể", "giải thích", "hỏi", "trả lời", "say", "tell", "explain", "ask", "answer"], "weight": "FRONT_FOOT_55", "spine_lean": 4, "arms": "open_gesture", "legs": "planted", "contrapposto": false},
+    {"id": "POSE_RELAXED_STAND_CONTRAPPOSTO", "keywords": ["thư thái", "thong thả", "đứng chờ", "relaxed", "lounge", "idle wait"], "weight": "BACK_FOOT_70", "spine_lean": 0, "arms": "relaxed", "legs": "contrapposto", "contrapposto": true},
+    {"id": "POSE_ALERT_STAND", "keywords": ["đứng", "stand"], "weight": "CENTER_50_50", "spine_lean": 0, "arms": "at_sides", "legs": "planted", "contrapposto": false},
+    {"id": "POSE_NONE", "keywords": [], "weight": "NONE", "spine_lean": 0, "arms": "none", "legs": "none", "contrapposto": false}
+  ]
+}

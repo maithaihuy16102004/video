@@ -1,0 +1,15 @@
+from __future__ import annotations
+from pydantic import BaseModel,Field
+from typing import Any
+
+class Provenance(BaseModel): source:str='SCRIPT_EXPLICIT';confidence:float=.7;evidence:str=''
+class CharacterEntity(BaseModel):
+ character_id:str;canonical_name:str;aliases:list[str]=Field(default_factory=list);story_role:str='SUPPORTING';importance:str='SUPPORTING';identity_anchors:list[str]=Field(default_factory=list);appearance_confidence:float=.5;age_timeline:list[dict]=Field(default_factory=list);appearance_timeline:list[dict]=Field(default_factory=list);costume_timeline:list[dict]=Field(default_factory=list);hair_timeline:list[dict]=Field(default_factory=list);facial_hair_timeline:list[dict]=Field(default_factory=list);performance_profile:dict=Field(default_factory=dict);continuity_rules:list[str]=Field(default_factory=list);uncertainties:list[str]=Field(default_factory=list);provenance:dict[str,Provenance]=Field(default_factory=dict);ideal_character_design:dict=Field(default_factory=dict);executable_character_dna:dict=Field(default_factory=dict);capability_gaps:list[str]=Field(default_factory=list)
+class LocationEntity(BaseModel):
+ location_id:str;canonical_name:str;aliases:list[str]=Field(default_factory=list);location_type:str='UNKNOWN';time_periods:list[str]=Field(default_factory=list);architecture:str='context-derived';materials:list[str]=Field(default_factory=list);layout_intent:str='event-supporting';landmarks:list[str]=Field(default_factory=list);prop_ecology:list[str]=Field(default_factory=list);human_traces:list[str]=Field(default_factory=list);environment_condition:str='used';lighting_sources:list[str]=Field(default_factory=list);weather:str='UNKNOWN';continuity_rules:list[str]=Field(default_factory=list);historical_context:dict=Field(default_factory=dict);executable_location_dna:dict=Field(default_factory=dict)
+class ObjectEntity(BaseModel): object_id:str;name:str;importance:str='SUPPORTING';states:list[dict]=Field(default_factory=list)
+class ActionIntent(BaseModel): action_id:str;actor_id:str;primitives:list[str];object_id:str|None=None;emotion:str='NEUTRAL';intensity:str='NORMAL';eyeline:str|None=None;hand_interaction:str|None=None;source_text:str=''
+class EventEntity(BaseModel): event_id:str;scene_id:str;participants:list[str];location_id:str;time_label:str='UNSPECIFIED';actions:list[str];objects:list[str];cause:str='';effect:str='';information_change:str='';emotional_change:str='';environment_change:str=''
+class SceneInstance(BaseModel): scene_id:str;location_id:str;character_ids:list[str];object_ids:list[str];event_ids:list[str];script_excerpt:str
+class StoryWorldModel(BaseModel):
+ schema_version:str='story-world-v1';script_hash:str;title:str;status:str;characters:dict[str,CharacterEntity];locations:dict[str,LocationEntity];objects:dict[str,ObjectEntity];actions:list[ActionIntent];events:list[EventEntity];relationships:list[dict];timeline:list[dict];scenes:list[SceneInstance];continuity_state:dict=Field(default_factory=dict);provider_audit:list[dict]=Field(default_factory=list)

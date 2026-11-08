@@ -1,0 +1,108 @@
+{
+  "title": "Kinh tế thị trường là gì?",
+  "hook": "Vì sao có người bán rẻ mà vẫn lãi, có người bán đắt mà lỗ?",
+  "points": [
+    "Cung và cầu quyết định giá cả",
+    "Giá là tín hiệu dẫn dắt sản xuất",
+    "Cạnh tranh thúc đẩy chất lượng",
+    "Nhà nước giữ vai trò điều tiết",
+    "Lạm phát là kẻ thù của người gửi tiền"
+  ],
+  "narration": "Kinh tế thị trường là gì? Đó là nền kinh tế vận hành theo cung và cầu. Khi cầu tăng mà cung không kịp, giá sẽ lên, người sản xuất có lời nên mở rộng sản xuất. Khi cung vượt cầu, giá giảm, người làm ăn kém hiệu quả bị đào thải. Giá cả chính là tín hiệu dẫn dắt, giúp nguồn lực chảy về nơi sinh lời nhất. Cạnh tranh thì thúc ép mọi người làm tốt hơn, rẻ hơn, nhanh hơn. Nhưng thị trường không tự hoàn hảo, nên nhà nước cần điều tiết để chống độc quyền và bảo vệ người yếu thế. Và lạm phát là kẻ thù thầm lặng, nó bào mòn đồng tiền của bạn mỗi ngày. Hiểu được quy luật này, bạn sẽ đi đúng hướng trong làm ăn và đầu tư.",
+  "width": 1080,
+  "height": 1920,
+  "fps": 30,
+  "scenes": [
+    {
+      "title": "hook",
+      "duration": 3.5,
+      "background": {"type": "gradient", "top": [58, 40, 10], "bottom": [16, 11, 4]},
+      "texts": [
+        {"text": "Vì sao có người bán rẻ mà vẫn lãi, có người bán đắt mà lỗ?", "x": 0.5, "y": 0.36, "size": 76,
+         "effect": "pop", "delay": 0.2, "duration": 1.6, "max_width": 940}
+      ],
+      "shapes": [
+        {"type": "lightbulb", "x": 0.5, "y": 0.64, "radius": 88, "color": [255, 196, 40], "delay": 0.5, "duration": 1.2}
+      ]
+    },
+    {
+      "title": "title",
+      "duration": 3.5,
+      "background": {"type": "gradient", "top": [58, 40, 10], "bottom": [20, 14, 4]},
+      "character": {"pose": "wave", "expression": "happy", "x": 0.5, "y": 0.72, "scale": 130},
+      "texts": [
+        {"text": "KINH TẾ THỊ TRƯỜNG", "x": 0.5, "y": 0.24, "size": 96,
+         "effect": "scale", "delay": 0.2, "duration": 1.6, "max_width": 950, "color": [255, 196, 40]}
+      ]
+    },
+    {
+      "title": "point_1",
+      "duration": 5.0,
+      "background": {"type": "tech", "top": [58, 40, 10], "bottom": [16, 11, 4], "grid_color": [120, 90, 30]},
+      "character": {"pose": "talk", "expression": "neutral", "x": 0.28, "y": 0.72, "scale": 108, "talking": true},
+      "texts": [
+        {"text": "01", "x": 0.5, "y": 0.16, "size": 72, "effect": "pop", "delay": 0.1, "duration": 1.0, "color": [255, 196, 40]},
+        {"text": "Cung và cầu quyết định giá cả", "x": 0.64, "y": 0.36, "size": 62, "effect": "slide_up", "delay": 0.4, "duration": 1.2, "max_width": 760}
+      ],
+      "shapes": [
+        {"type": "progress", "x": 0.5, "y": 0.88, "width": 700, "height": 26, "color": [255, 196, 40], "delay": 0.6, "duration": 2.4}
+      ]
+    },
+    {
+      "title": "point_2",
+      "duration": 5.0,
+      "background": {"type": "tech", "top": [58, 40, 10], "bottom": [16, 11, 4], "grid_color": [120, 90, 30]},
+      "character": {"pose": "talk", "expression": "neutral", "x": 0.28, "y": 0.72, "scale": 108, "talking": true},
+      "texts": [
+        {"text": "02", "x": 0.5, "y": 0.16, "size": 72, "effect": "pop", "delay": 0.1, "duration": 1.0, "color": [255, 196, 40]},
+        {"text": "Giá là tín hiệu dẫn dắt sản xuất", "x": 0.64, "y": 0.36, "size": 62, "effect": "slide_left", "delay": 0.4, "duration": 1.2, "max_width": 760}
+      ],
+      "shapes": [
+        {"type": "arrow", "x1": 0.15, "y1": 0.52, "x2": 0.85, "y2": 0.52, "color": [255, 196, 40], "delay": 0.5, "duration": 2.0}
+      ]
+    },
+    {
+      "title": "point_3",
+      "duration": 5.0,
+      "background": {"type": "tech", "top": [58, 40, 10], "bottom": [16, 11, 4], "grid_color": [120, 90, 30]},
+      "character": {"pose": "point", "expression": "happy", "x": 0.28, "y": 0.72, "scale": 108, "talking": true},
+      "texts": [
+        {"text": "03", "x": 0.5, "y": 0.16, "size": 72, "effect": "pop", "delay": 0.1, "duration": 1.0, "color": [255, 196, 40]},
+        {"text": "Cạnh tranh thúc đẩy chất lượng", "x": 0.64, "y": 0.36, "size": 62, "effect": "bounce", "delay": 0.4, "duration": 1.2, "max_width": 760}
+      ]
+    },
+    {
+      "title": "point_4",
+      "duration": 5.0,
+      "background": {"type": "tech", "top": [58, 40, 10], "bottom": [16, 11, 4], "grid_color": [120, 90, 30]},
+      "character": {"pose": "talk", "expression": "thinking", "x": 0.28, "y": 0.72, "scale": 108, "talking": true},
+      "texts": [
+        {"text": "04", "x": 0.5, "y": 0.16, "size": 72, "effect": "pop", "delay": 0.1, "duration": 1.0, "color": [255, 196, 40]},
+        {"text": "Nhà nước giữ vai trò điều tiết", "x": 0.64, "y": 0.36, "size": 62, "effect": "fade", "delay": 0.4, "duration": 1.2, "max_width": 760}
+      ],
+      "shapes": [
+        {"type": "ring", "x": 0.5, "y": 0.72, "radius": 110, "color": [255, 196, 40], "delay": 0.5, "duration": 2.0}
+      ]
+    },
+    {
+      "title": "point_5",
+      "duration": 5.0,
+      "background": {"type": "tech", "top": [58, 40, 10], "bottom": [16, 11, 4], "grid_color": [120, 90, 30]},
+      "character": {"pose": "surprised", "expression": "surprised", "x": 0.28, "y": 0.72, "scale": 108, "talking": true},
+      "texts": [
+        {"text": "05", "x": 0.5, "y": 0.16, "size": 72, "effect": "pop", "delay": 0.1, "duration": 1.0, "color": [255, 196, 40]},
+        {"text": "Lạm phát là kẻ thù của người gửi tiền", "x": 0.64, "y": 0.36, "size": 60, "effect": "pop", "delay": 0.4, "duration": 1.2, "max_width": 760}
+      ]
+    },
+    {
+      "title": "outro",
+      "duration": 4.0,
+      "background": {"type": "gradient", "top": [255, 196, 40], "bottom": [200, 130, 30]},
+      "character": {"pose": "thumbs_up", "expression": "happy", "x": 0.5, "y": 0.72, "scale": 140},
+      "texts": [
+        {"text": "Hiểu quy luật, đi đúng hướng", "x": 0.5, "y": 0.26, "size": 78, "effect": "bounce", "delay": 0.3, "duration": 1.6, "max_width": 900},
+        {"text": "Follow để xem thêm!", "x": 0.5, "y": 0.52, "size": 52, "effect": "fade", "delay": 1.0, "duration": 1.5, "max_width": 900}
+      ]
+    }
+  ]
+}

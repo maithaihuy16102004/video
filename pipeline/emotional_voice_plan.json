@@ -1,0 +1,11 @@
+{
+  "voice_profile": "narrator_vi_expressive",
+  "render_order": "audio_first",
+  "segments": [
+    {"text": "Bạn có bao giờ thắc mắc?", "emotion": "curious", "pitch_semitones": 1, "speed": 1.02, "pause_after_ms": 180},
+    {"text": "Càng cố nghĩ, càng bí.", "emotion": "tired", "pitch_semitones": -2, "speed": 0.9, "pause_after_ms": 260},
+    {"text": "Não bắt đầu lang thang.", "emotion": "intrigued", "pitch_semitones": 0, "speed": 0.96, "pause_after_ms": 140},
+    {"text": "Rồi bật ra một ý tưởng mới!", "emotion": "excited", "pitch_semitones": 3, "speed": 1.15, "pause_after_ms": 180},
+    {"text": "Hãy cho não một khoảng trống.", "emotion": "confident", "pitch_semitones": -1, "speed": 0.94, "pause_after_ms": 350}
+  ]
+}

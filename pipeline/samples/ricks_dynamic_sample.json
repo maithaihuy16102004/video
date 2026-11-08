@@ -1,0 +1,18 @@
+[
+  {
+    "scene_id": "scene_001",
+    "timestamp": {"start": 0.0, "end": 2.4},
+    "narrative": {"text": "Bạn nghĩ đây chỉ là một bức vẽ?", "voice_profile": "narrator_vi", "emotion_tagging": "[curious][whisper]"},
+    "charmotion": {"avatar_id": "assets/characters/host.png", "pipeline": "LivePortrait", "motion_intensity": 0.55, "driving_video_ref": "charmotion/assets/driving_clips/curious.mp4"},
+    "visual_composition": {"b_roll_source": "assets/broll/ink_reveal.mp4", "screen_effect": "dolly_in_parallax", "subtitle_style": "bold_center_keyword_yellow_pop"},
+    "audio_dynamics": {"bgm_track": "assets/bgm/tension_pulse.mp3", "ducking_level": 0.2, "sfx_triggers": ["f+0:paper_hit.wav", "f+34:whoosh_soft.wav"]}
+  },
+  {
+    "scene_id": "scene_002",
+    "timestamp": {"start": 2.4, "end": 5.2},
+    "narrative": {"text": "Nhìn kỹ đi — nhân vật đang phản ứng với từng chữ.", "voice_profile": "narrator_vi", "emotion_tagging": "[excited]"},
+    "charmotion": {"avatar_id": "assets/characters/host.png", "pipeline": "LivePortrait", "motion_intensity": 0.82, "driving_video_ref": "charmotion/assets/driving_clips/excited.mp4"},
+    "visual_composition": {"b_roll_source": "assets/broll/reaction_cut.mp4", "screen_effect": "whip_pan_then_shake_light", "subtitle_style": "bold_center_word_synced_scale"},
+    "audio_dynamics": {"bgm_track": "assets/bgm/tension_pulse.mp3", "ducking_level": 0.2, "sfx_triggers": ["f+3:whip.wav", "f+48:impact_low.wav"]}
+  }
+]

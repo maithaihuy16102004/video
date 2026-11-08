@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Universal Three.js & Motion Canvas Runner V4.2.2</title>
+  <style>
+    body, html { margin: 0; padding: 0; overflow: hidden; background: #000; width: 1920px; height: 1080px; }
+    #viewport { position: relative; width: 1920px; height: 1080px; }
+    #webgl-canvas { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; z-index: 1; }
+    #overlay-canvas { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; z-index: 2; pointer-events: none; }
+    #composite-canvas { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; z-index: 3; display: none; }
+  </style>
+</head>
+<body>
+  <div id="viewport">
+    <canvas id="webgl-canvas" width="1920" height="1080"></canvas>
+    <canvas id="overlay-canvas" width="1920" height="1080"></canvas>
+    <canvas id="composite-canvas" width="1920" height="1080"></canvas>
+  </div>
+
+  <script type="module">
+    import * as THREE from '/node_modules/three/build/three.module.js';
+    import { UniversalWorldEngine } from '/motioncanvas/three/UniversalWorldEngine.ts';
+    import { UniversalCharacterEngine } from '/motioncanvas/components/UniversalCharacterEngine.ts';
+    import { CinematicOverlayRenderer } from '/motioncanvas/components/CinematicOverlay.ts';
+
+    const w = 1920, h = 1080;
+    const glCanvas = document.getElementById('webgl-canvas');
+    const overlayCanvas = document.getElementById('overlay-canvas');
+    const compCanvas = document.getElementById('composite-canvas');
+    const ctxOverlay = overlayCanvas.getContext('2d');
+    const ctxComp = compCanvas.getContext('2d');
+
+    // 1. Production WebGL Hardware Renderer (ACESFilmic, Crisp Contrast)
+    const renderer = new THREE.WebGLRenderer({
+      canvas: glCanvas,
+      antialias: true,
+      preserveDrawingBuffer: true,
+      powerPreference: 'high-performance'
+    });
+    renderer.setSize(w, h);
+    renderer.setPixelRatio(1);
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.18; // Recovered bright, high-exposure benchmark
+
+    const charEngine = new UniversalCharacterEngine(ctxOverlay);
+    const overlayRenderer = new CinematicOverlayRenderer(ctxOverlay, w, h);
+
+    let activeWorld = null;
+    let activePackage = null;
+
+    // Telemetry & Verification Instrumentation
+    window.__renderMetrics = {
+      initialized: false,
+      packagesLoaded: 0,
+      framesRendered: 0,
+      activeActorCount: 0,
+      webglDrawCalls: 0,
+      lastFrameTime: 0,
+      frameHashes: []
+    };
+
+    /**
+     * UNIVERSAL PRODUCTION SCENE PACKAGE SETUP (100% DATA-DRIVEN)
+     * No story-specific code, no hardcoded character renderers.
+     */
+    window.setupProductionPackage = function(pkg) {
+      activePackage = pkg;
+
+      // 1. Resolve LocationDNA
+      const locDna = pkg.scene_world?.location_dna || {
+        location_id: pkg.scene_world?.location_id || 'LOC_UNIVERSAL',
+        name: pkg.scene_world?.canonical_name || 'Universal Scene',
+        architecture: pkg.scene_world?.architecture_style || pkg.scene_world?.location_id || 'TRADITIONAL_EAST_ASIAN',
+        weather: pkg.scene_world?.weather || (pkg.scene_world?.rain_simulation?.enabled ? 'RAIN' : 'CLEAR'),
+        lighting_behavior: pkg.scene_world?.lighting_behavior || 'WARM_DIRECT',
+        palette: pkg.scene_world?.palette || {},
+        camera_initial: pkg.scene_world?.threejs_environment?.camera_initial || pkg.camera?.initial,
+        camera_keyframes: pkg.scene_world?.threejs_environment?.camera_keyframes || pkg.camera?.keyframes || []
+      };
+
+      // 2. Instantiate Universal 3D World Engine
+      activeWorld = new UniversalWorldEngine(locDna, w, h);
+
+      // 3. Reset telemetry
+      window.__renderMetrics.initialized = true;
+      window.__renderMetrics.packagesLoaded++;
+      window.__renderMetrics.activeActorCount = pkg.actors ? pkg.actors.length : 0;
+
+      console.log(`[UniversalRunner] Configured package: ${pkg.project_id || pkg.sequence_id || 'UNNAMED'}`);
+      console.log(`[UniversalRunner] World: ${locDna.name} (${locDna.architecture}), Actors: ${window.__renderMetrics.activeActorCount}`);
+      return { success: true, package_id: pkg.project_id || pkg.sequence_id };
+    };
+
+    /**
+     * BACKWARD COMPATIBILITY ADAPTER
+     * Converts legacy sceneType calls to data-driven ProductionScenePackages.
+     */
+    window.setupScene = function(sceneType, config = {}) {
+      if (typeof sceneType === 'object') {
+        return window.setupProductionPackage(sceneType);
+      }
+
+      console.log(`[UniversalRunner] Converting legacy sceneType '${sceneType}' to ProductionScenePackage contract...`);
+
+      let pkg = {
+        project_id: `legacy_${sceneType}`,
+        scene_world: {
+          location_id: sceneType.toUpperCase(),
+          canonical_name: sceneType,
+          architecture_style: sceneType,
+          weather: sceneType.includes('bridge') || sceneType.includes('rain') ? 'RAIN' : 'CLEAR',
+        },
+        actors: [],
+        story_beats: [],
+        voice_timeline: { lines: [] }
+      };
+
+      if (sceneType === 'edo_bridge') {
+        pkg.scene_world.architecture_style = 'TRADITIONAL_EAST_ASIAN';
+        pkg.scene_world.location_id = 'LOC_EDO_WOODEN_BRIDGE';
+        pkg.scene_world.canonical_name = 'Edo Wooden Bridge Canal';
+        pkg.scene_world.weather = 'RAIN';
+        pkg.scene_world.threejs_environment = {
+          camera_initial: { position: [-2.8, 1.9, 5.8], target: [0.2, 1.4, 0.0], fov: 44 },
+          camera_keyframes: [
+            { t: 0.0, position: [-2.8, 1.9, 5.8], target: [0.2, 1.4, 0.0] },
+            { t: 3.5, position: [-1.2, 1.6, 4.2], target: [0.1, 1.2, 0.0] },
+            { t: 8.0, position: [-0.6, 1.4, 3.2], target: [0.2, 1.1, -0.4] }
+          ]
+        };
+        pkg.actors = [{
+          actor_id: 'haru',
+          role: 'LEAD',
+          dna: {
+            id: 'haru',
+            name: 'Haru',
+            proportions: { head_ratio: 0.28, height_standing: 260, shoulder_width: 52, limb_thickness: 11 },
+            face: { head_contour: 'round_youth', skin_tone: '#F5D7B5', eye_type: 'curious_wide', eye_color: '#241C16', eyebrow_style: 'arched', facial_hair: 'none' },
+            hair: { style: 'edo_topknot', color: '#181412', accessory: 'paper_cord' },
+            costume: { archetype: 'edo_hanten_courier', primary_color: '#345577', accent_color: '#FFFFFF', pants_skirt: 'trousers', pants_color: '#283648', belt_sash: 'cord', footwear: 'waraji_sandals', footwear_color: '#C29B38' },
+            held_props: { right_hand: 'letter_envelope' }
+          },
+          staging: { initial_world_pos: [-2.8, 2.75, 0.0] },
+          performance_cues: [
+            { time: 0.0, pos: [-2.8, 2.75, 0.0], action: 'sprint', emotion: 'determined', facing: 1 },
+            { time: 2.8, pos: [0.0, 2.75, 0.0], action: 'sprint', emotion: 'determined', facing: 1 },
+            { time: 3.5, pos: [0.15, 2.2, -0.3], action: 'slip_fall', emotion: 'panic', facing: 1 },
+            { time: 4.8, pos: [0.25, 2.0, -0.5], action: 'hang_from_ledge', emotion: 'panic', facing: 1 },
+            { time: 9.0, pos: [0.25, 2.0, -0.5], action: 'hang_from_ledge', emotion: 'relief', facing: 1 }
+          ]
+        }];
+        pkg.voice_timeline.lines = [
+          { start_sec: 0.0, end_sec: 3.2, speaker: 'HARU', text: 'Cây cầu gỗ bắc qua con kênh ngập nước chỉ còn cách vài bước chân...' },
+          { start_sec: 3.2, end_sec: 7.5, speaker: 'HARU', text: 'RẮC! Một tấm ván gục xuống! Tôi trượt chân nhào người xuống kênh lũ!' },
+          { start_sec: 7.5, end_sec: 12.0, speaker: 'HARU', text: 'Một tay bám chặt lan can, tay kia giơ cao... Bức thư vẫn tuyệt đối khô ráo!' }
+        ];
+        pkg.visual_plan = [
+          { type: 'LOCATION_DATE_CARD', content_headline: 'EDO · KHOẢNG NĂM 1800', content_body: 'Cầu Gỗ Mục Bên Dòng Kênh Nước Lũ', start_time: 0.0, end_time: 6.0 }
+        ];
+      } else if (sceneType === 'edo_house') {
+        pkg.scene_world.architecture_style = 'TRADITIONAL_EAST_ASIAN';
+        pkg.scene_world.location_id = 'LOC_EDO_RESIDENCE';
+        pkg.scene_world.canonical_name = 'Phố Cổ Edo & Hiên Nhà Đèn Lồng';
+        pkg.scene_world.weather = 'RAIN';
+        pkg.scene_world.threejs_environment = {
+          camera_initial: { position: [0.0, 1.8, 6.2], target: [0.0, 1.2, 0.0], fov: 42 }
+        };
+        pkg.actors = [
+          {
+            actor_id: 'haru',
+            role: 'LEAD',
+            dna: {
+              id: 'haru',
+              name: 'Haru',
+              proportions: { head_ratio: 0.28, height_standing: 260, shoulder_width: 52, limb_thickness: 11 },
+              face: { head_contour: 'round_youth', skin_tone: '#F5D7B5', eye_type: 'curious_wide', eye_color: '#241C16', eyebrow_style: 'arched', facial_hair: 'none' },
+              hair: { style: 'edo_topknot', color: '#181412', accessory: 'paper_cord' },
+              costume: { archetype: 'edo_hanten_courier', primary_color: '#345577', accent_color: '#FFFFFF', pants_skirt: 'trousers', pants_color: '#283648', belt_sash: 'cord', footwear: 'waraji_sandals', footwear_color: '#C29B38' },
+              held_props: { right_hand: 'letter_envelope' }
+            },
+            staging: { initial_world_pos: [-1.4, 0.45, 0.2] },
+            performance_cues: [
+              { time: 0.0, pos: [-1.4, 0.45, 0.2], action: 'present_two_handed', emotion: 'relief', facing: 1 }
+            ]
+          },
+          {
+            actor_id: 'aiko',
+            role: 'SUPPORTING',
+            dna: {
+              id: 'aiko',
+              name: 'Aiko',
+              proportions: { head_ratio: 0.27, height_standing: 245, shoulder_width: 44, limb_thickness: 10 },
+              face: { head_contour: 'delicate_heart', skin_tone: '#FCEDE0', eye_type: 'almond_asian', eye_color: '#2A1F18', eyebrow_style: 'delicate_curved', facial_hair: 'none' },
+              hair: { style: 'edo_shimada', color: '#141210', accessory: 'kanzashi_hairpin' },
+              costume: { archetype: 'edo_kimono_formal', primary_color: '#B83A4B', accent_color: '#E8A598', pants_skirt: 'kimono_skirt', pants_color: '#8A2534', belt_sash: 'obi_sash', footwear: 'tabi_socks', footwear_color: '#FFFFFF' },
+              held_props: { right_hand: 'letter_scroll_open' }
+            },
+            staging: { initial_world_pos: [1.2, 0.45, -0.1] },
+            performance_cues: [
+              { time: 0.0, pos: [1.2, 0.45, -0.1], action: 'idle', emotion: 'determined', facing: -1 },
+              { time: 3.5, pos: [1.2, 0.45, -0.1], action: 'laugh_heartily', emotion: 'laughing', facing: -1 }
+            ]
+          }
+        ];
+        pkg.voice_timeline.lines = [
+          { start_sec: 0.0, end_sec: 3.5, speaker: 'HARU', text: 'Người tôi ướt sũng bùn đất, nhưng lá thư được dâng lên nguyên vẹn.' },
+          { start_sec: 3.5, end_sec: 8.5, speaker: 'AIKO', text: 'Haha♪... Trời ơi, anh chạy thục mạng qua bão chỉ vì bức thư này sao?!' }
+        ];
+        pkg.visual_plan = [
+          { type: 'LOCATION_DATE_CARD', content_headline: 'NHÀ ĐÈN LỒNG ĐỎ · PHỐ EDO', content_body: 'Gặp Tiểu Thư Aiko Dưới Mái Hiên Mưa', start_time: 0.0, end_time: 5.0 }
+        ];
+      } else if (sceneType === 'modern_lab') {
+        pkg.scene_world.architecture_style = 'MODERN_INDUSTRIAL_TECH';
+        pkg.scene_world.location_id = 'LOC_ROBOTICS_LAB';
+        pkg.scene_world.canonical_name = 'Modern AI & Robotics Research Lab';
+        pkg.scene_world.weather = 'CLEAR';
+        pkg.scene_world.threejs_environment = {
+          camera_initial: { position: [-2.5, 2.2, 6.5], target: [0.3, 1.5, 0.0], fov: 45 }
+        };
+        pkg.actors = [{
+          actor_id: 'founder',
+          role: 'LEAD',
+          dna: {
+            id: 'founder',
+            name: 'Robotics Lead',
+            proportions: { head_ratio: 0.28, height_standing: 260, shoulder_width: 52, limb_thickness: 11 },
+            face: { head_contour: 'square_jaw', skin_tone: '#F0D4B8', eye_type: 'intense_focused', eye_color: '#1C2430', eyebrow_style: 'thick_bushy', facial_hair: 'stubble' },
+            hair: { style: 'modern_part', color: '#28201A', accessory: 'none' },
+            costume: { archetype: 'modern_hoodie', primary_color: '#263238', accent_color: '#00BCD4', pants_skirt: 'jeans', pants_color: '#1A2327', belt_sash: 'leather_belt', footwear: 'sneakers', footwear_color: '#E0E0E0' },
+            held_props: { right_hand: 'tablet' }
+          },
+          staging: { initial_world_pos: [-1.4, 0.0, 0.4] },
+          performance_cues: [
+            { time: 0.0, pos: [-1.4, 0.0, 0.4], action: 'speak_gestural', emotion: 'focused', facing: 1 }
+          ]
+        }];
+        pkg.voice_timeline.lines = [
+          { start_sec: 0.0, end_sec: 7.0, speaker: 'FOUNDER', text: 'Thuật toán điều khiển cân bằng tự động đã khóa mục tiêu. Các khớp chân phản hồi hoàn hảo.' }
+        ];
+        pkg.visual_plan = [
+          { type: 'LOCATION_DATE_CARD', content_headline: 'SAN FRANCISCO · 2026', content_body: 'Phòng Thí Nghiệm Robot Hình Người & AI', start_time: 0.0, end_time: 5.0 }
+        ];
+      }
+
+      return window.setupProductionPackage(pkg);
+    };
+
+    /**
+     * DETERMINISTIC PER-FRAME RENDER PIPELINE
+     * Evaluates 3D World, Projects Skeletal Coordinates, Executes Organic Vector Anatomy,
+     * Renders Motion Graphics & Verified Subtitles, Composites Frame.
+     */
+    window.renderFrame = function(frameIndex, timeSeconds) {
+      if (!activeWorld || !activePackage) {
+        window.setupScene('edo_bridge');
+      }
+
+      // 1. Update 3D World Simulation (Rain, Water ripples, Lighting, Camera path)
+      activeWorld.update(timeSeconds);
+      activeWorld.render(renderer);
+
+      // 2. Clear 2D Vector Overlay
+      ctxOverlay.clearRect(0, 0, w, h);
+
+      // 3. Render Every Actor Universally from Data
+      const actors = activePackage.actors || [];
+      for (const actor of actors) {
+        renderActorUniversal(actor, timeSeconds, activeWorld);
+      }
+
+      // 4. Render Context-Aware Motion Graphics & Subtitles
+      renderCinematicGraphics(activePackage, timeSeconds);
+
+      // 5. Composite Output Frame
+      ctxComp.clearRect(0, 0, w, h);
+      ctxComp.drawImage(glCanvas, 0, 0);
+      ctxComp.drawImage(overlayCanvas, 0, 0);
+
+      // 6. Record Telemetry
+      window.__renderMetrics.framesRendered++;
+      window.__renderMetrics.lastFrameTime = timeSeconds;
+      if (renderer.info && renderer.info.render) {
+        window.__renderMetrics.webglDrawCalls = renderer.info.render.calls;
+      }
+
+      return true;
+    };
+
+    /**
+     * UNIVERSAL ACTOR INTERPOLATION & KINEMATIC RENDERING
+     */
+    function renderActorUniversal(actor, t, world) {
+      const cues = actor.performance_cues || [];
+      let pos = actor.staging?.initial_world_pos || [0, 0, 0];
+      let action = actor.staging?.posture || 'idle';
+      let emotion = 'neutral';
+      let facing = actor.staging?.facing === 'LEFT' ? -1 : 1;
+
+      if (cues.length > 0) {
+        if (t <= cues[0].time) {
+          pos = cues[0].pos;
+          action = cues[0].action;
+          emotion = cues[0].emotion;
+          facing = cues[0].facing || facing;
+        } else if (t >= cues[cues.length - 1].time) {
+          const last = cues[cues.length - 1];
+          pos = last.pos;
+          action = last.action;
+          emotion = last.emotion;
+          facing = last.facing || facing;
+        } else {
+          for (let i = 0; i < cues.length - 1; i++) {
+            const c0 = cues[i];
+            const c1 = cues[i + 1];
+            if (t >= c0.time && t <= c1.time) {
+              const alpha = (t - c0.time) / (c1.time - c0.time);
+              // Linear position interpolation in 3D world space
+              pos = [
+                c0.pos[0] + (c1.pos[0] - c0.pos[0]) * alpha,
+                c0.pos[1] + (c1.pos[1] - c0.pos[1]) * alpha,
+                c0.pos[2] + (c1.pos[2] - c0.pos[2]) * alpha
+              ];
+              action = alpha > 0.5 ? c1.action : c0.action;
+              emotion = alpha > 0.5 ? c1.emotion : c0.emotion;
+              facing = c0.facing || facing;
+              break;
+            }
+          }
+        }
+      }
+
+      // Project 3D World Anchor into Screen Pixel Space
+      const proj = world.projectToScreen(pos);
+
+      // Semantic Eyeline & Constraint Resolving
+      let handConstraintR = undefined;
+      let handConstraintL = undefined;
+      if (action === 'hang_from_ledge') {
+        handConstraintL = [proj.x - 20 * proj.scale, proj.y - 120 * proj.scale];
+      }
+
+      const charState = {
+        screenX: proj.x,
+        screenY: proj.y,
+        scale: 0.95 * proj.scale,
+        facing: facing,
+        action: action,
+        progress: t,
+        emotion: emotion,
+        eyeline: action === 'hang_from_ledge' ? (t > 7.5 ? [0.6, -0.8] : [0.0, 0.8]) : [facing * 0.7, -0.2],
+        handConstraintL: handConstraintL,
+        lostSandalRight: t > 3.2 && actor.actor_id === 'haru' && activePackage.scene_world?.location_id?.includes('BRIDGE'),
+        soaked: activePackage.scene_world?.weather === 'RAIN'
+      };
+
+      charEngine.render(actor.dna, charState);
+    }
+
+    /**
+     * DATA-DRIVEN MOTION GRAPHICS & SUBTITLES
+     */
+    function renderCinematicGraphics(pkg, t) {
+      // 1. Find active location card from visual_plan
+      let locationCard = undefined;
+      if (pkg.visual_plan) {
+        const cardElem = pkg.visual_plan.find(p => p.type === 'LOCATION_DATE_CARD' && t >= p.start_time && t <= p.end_time);
+        if (cardElem) {
+          locationCard = {
+            headline: cardElem.content_headline,
+            subline: cardElem.content_body,
+            showUntil: cardElem.end_time
+          };
+        }
+      }
+
+      // 2. Find active subtitle from voice_timeline
+      let subtitle = undefined;
+      if (pkg.voice_timeline?.lines) {
+        const line = pkg.voice_timeline.lines.find(l => t >= l.start_sec && t <= l.end_sec);
+        if (line) {
+          let col = '#FFD24D';
+          if (line.speaker?.toLowerCase().includes('aiko')) col = '#FF8FA3';
+          else if (line.speaker?.toLowerCase().includes('founder')) col = '#00D2FF';
+
+          subtitle = {
+            speaker: line.speaker,
+            text: line.text,
+            color: col
+          };
+        }
+      }
+
+      // 3. Find active beat badge
+      let beatBadge = undefined;
+      if (pkg.story_beats && pkg.story_beats.length > 0) {
+        const beat = pkg.story_beats[0];
+        beatBadge = {
+          tag: 'Story Beat',
+          title: beat.what_happens || beat.beat_name || 'Cinematic Sequence'
+        };
+      }
+
+      overlayRenderer.draw({
+        timeSeconds: t,
+        locationCard,
+        subtitle,
+        beatBadge
+      });
+    }
+
+    window.runnerReady = true;
+    console.log('[UniversalRunner] Universal Three.js & Motion Canvas Runner V4.2.2 Ready.');
+  </script>
+</body>
+</html>

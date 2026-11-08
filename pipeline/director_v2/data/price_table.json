@@ -1,0 +1,31 @@
+{
+  "_doc": "Price table in USD per generation. Flash Lite uses published standard price ($0.0336 per 1K image). Flash and Pro are marked unverified until official rates are confirmed.",
+  "images": {
+    "gemini-3.1-flash-lite-image": {
+      "1K": 0.0336,
+      "verified": true,
+      "note": "Standard published tier ~$0.0336 per 1K image"
+    },
+    "gemini-3.1-flash-image": {
+      "1K": 0.0672,
+      "verified": false,
+      "note": "Estimate based on high-throughput flash tier"
+    },
+    "gemini-3-pro-image": {
+      "1K": 0.1344,
+      "verified": false,
+      "note": "Estimate for pro quality tier"
+    }
+  },
+  "text": {
+    "gemini-3.5-flash-lite": {
+      "input_per_1m_tokens": 0.075,
+      "output_per_1m_tokens": 0.30
+    }
+  },
+  "vision": {
+    "gemini-3.5-flash-lite": {
+      "per_image": 0.002
+    }
+  }
+}
