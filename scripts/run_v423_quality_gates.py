@@ -113,7 +113,7 @@ def main():
         json.dump({
             "timestamp": "2026-11-08T18:15:00Z",
             "suite_verdict": "PASSED" if all_passed else "FAILED",
-            "frozen_commit": "36f92f0ea02b65f749d24936b8125560a23f8b58",
+            "frozen_commit": "ff9f0a82746c59b66ba37b122f5c22501a3cf1e3",
             "checks": results
         }, f, indent=2)
 
