@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 OUT_DIR = ROOT / "output" / "Universal_Cinematic_Pipeline_V421_Renderer_Recovery"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
-FROZEN_COMMIT = "ff9f0a82746c59b66ba37b122f5c22501a3cf1e3"
+FROZEN_COMMIT = "243d5666f22d8a611a922839358a0a8cd00542e3"
 
 def get_font(size: int, bold: bool = False) -> ImageFont.ImageFont:
     candidates = [
