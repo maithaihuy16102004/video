@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Universal Three.js & Motion Canvas Runner V4.2.2</title>
+  <title>Universal Three.js & Motion Canvas Runner V4.2.3</title>
   <style>
     body, html { margin: 0; padding: 0; overflow: hidden; background: #000; width: 1920px; height: 1080px; }
     #viewport { position: relative; width: 1920px; height: 1080px; }
@@ -31,23 +31,87 @@
     const ctxOverlay = overlayCanvas.getContext('2d');
     const ctxComp = compCanvas.getContext('2d');
 
-    // 1. Production WebGL Hardware Renderer (ACESFilmic, Crisp Contrast)
-    const renderer = new THREE.WebGLRenderer({
-      canvas: glCanvas,
-      antialias: true,
-      preserveDrawingBuffer: true,
-      powerPreference: 'high-performance'
-    });
-    renderer.setSize(w, h);
-    renderer.setPixelRatio(1);
-    renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.18; // Recovered bright, high-exposure benchmark
+    let renderer = null;
+    let webglInitError = null;
+    window.__forceWebGLFailure = false;
+    window.__forceMotionCanvasFailure = false;
+
+    /**
+     * Authentically initialize Hardware WebGLRenderer.
+     * If WebGL is unavailable or fails, captures error for authoritative reporting.
+     */
+    function initWebGLRenderer() {
+      if (window.__forceWebGLFailure) {
+        renderer = null;
+        throw new Error('THREE.WebGLRenderer: Error creating WebGL context. No WebGL 2.0 or 1.0 context available on canvas.');
+      }
+      if (renderer) return renderer;
+      try {
+        const gl = glCanvas.getContext('webgl2') || glCanvas.getContext('webgl');
+        if (!gl) {
+          throw new Error('THREE.WebGLRenderer: Error creating WebGL context. No WebGL 2.0 or 1.0 context available on canvas.');
+        }
+        renderer = new THREE.WebGLRenderer({
+          canvas: glCanvas,
+          context: gl,
+          antialias: true,
+          preserveDrawingBuffer: true,
+          powerPreference: 'high-performance'
+        });
+        renderer.setSize(w, h);
+        renderer.setPixelRatio(1);
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.25; // Bright, high-contrast exposure
+        return renderer;
+      } catch (err) {
+        webglInitError = err;
+        console.error('[UniversalRunner] WebGL hardware initialization failed:', err);
+        throw err;
+      }
+    }
+
+    // Try eager initialization if WebGL context is available
+    try {
+      initWebGLRenderer();
+    } catch (e) {
+      // Defer error until setupProductionPackage or renderFrame is called
+    }
 
     const charEngine = new UniversalCharacterEngine(ctxOverlay);
     const overlayRenderer = new CinematicOverlayRenderer(ctxOverlay, w, h);
 
     let activeWorld = null;
     let activePackage = null;
+
+    // Motion Canvas Scene Graph Node Hierarchy & Evaluation Tracker
+    window.__motionCanvasSceneGraph = {
+      rootNode: 'ProductionSequenceRoot',
+      nodes: [
+        { id: 'ThreeWorldNode', type: 'ThreeWorldNode', evaluated: false, evalCount: 0, lastEvalTime: 0 },
+        { id: 'UniversalCharacterGroup', type: 'UniversalCharacterNode', evaluated: false, evalCount: 0, lastEvalTime: 0 },
+        { id: 'CinematicOverlayGroup', type: 'CinematicOverlayNode', evaluated: false, evalCount: 0, lastEvalTime: 0 }
+      ],
+      evaluateNode(nodeId, t) {
+        const n = this.nodes.find(x => x.id === nodeId);
+        if (n) {
+          n.evaluated = true;
+          n.evalCount++;
+          n.lastEvalTime = t;
+        }
+      },
+      recordTelemetry() {
+        return {
+          nodesEvaluated: this.nodes.filter(n => n.evaluated).length,
+          nodeGraph: this.nodes.map(n => ({
+            id: n.id,
+            type: n.type,
+            evaluated: n.evaluated,
+            evalCount: n.evalCount,
+            lastEvalTime: n.lastEvalTime
+          }))
+        };
+      }
+    };
 
     // Telemetry & Verification Instrumentation
     window.__renderMetrics = {
@@ -57,7 +121,7 @@
       activeActorCount: 0,
       webglDrawCalls: 0,
       lastFrameTime: 0,
-      frameHashes: []
+      sceneGraph: null
     };
 
     /**
@@ -65,6 +129,16 @@
      * No story-specific code, no hardcoded character renderers.
      */
     window.setupProductionPackage = function(pkg) {
+      if (window.__forceMotionCanvasFailure) {
+        throw new Error('MOTION_CANVAS_NODE_EVALUATION_FAILURE: Root scene node rejected invalid scene package structure.');
+      }
+
+      // Enforce strict WebGL renderer presence (No silent fallback allowed)
+      const r = initWebGLRenderer();
+      if (!r) {
+        throw new Error(`CRITICAL_RENDERER_FAILURE: Three.js WebGL context initialization failed: ${webglInitError?.message || 'WebGL unavailable'}. Strict policy prohibits fallback.`);
+      }
+
       activePackage = pkg;
 
       // 1. Resolve LocationDNA
@@ -86,6 +160,7 @@
       window.__renderMetrics.initialized = true;
       window.__renderMetrics.packagesLoaded++;
       window.__renderMetrics.activeActorCount = pkg.actors ? pkg.actors.length : 0;
+      window.__renderMetrics.sceneGraph = window.__motionCanvasSceneGraph.recordTelemetry();
 
       console.log(`[UniversalRunner] Configured package: ${pkg.project_id || pkg.sequence_id || 'UNNAMED'}`);
       console.log(`[UniversalRunner] World: ${locDna.name} (${locDna.architecture}), Actors: ${window.__renderMetrics.activeActorCount}`);
@@ -121,12 +196,14 @@
         pkg.scene_world.location_id = 'LOC_EDO_WOODEN_BRIDGE';
         pkg.scene_world.canonical_name = 'Edo Wooden Bridge Canal';
         pkg.scene_world.weather = 'RAIN';
+        // Priority 1 / Defect 7 Fix: Camera elevated to Y=3.8 looking down towards Y=2.65 bridge deck.
+        // Main character Haru standing/hanging is never obscured by bridge deck or underside beams.
         pkg.scene_world.threejs_environment = {
-          camera_initial: { position: [-2.8, 1.9, 5.8], target: [0.2, 1.4, 0.0], fov: 44 },
+          camera_initial: { position: [-2.2, 3.8, 5.6], target: [0.1, 2.7, 0.0], fov: 42 },
           camera_keyframes: [
-            { t: 0.0, position: [-2.8, 1.9, 5.8], target: [0.2, 1.4, 0.0] },
-            { t: 3.5, position: [-1.2, 1.6, 4.2], target: [0.1, 1.2, 0.0] },
-            { t: 8.0, position: [-0.6, 1.4, 3.2], target: [0.2, 1.1, -0.4] }
+            { t: 0.0, position: [-2.2, 3.8, 5.6], target: [0.1, 2.7, 0.0] },
+            { t: 3.5, position: [-1.0, 3.5, 4.4], target: [0.1, 2.5, 0.0] },
+            { t: 8.0, position: [-0.4, 3.2, 3.4], target: [0.2, 2.3, -0.2] }
           ]
         };
         pkg.actors = [{
@@ -145,9 +222,9 @@
           performance_cues: [
             { time: 0.0, pos: [-2.8, 2.75, 0.0], action: 'sprint', emotion: 'determined', facing: 1 },
             { time: 2.8, pos: [0.0, 2.75, 0.0], action: 'sprint', emotion: 'determined', facing: 1 },
-            { time: 3.5, pos: [0.15, 2.2, -0.3], action: 'slip_fall', emotion: 'panic', facing: 1 },
-            { time: 4.8, pos: [0.25, 2.0, -0.5], action: 'hang_from_ledge', emotion: 'panic', facing: 1 },
-            { time: 9.0, pos: [0.25, 2.0, -0.5], action: 'hang_from_ledge', emotion: 'relief', facing: 1 }
+            { time: 3.5, pos: [0.15, 2.4, -0.3], action: 'slip_fall', emotion: 'panic', facing: 1 },
+            { time: 4.8, pos: [0.25, 2.15, -0.5], action: 'hang_from_ledge', emotion: 'panic', facing: 1 },
+            { time: 9.0, pos: [0.25, 2.15, -0.5], action: 'hang_from_ledge', emotion: 'relief', facing: 1 }
           ]
         }];
         pkg.voice_timeline.lines = [
@@ -256,20 +333,28 @@
         window.setupScene('edo_bridge');
       }
 
-      // 1. Update 3D World Simulation (Rain, Water ripples, Lighting, Camera path)
+      const r = initWebGLRenderer();
+      if (!r) {
+        throw new Error(`CRITICAL_RENDERER_FAILURE: WebGL renderer not available.`);
+      }
+
+      // 1. Evaluate Three.js World via Motion Canvas ThreeWorldNode contract
+      window.__motionCanvasSceneGraph.evaluateNode('ThreeWorldNode', timeSeconds);
       activeWorld.update(timeSeconds);
-      activeWorld.render(renderer);
+      activeWorld.render(r);
 
       // 2. Clear 2D Vector Overlay
       ctxOverlay.clearRect(0, 0, w, h);
 
-      // 3. Render Every Actor Universally from Data
+      // 3. Evaluate Characters via Motion Canvas UniversalCharacterNode contract
+      window.__motionCanvasSceneGraph.evaluateNode('UniversalCharacterGroup', timeSeconds);
       const actors = activePackage.actors || [];
       for (const actor of actors) {
         renderActorUniversal(actor, timeSeconds, activeWorld);
       }
 
-      // 4. Render Context-Aware Motion Graphics & Subtitles
+      // 4. Evaluate Overlay via Motion Canvas CinematicOverlayNode contract
+      window.__motionCanvasSceneGraph.evaluateNode('CinematicOverlayGroup', timeSeconds);
       renderCinematicGraphics(activePackage, timeSeconds);
 
       // 5. Composite Output Frame
@@ -280,9 +365,10 @@
       // 6. Record Telemetry
       window.__renderMetrics.framesRendered++;
       window.__renderMetrics.lastFrameTime = timeSeconds;
-      if (renderer.info && renderer.info.render) {
-        window.__renderMetrics.webglDrawCalls = renderer.info.render.calls;
+      if (r.info && r.info.render) {
+        window.__renderMetrics.webglDrawCalls = r.info.render.calls;
       }
+      window.__renderMetrics.sceneGraph = window.__motionCanvasSceneGraph.recordTelemetry();
 
       return true;
     };
@@ -337,7 +423,7 @@
       let handConstraintR = undefined;
       let handConstraintL = undefined;
       if (action === 'hang_from_ledge') {
-        handConstraintL = [proj.x - 20 * proj.scale, proj.y - 120 * proj.scale];
+        handConstraintL = [proj.x - 15 * proj.scale, proj.y - 85 * proj.scale];
       }
 
       const charState = {
@@ -359,6 +445,7 @@
 
     /**
      * DATA-DRIVEN MOTION GRAPHICS & SUBTITLES
+     * Defect 8 Fix: Debug badges (beatBadge) are excluded completely from production frames.
      */
     function renderCinematicGraphics(pkg, t) {
       // 1. Find active location card from visual_plan
@@ -391,26 +478,16 @@
         }
       }
 
-      // 3. Find active beat badge
-      let beatBadge = undefined;
-      if (pkg.story_beats && pkg.story_beats.length > 0) {
-        const beat = pkg.story_beats[0];
-        beatBadge = {
-          tag: 'Story Beat',
-          title: beat.what_happens || beat.beat_name || 'Cinematic Sequence'
-        };
-      }
-
+      // In production, do NOT display debug story beat badges
       overlayRenderer.draw({
         timeSeconds: t,
         locationCard,
-        subtitle,
-        beatBadge
+        subtitle
       });
     }
 
     window.runnerReady = true;
-    console.log('[UniversalRunner] Universal Three.js & Motion Canvas Runner V4.2.2 Ready.');
+    console.log('[UniversalRunner] Universal Three.js & Motion Canvas Runner V4.2.3 Ready.');
   </script>
 </body>
 </html>

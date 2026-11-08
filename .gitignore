@@ -1,0 +1,29 @@
+# --- Secrets: never commit ---
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+secrets/
+**/secrets/
+credentials*.json
+service-account*.json
+
+# --- Submodules & Vendors ---
+vie-agentic-skills/
+vendor/
+.integration/
+
+output/
+**/__pycache__/
+*.pyc
+.pytest_cache/
+node_modules/
+remotion-engine/_draft_cache/
+remotion-engine/out/
+remotion-engine/node_modules/.cache/
+output/studio-jobs/**/*.mp4
+output/studio-jobs/**/*.webm
+output/studio-jobs/**/*.mov
+output/studio-jobs/**/*.wav
+output/studio-voice-cache/
