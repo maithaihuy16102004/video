@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <title>Topview 3D Studio & Camera Tracking Director</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      background: #080810;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      color: #fff;
+    }
+    #canvas-container {
+      width: 100vw;
+      height: 100vh;
+      position: absolute;
+      top: 0;
+      left: 0;
+    }
+    #ui-panel {
+      position: absolute;
+      top: 24px;
+      left: 24px;
+      background: rgba(15, 20, 35, 0.85);
+      backdrop-filter: blur(20px);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 16px;
+      padding: 20px;
+      width: 320px;
+      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
+      z-index: 100;
+    }
+    h2 {
+      margin: 0 0 12px 0;
+      font-size: 18px;
+      color: #f59e0b;
+      letter-spacing: 0.5px;
+    }
+    .btn {
+      display: block;
+      width: 100%;
+      background: #2563eb;
+      color: #fff;
+      border: none;
+      padding: 10px 14px;
+      border-radius: 8px;
+      font-weight: 600;
+      cursor: pointer;
+      margin-bottom: 8px;
+      transition: background 0.2s;
+    }
+    .btn:hover { background: #1d4ed8; }
+    .btn-cam {
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+    }
+    .btn-cam:hover { background: rgba(245, 158, 11, 0.2); border-color: #f59e0b; }
+    .tag {
+      display: inline-block;
+      font-size: 11px;
+      padding: 4px 8px;
+      background: rgba(16, 185, 129, 0.2);
+      border: 1px solid #10b981;
+      color: #10b981;
+      border-radius: 12px;
+      margin-bottom: 12px;
+    }
+  </style>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+</head>
+<body>
+  <div id="canvas-container"></div>
+
+  <div id="ui-panel">
+    <div class="tag">TOPVIEW 3D STUDIO v3.0</div>
+    <h2>ĐẠO DIỄN BỐI CẢNH 3D</h2>
+    <p style="font-size: 13px; color: #94a3b8; margin-bottom: 16px;">
+      Kiểm soát góc máy Camera & Bố cục phân cảnh Storyboard cho Video Production
+    </p>
+
+    <div style="font-size: 12px; font-weight: 700; color: #cbd5e1; margin-bottom: 8px;">GÓC MÁY CAMERA (PRESETS):</div>
+    <button class="btn btn-cam" onclick="setCamera('topview')">🎥 Top-View (Góc nhìn từ trên cao)</button>
+    <button class="btn btn-cam" onclick="setCamera('over_shoulder')">🎥 Over-the-Shoulder (Qua vai nhân vật)</button>
+    <button class="btn btn-cam" onclick="setCamera('cinematic_low')">🎥 Low-Angle (Góc thấp điện ảnh)</button>
+    <button class="btn btn-cam" onclick="setCamera('tracking')">🎥 Orbit Tracking (Quay vòng điện ảnh)</button>
+
+    <div style="margin-top: 16px;">
+      <button class="btn" onclick="captureScene()">📸 Chụp Frame Storyboard (Render 4K)</button>
+    </div>
+  </div>
+
+  <script>
+    let scene, camera, renderer, controls;
+    let character, studioRoom;
+    let isTracking = false;
+
+    function init() {
+      const container = document.getElementById('canvas-container');
+
+      // 1. Scene & Camera
+      scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x0a0c16);
+      scene.fog = new THREE.FogExp2(0x0a0c16, 0.035);
+
+      camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
+      camera.position.set(0, 3, 7);
+
+      // 2. Renderer
+      renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      container.appendChild(renderer.domElement);
+
+      // 3. OrbitControls
+      controls = new THREE.OrbitControls(camera, renderer.domElement);
+      controls.enableDamping = true;
+      controls.dampingFactor = 0.05;
+
+      // 4. Lighting Setup (Studio 3 điểm sáng chuyên nghiệp)
+      const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+      scene.add(ambientLight);
+
+      // Key Light (Ánh sáng chính)
+      const keyLight = new THREE.DirectionalLight(0xffeedd, 1.2);
+      keyLight.position.set(5, 8, 4);
+      keyLight.castShadow = true;
+      keyLight.shadow.mapSize.width = 2048;
+      keyLight.shadow.mapSize.height = 2048;
+      scene.add(keyLight);
+
+      // Fill Light (Ánh sáng phụ)
+      const fillLight = new THREE.PointLight(0x38bdf8, 0.8, 20);
+      fillLight.position.set(-5, 4, -2);
+      scene.add(fillLight);
+
+      // Rim Light (Ánh sáng ven tóc nhân vật)
+      const rimLight = new THREE.SpotLight(0xf59e0b, 2.5);
+      rimLight.position.set(0, 5, -4);
+      rimLight.target.position.set(0, 1, 0);
+      scene.add(rimLight);
+      scene.add(rimLight.target);
+
+      // 5. Build 3D Studio & Character
+      buildStudio();
+      buildCharacter();
+
+      window.addEventListener('resize', onWindowResize);
+      animate();
+    }
+
+    function buildStudio() {
+      // Sàn lưới Studio
+      const grid = new THREE.GridHelper(20, 20, 0xf59e0b, 0x1e293b);
+      grid.position.y = -0.01;
+      scene.add(grid);
+
+      // Sàn phản chiếu (Reflective Floor)
+      const floorGeo = new THREE.PlaneGeometry(30, 30);
+      const floorMat = new THREE.MeshStandardMaterial({
+        color: 0x070913,
+        roughness: 0.2,
+        metalness: 0.5
+      });
+      const floor = new THREE.Mesh(floorGeo, floorMat);
+      floor.rotation.x = -Math.PI / 2;
+      floor.receiveShadow = true;
+      scene.add(floor);
+
+      // Vách bối cảnh phòng
+      const wallMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.8 });
+      const backWall = new THREE.Mesh(new THREE.BoxGeometry(20, 8, 0.5), wallMat);
+      backWall.position.set(0, 4, -6);
+      backWall.receiveShadow = true;
+      scene.add(backWall);
+    }
+
+    function buildCharacter() {
+      character = new THREE.Group();
+
+      // Thân nhân vật
+      const bodyGeo = new THREE.CylinderGeometry(0.3, 0.4, 1.2, 32);
+      const bodyMat = new THREE.MeshStandardMaterial({ color: 0x2563eb, roughness: 0.4 });
+      const body = new THREE.Mesh(bodyGeo, bodyMat);
+      body.position.y = 1.0;
+      body.castShadow = true;
+      character.add(body);
+
+      // Đầu nhân vật
+      const headGeo = new THREE.SphereGeometry(0.32, 32, 32);
+      const headMat = new THREE.MeshStandardMaterial({ color: 0xffdbac, roughness: 0.5 });
+      const head = new THREE.Mesh(headGeo, headMat);
+      head.position.y = 1.9;
+      head.castShadow = true;
+      character.add(head);
+
+      scene.add(character);
+    }
+
+    function setCamera(mode) {
+      isTracking = false;
+      if (mode === 'topview') {
+        gsapAnimateCam(0, 8, 0.1, 0, 1, 0);
+      } else if (mode === 'over_shoulder') {
+        gsapAnimateCam(0.8, 1.9, -1.2, 0, 1.5, 3);
+      } else if (mode === 'cinematic_low') {
+        gsapAnimateCam(-2.5, 0.4, 3, 0, 1.5, 0);
+      } else if (mode === 'tracking') {
+        isTracking = true;
+      }
+    }
+
+    function gsapAnimateCam(px, py, pz, tx, ty, tz) {
+      camera.position.set(px, py, pz);
+      controls.target.set(tx, ty, tz);
+      controls.update();
+    }
+
+    function captureScene() {
+      renderer.render(scene, camera);
+      const dataURL = renderer.domElement.toDataURL('image/png');
+      const link = document.createElement('a');
+      link.download = '3d_storyboard_frame.png';
+      link.href = dataURL;
+      link.click();
+    }
+
+    function onWindowResize() {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+
+    let angle = 0;
+    function animate() {
+      requestAnimationFrame(animate);
+
+      if (isTracking) {
+        angle += 0.015;
+        camera.position.x = Math.sin(angle) * 5;
+        camera.position.z = Math.cos(angle) * 5;
+        camera.position.y = 2.5;
+        controls.target.set(0, 1.2, 0);
+      }
+
+      controls.update();
+      renderer.render(scene, camera);
+    }
+
+    window.onload = init;
+  </script>
+</body>
+</html>

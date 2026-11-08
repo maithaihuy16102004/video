@@ -254,30 +254,64 @@ TRẢ VỀ DUY NHẤT MỘT JSON OBJECT THEO CẤU TRÚC:
         """Universal, data-driven fallback that extracts structured production packages without per-story branching."""
         lines = [line.strip() for line in script_text.splitlines() if line.strip()]
 
-        # 1. Clean dialogue extraction eliminating all meta tags
+        # 1. Clean dialogue extraction eliminating all meta tags with multi-line buffering
         extracted_dialogue: List[Tuple[str, str]] = []
         raw_speakers: List[str] = []
 
+        current_speaker: Optional[str] = None
+        current_buffer: List[str] = []
+
+        def flush():
+            nonlocal current_speaker, current_buffer
+            if current_speaker and current_buffer:
+                full_txt = " ".join(current_buffer).strip()
+                if len(full_txt) > 0:
+                    extracted_dialogue.append((current_speaker, full_txt))
+                    if current_speaker not in raw_speakers:
+                        raw_speakers.append(current_speaker)
+            current_buffer = []
+
+        PROSE_VERBS = {"là", "rất", "có", "được", "làm", "nhìn", "thấy", "biết", "nghĩ", "bảo"}
+
         for line in lines:
-            # Strip markdown wrapping
-            clean_line = line.strip("*#_~`“”\"").strip()
-            # Match speaker patterns like "NHÂN VẬT: ..." or "BÁC SĨ: ..."
-            m = re.match(r"^([^\n\r:]{2,30}):\s*(.*)$", clean_line)
+            clean_line = line.strip("*#_~`“”\"'").strip()
+            if not clean_line or clean_line.startswith("---") or clean_line.startswith("=="):
+                continue
+
+            # Check if line defines a speaker: "HARU (kể chuyện):" or "ÔNG CHỦ:"
+            m = re.match(r"^([^\n\r:]{2,32}):\s*(.*)$", clean_line)
             if m:
                 candidate = m.group(1).strip()
-                # Check against blacklist
-                lower_cand = candidate.lower()
                 clean_speaker = re.sub(r"\(.*?\)", "", candidate).strip()
+                lower_cand = clean_speaker.lower()
+                words = lower_cand.split()
+
                 is_ignored = any(
-                    lower_cand.startswith(p) or lower_cand == p or p in lower_cand.split()
+                    lower_cand.startswith(p) or lower_cand == p or p in words
                     for p in IGNORED_SPEAKER_PREFIXES
                 )
-                if not is_ignored and len(clean_speaker) >= 2:
-                    content = m.group(2).strip()
-                    if content:
-                        extracted_dialogue.append((clean_speaker, content))
-                        if clean_speaker not in raw_speakers:
-                            raw_speakers.append(clean_speaker)
+                has_prose_verb = any(v in words for v in PROSE_VERBS)
+                is_valid_name = (
+                    not is_ignored
+                    and not has_prose_verb
+                    and 1 <= len(words) <= 5
+                    and len(clean_speaker) >= 2
+                    and not clean_speaker.isdigit()
+                )
+
+                if is_valid_name:
+                    flush()
+                    current_speaker = clean_speaker
+                    same_line_content = m.group(2).strip().strip("“”\"'")
+                    if same_line_content:
+                        current_buffer.append(same_line_content)
+                    continue
+
+            # If inside a speaker block, collect dialogue lines
+            if current_speaker and not clean_line.startswith("[") and not clean_line.startswith("CẢNH") and not clean_line.startswith("TẬP"):
+                current_buffer.append(clean_line.strip("“”\"'"))
+
+        flush()
 
         # 2. Discover semantic location
         lower_script = script_text.lower()
@@ -529,30 +563,30 @@ TRẢ VỀ DUY NHẤT MỘT JSON OBJECT THEO CẤU TRÚC:
         loc_name = loc_info.get("name", "Bối Cảnh V5")
         weather = loc_info.get("weather", "CLEAR")
         
-        # Camera setups per category
+        # Camera setups per category (Distinct viewpoints, angles & framing)
         cam_presets = {
             "RAIL_STATION": {
-                "initial": {"position": [-2.5, 2.2, 5.0], "target": [0.0, 1.2, 0.0], "fov": 42},
+                "initial": {"position": [2.4, 1.8, 4.8], "target": [-0.6, 1.3, -1.0], "fov": 38},
                 "keyframes": [
-                    {"t": 0.0, "position": [-2.5, 2.2, 5.0], "target": [0.0, 1.2, 0.0]},
-                    {"t": 6.0, "position": [-1.2, 2.0, 4.2], "target": [0.2, 1.2, 0.0]},
-                    {"t": 15.0, "position": [-0.5, 1.8, 3.5], "target": [0.3, 1.1, -0.2]}
+                    {"t": 0.0, "position": [2.4, 1.8, 4.8], "target": [-0.6, 1.3, -1.0]},
+                    {"t": 7.0, "position": [1.4, 1.7, 3.8], "target": [-0.5, 1.3, -0.8]},
+                    {"t": 16.0, "position": [0.4, 1.6, 2.8], "target": [-0.4, 1.2, -0.6]}
                 ]
             },
             "HOSPITAL_ER": {
-                "initial": {"position": [-1.8, 1.8, 4.5], "target": [0.0, 1.1, 0.0], "fov": 42},
+                "initial": {"position": [0.0, 1.7, 4.2], "target": [0.1, 1.1, 0.0], "fov": 40},
                 "keyframes": [
-                    {"t": 0.0, "position": [-1.8, 1.8, 4.5], "target": [0.0, 1.1, 0.0]},
-                    {"t": 5.0, "position": [-1.0, 1.7, 3.8], "target": [0.1, 1.1, 0.0]},
-                    {"t": 15.0, "position": [-0.4, 1.6, 3.2], "target": [0.2, 1.0, -0.1]}
+                    {"t": 0.0, "position": [0.0, 1.7, 4.2], "target": [0.1, 1.1, 0.0]},
+                    {"t": 6.0, "position": [-0.4, 1.6, 3.4], "target": [0.0, 1.1, 0.0]},
+                    {"t": 15.0, "position": [-0.8, 1.5, 2.8], "target": [-0.2, 1.0, 0.1]}
                 ]
             },
             "DESERT_STATION": {
-                "initial": {"position": [-3.0, 2.5, 6.0], "target": [0.0, 1.2, 0.0], "fov": 44},
+                "initial": {"position": [-3.8, 2.8, 6.2], "target": [0.2, 1.5, -1.2], "fov": 46},
                 "keyframes": [
-                    {"t": 0.0, "position": [-3.0, 2.5, 6.0], "target": [0.0, 1.2, 0.0]},
-                    {"t": 7.0, "position": [-1.5, 2.2, 4.8], "target": [0.1, 1.2, 0.0]},
-                    {"t": 16.0, "position": [-0.6, 2.0, 3.8], "target": [0.2, 1.1, -0.2]}
+                    {"t": 0.0, "position": [-3.8, 2.8, 6.2], "target": [0.2, 1.5, -1.2]},
+                    {"t": 8.0, "position": [-2.2, 2.4, 5.0], "target": [0.6, 1.4, -0.6]},
+                    {"t": 16.0, "position": [-1.0, 2.0, 3.8], "target": [0.9, 1.3, 0.0]}
                 ]
             },
             "CAFE": {
@@ -608,25 +642,44 @@ TRẢ VỀ DUY NHẤT MỘT JSON OBJECT THEO CẤU TRÚC:
         }
         cam = cam_presets.get(cat, cam_presets["NEOCLASSICAL"])
         
-        # Build Actors
+        # Ground height & staging presets per category
+        staging_presets = {
+            "RAIL_STATION": {"ground_y": 0.45, "lead_pos": [-0.8, 0.45, -0.6], "supp_pos": [0.8, 0.45, -0.4], "facing": 1},
+            "HOSPITAL_ER": {"ground_y": 0.00, "lead_pos": [-0.5, 0.00, 0.2], "supp_pos": [0.9, 0.00, 0.0], "facing": 1},
+            "DESERT_STATION": {"ground_y": 0.65, "lead_pos": [1.1, 0.65, 0.2], "supp_pos": [-0.6, 0.65, -0.2], "facing": -1},
+            "CAFE": {"ground_y": 0.00, "lead_pos": [-0.5, 0.00, 0.1], "supp_pos": [0.7, 0.00, -0.1], "facing": 1},
+            "ANTARCTIC": {"ground_y": 0.85, "lead_pos": [0.6, 0.85, 0.3], "supp_pos": [-0.8, 0.85, 0.1], "facing": -1},
+            "EDO_BRIDGE": {"ground_y": 2.65, "lead_pos": [-1.2, 2.65, 0.0], "supp_pos": [0.8, 2.65, 0.0], "facing": 1},
+            "EDO_HOUSE": {"ground_y": 0.45, "lead_pos": [-0.8, 0.45, 0.2], "supp_pos": [0.8, 0.45, -0.1], "facing": 1},
+            "ROBOTICS_LAB": {"ground_y": 0.00, "lead_pos": [-0.6, 0.00, 0.3], "supp_pos": [0.8, 0.00, 0.1], "facing": 1},
+            "NEOCLASSICAL": {"ground_y": 0.65, "lead_pos": [-0.7, 0.65, 0.2], "supp_pos": [0.7, 0.65, 0.0], "facing": 1}
+        }
+        stg = staging_presets.get(cat, staging_presets["NEOCLASSICAL"])
+        
+        # Build Actors with CANONICAL ADULT PROPORTIONS (6.3 to 7.0 heads tall, never chibi)
         archetype_defaults = {
             "young_courier": {
+                "proportions": {"headRatio": 0.155, "standingHeightPx": 290, "shoulderWidthPx": 50, "limbThicknessPx": 10, "torsoLengthPx": 94, "legLengthPx": 148},
                 "headContour": "round_youth", "skinTone": "#F5D7B5", "eyeType": "curious_wide", "eyeColor": "#241C16", "eyebrowStyle": "arched",
                 "hairStyle": "edo_topknot", "costume": "edo_hanten_courier", "primaryColor": "#345577", "accentColor": "#FFFFFF", "pantsColor": "#283648", "footwear": "waraji_sandals", "prop": "letter_scroll_sealed"
             },
             "noblewoman": {
+                "proportions": {"headRatio": 0.150, "standingHeightPx": 285, "shoulderWidthPx": 46, "limbThicknessPx": 9, "torsoLengthPx": 92, "legLengthPx": 146},
                 "headContour": "delicate_heart", "skinTone": "#FFF0E5", "eyeType": "almond_asian", "eyeColor": "#2C1E1A", "eyebrowStyle": "delicate_curved",
                 "hairStyle": "edo_shimada", "costume": "edo_kimono_formal", "primaryColor": "#8B1E3F", "accentColor": "#E0A96D", "pantsColor": "#4A1224", "footwear": "tabi_socks", "prop": "folded_parchment"
             },
             "detective_scholar": {
+                "proportions": {"headRatio": 0.142, "standingHeightPx": 325, "shoulderWidthPx": 60, "limbThicknessPx": 11, "torsoLengthPx": 108, "legLengthPx": 168},
                 "headContour": "oval_gaunt", "skinTone": "#EFE0D3", "eyeType": "intense_focused", "eyeColor": "#2B2D42", "eyebrowStyle": "straight_sharp",
                 "hairStyle": "side_sweep_1914", "costume": "victorian_frock_coat", "primaryColor": "#2B2D42", "accentColor": "#D90429", "pantsColor": "#1F2022", "footwear": "leather_shoes", "prop": "walking_cane"
             },
             "tech_founder": {
+                "proportions": {"headRatio": 0.148, "standingHeightPx": 305, "shoulderWidthPx": 58, "limbThicknessPx": 11, "torsoLengthPx": 100, "legLengthPx": 156},
                 "headContour": "square_jaw", "skinTone": "#F3DFC1", "eyeType": "curious_wide", "eyeColor": "#1B1B1B", "eyebrowStyle": "straight_sharp",
                 "hairStyle": "modern_crop", "costume": "modern_hoodie", "primaryColor": "#3D5A80", "accentColor": "#EE6C4D", "pantsColor": "#293241", "footwear": "sneakers", "prop": "tablet_computer"
             },
             "polar_scientist": {
+                "proportions": {"headRatio": 0.150, "standingHeightPx": 295, "shoulderWidthPx": 54, "limbThicknessPx": 11, "torsoLengthPx": 96, "legLengthPx": 152},
                 "headContour": "athletic_lean", "skinTone": "#FCEADE", "eyeType": "intense_focused", "eyeColor": "#4895EF", "eyebrowStyle": "arched",
                 "hairStyle": "ponytail_athletic", "costume": "polar_hazard_suit", "primaryColor": "#F77F00", "accentColor": "#003049", "pantsColor": "#D62828", "footwear": "snow_boots", "prop": "scientific_scanner"
             }
@@ -638,36 +691,31 @@ TRẢ VỀ DUY NHẤT MỘT JSON OBJECT THEO CẤU TRÚC:
             arch_id = char.get("archetypeId", "young_courier")
             d_arch = archetype_defaults.get(arch_id, archetype_defaults["young_courier"])
             
-            init_x = -1.4 if idx == 0 else (1.2 if idx == 1 else 0.0)
-            init_z = 0.4 if idx == 0 else 0.2
-            facing = 1 if idx == 0 else -1
+            base_pos = stg["lead_pos"] if idx == 0 else stg["supp_pos"]
+            init_x, init_y, init_z = base_pos[0], base_pos[1], base_pos[2]
+            facing = stg["facing"] if idx == 0 else -stg["facing"]
 
-            # Performance cues across beats
+            # Performance cues across beats with contextual actor motion
             cues = []
             for b_i, beat in enumerate(beats):
                 t_start = beat.get("timeRange", [0.0, 5.0])[0]
                 verb = beat.get("primaryVerb", "idle")
                 cues.append({
                     "time": t_start,
-                    "pos": [init_x + (0.15 if b_i % 2 else -0.1), 0.0, init_z],
+                    "pos": [init_x + (0.12 if b_i % 2 else -0.08), init_y, init_z],
                     "action": verb,
                     "emotion": "focused",
                     "facing": facing
                 })
             if not cues:
-                cues = [{"time": 0.0, "pos": [init_x, 0.0, init_z], "action": "idle", "emotion": "neutral", "facing": facing}]
+                cues = [{"time": 0.0, "pos": [init_x, init_y, init_z], "action": "idle", "emotion": "neutral", "facing": facing}]
 
             prop_r = char.get("heldProp") or d_arch["prop"]
 
             dna = {
                 "id": char.get("characterId", f"char_{idx+1}"),
                 "name": char.get("canonicalName", "Actor"),
-                "proportions": {
-                    "headRatio": 0.28,
-                    "standingHeightPx": 260,
-                    "shoulderWidthPx": 54,
-                    "limbThicknessPx": 11
-                },
+                "proportions": d_arch["proportions"],
                 "face": {
                     "headContour": char.get("headContour", d_arch["headContour"]),
                     "skinTone": d_arch["skinTone"],
@@ -700,7 +748,7 @@ TRẢ VỀ DUY NHẤT MỘT JSON OBJECT THEO CẤU TRÚC:
                 "role": char.get("role", "LEAD"),
                 "dna": dna,
                 "staging": {
-                    "initial_world_pos": [init_x, 0.0, init_z],
+                    "initial_world_pos": [init_x, init_y, init_z],
                     "facing": "RIGHT" if facing == 1 else "LEFT",
                     "posture": cues[0]["action"]
                 },

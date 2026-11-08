@@ -1,0 +1,19 @@
+{
+    "_comment": "Cấu hình mặc định cho AI Video Editor. Sửa các giá trị để đổi phong cách phụ đề, nhạc nền, ngưỡng cắt lặng...",
+    "silence_thresh": -40.0,
+    "silence_dur": 0.6,
+    "silence_pad": 0.15,
+    "music_volume": 0.18,
+    "fontsize": 26,
+    "fontcolor": "white",
+    "border_color": "black",
+    "alignment": 10,
+    "intro_title": "AI EDITOR",
+    "intro_duration": 2.0,
+    "style": {
+        "name": "default_tiktok_style",
+        "vertical": true,
+        "avg_fps": 30,
+        "target_aspect": 0.5625
+    }
+}

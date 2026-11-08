@@ -1,0 +1,7 @@
+# This file records the segment order used by Manim.
+file 'file:D:/Agent/ai-engine/manim/vfx_cache/caefdf52ed/videos/impact_flash/480p15/partial_movie_files/ImpactFlashScene/98528c4998bf95d33b1a9f283e4bf5b17f0df7e8d1019f3fb4d42d1b7c7e5431.mp4'
+file 'file:D:/Agent/ai-engine/manim/vfx_cache/caefdf52ed/videos/impact_flash/480p15/partial_movie_files/ImpactFlashScene/fed2f2022578fa932b053f35236dc47e79314ac686096d858f9849e87a311787.mp4'
+file 'file:D:/Agent/ai-engine/manim/vfx_cache/caefdf52ed/videos/impact_flash/480p15/partial_movie_files/ImpactFlashScene/4cdfbac802a5ccd83085e785c70e29669a5a13937705871312ca1568870d0329.mp4'
+file 'file:D:/Agent/ai-engine/manim/vfx_cache/caefdf52ed/videos/impact_flash/480p15/partial_movie_files/ImpactFlashScene/a5339025605188452cfc00262a86410ec781e38981aa5af21a02bebf4f2a702b.mp4'
+file 'file:D:/Agent/ai-engine/manim/vfx_cache/caefdf52ed/videos/impact_flash/480p15/partial_movie_files/ImpactFlashScene/1b458d87ba372eb119d35f40f9348644ef6817e946081590dc5e041b6754410a.mp4'
+file 'file:D:/Agent/ai-engine/manim/vfx_cache/caefdf52ed/videos/impact_flash/480p15/partial_movie_files/ImpactFlashScene/5bc3d5a449dbf4c727a88a3509c972f9882816c08ee9a24344a193f6a150a2fc.mp4'

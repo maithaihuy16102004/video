@@ -1,0 +1,24 @@
+{
+  "model": "deepseek-chat",
+  "base_url": "https://api.deepseek.com/chat/completions",
+  "project_name": "AI Video Editor",
+  "chunk": {
+    "strategy": "auto",
+    "max_chunk_lines": 200,
+    "hours": 1
+  },
+  "filter": {
+    "keep_blank_lines": false
+  },
+  "report": {
+    "temperature": 0.3,
+    "max_tokens": 2000
+  },
+  "pricing": {
+    "deepseek-chat": {
+      "input": 0.14,
+      "input_cached": 0.014,
+      "output": 0.28
+    }
+  }
+}

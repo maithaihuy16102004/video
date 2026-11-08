@@ -1,0 +1,1889 @@
+[
+  {
+    "scene_id": "SCENE_001",
+    "shot_id": "SH_001",
+    "shot_index": 0,
+    "beat_ids": [
+      "B001"
+    ],
+    "year": 1914,
+    "location_id": "LOC_MUNICH",
+    "shot_purpose": "INFORMATION",
+    "purpose_reason": "Beat HOOK requires INFORMATION visual emphasis.",
+    "camera": {
+      "shot": "ENVIRONMENT_ESTABLISHING",
+      "height": "EYE",
+      "height_m": 1.6,
+      "yaw_deg": 0.0,
+      "pitch_deg": 0.0,
+      "lens": "WIDE",
+      "perspective": "ONE_POINT",
+      "horizon_y": 0.45,
+      "vanishing_point": [
+        0.65,
+        0.45
+      ],
+      "vanishing_point_secondary": null,
+      "depth_layout": "LAYERED",
+      "subject_height_px": 420.0,
+      "subject_position": [
+        0.35,
+        0.8
+      ],
+      "motion": "STATIC"
+    },
+    "actors": [],
+    "props": [
+      {
+        "instance_id": "PROP_01",
+        "semantic": "wooden street bench",
+        "asset_id": "generic_bench_wood_01",
+        "resolution_status": "MATCH",
+        "category": "BENCH",
+        "role": "DRESSING",
+        "depth_plane": "MG",
+        "screen_x": 0.25,
+        "depth": 0.5,
+        "state": "STATIC",
+        "mount": "FLOOR"
+      },
+      {
+        "instance_id": "PROP_02",
+        "semantic": "wrought iron street lamp",
+        "asset_id": "generic_lamp_lantern_01",
+        "resolution_status": "MATCH",
+        "category": "LAMP",
+        "role": "DRESSING",
+        "depth_plane": "FG",
+        "screen_x": 0.75,
+        "depth": 0.25,
+        "state": "STATIC",
+        "mount": "FLOOR"
+      }
+    ],
+    "object_states": {},
+    "depth_planes": {
+      "NEAR_FG": 0.05,
+      "FG": 0.18,
+      "MG": 0.35,
+      "BG": 0.65,
+      "FAR_BG": 0.9
+    },
+    "lighting_story": {
+      "direction": "KEY_LEFT",
+      "mood": "OVERCAST"
+    },
+    "vitality": {
+      "density": "BALANCED"
+    },
+    "visual_eye_path": {
+      "steps": [
+        "OBJECT:generic_bench_wood_01"
+      ]
+    },
+    "historical_metadata": [
+      {
+        "item": "Year 1914",
+        "confidence": "PLAUSIBLE_RECONSTRUCTION",
+        "note": ""
+      }
+    ],
+    "continuity": {},
+    "dialogue": [
+      {
+        "speaker_id": "C_NARRATOR",
+        "voice_id": "voice_c_narrator",
+        "text": "Hãy tưởng tượng bạn 25 tuổi. Sự nghiệp chưa có gì, tương lai mờ mịt. Đúng lúc đó, cả châu Âu lao vào cuộc chiến tranh khổng lồ.",
+        "delivery": "NEUTRAL"
+      }
+    ],
+    "narration": "",
+    "motion_intent": {
+      "motion": "STATIC"
+    },
+    "duration_sec": 6.0,
+    "seed": 1234,
+    "validation": {
+      "delta_passed": true,
+      "stage_view_checked": true
+    }
+  },
+  {
+    "scene_id": "SCENE_002",
+    "shot_id": "SH_002",
+    "shot_index": 1,
+    "beat_ids": [
+      "B002"
+    ],
+    "year": 1914,
+    "location_id": "LOC_MUNICH",
+    "shot_purpose": "COMEDY",
+    "purpose_reason": "Beat COMEDY requires COMEDY visual emphasis.",
+    "camera": {
+      "shot": "TWO_SHOT",
+      "height": "EYE",
+      "height_m": 1.6,
+      "yaw_deg": 0.0,
+      "pitch_deg": 0.0,
+      "lens": "NORMAL",
+      "perspective": "ONE_POINT",
+      "horizon_y": 0.5,
+      "vanishing_point": [
+        0.42,
+        0.5
+      ],
+      "vanishing_point_secondary": null,
+      "depth_layout": "LAYERED",
+      "subject_height_px": 420.0,
+      "subject_position": [
+        0.62,
+        0.8
+      ],
+      "motion": "STATIC"
+    },
+    "actors": [
+      {
+        "character_id": "C_HITLER",
+        "variant_id": "VARIANT_DEFAULT",
+        "costume_id": "COS_HITLER_SOLDIER",
+        "detail_level": "HERO",
+        "action": "SPEAK",
+        "emotion": "CONFIDENT",
+        "intensity": "NORMAL",
+        "body_weight": "CENTERED",
+        "orientation": "THREE_QUARTER_LEFT",
+        "eyeline_target": null,
+        "contact_target": null,
+        "screen_x": 0.62,
+        "depth": 0.35,
+        "depth_plane": "MG",
+        "height_px": 420.0,
+        "silhouette": false
+      }
+    ],
+    "props": [
+      {
+        "instance_id": "PROP_01",
+        "semantic": "wooden street bench",
+        "asset_id": "generic_bench_wood_01",
+        "resolution_status": "MATCH",
+        "category": "BENCH",
+        "role": "DRESSING",
+        "depth_plane": "MG",
+        "screen_x": 0.25,
+        "depth": 0.5,
+        "state": "STATIC",
+        "mount": "FLOOR"
+      },
+      {
+        "instance_id": "PROP_02",
+        "semantic": "wrought iron street lamp",
+        "asset_id": "generic_lamp_lantern_01",
+        "resolution_status": "MATCH",
+        "category": "LAMP",
+        "role": "DRESSING",
+        "depth_plane": "FG",
+        "screen_x": 0.75,
+        "depth": 0.25,
+        "state": "STATIC",
+        "mount": "FLOOR"
+      }
+    ],
+    "object_states": {},
+    "depth_planes": {
+      "NEAR_FG": 0.05,
+      "FG": 0.18,
+      "MG": 0.35,
+      "BG": 0.65,
+      "FAR_BG": 0.9
+    },
+    "lighting_story": {
+      "direction": "KEY_LEFT",
+      "mood": "OVERCAST"
+    },
+    "vitality": {
+      "density": "BALANCED"
+    },
+    "visual_eye_path": {
+      "steps": [
+        "ACTOR:C_HITLER",
+        "OBJECT:generic_bench_wood_01"
+      ]
+    },
+    "historical_metadata": [
+      {
+        "item": "Year 1914",
+        "confidence": "PLAUSIBLE_RECONSTRUCTION",
+        "note": ""
+      }
+    ],
+    "continuity": {},
+    "dialogue": [
+      {
+        "speaker_id": "C_HITLER",
+        "voice_id": "voice_c_hitler",
+        "text": "Người ta nói chiến tranh sẽ kết thúc trước Giáng sinh. Nghe cũng ổn.",
+        "delivery": "NEUTRAL"
+      }
+    ],
+    "narration": "",
+    "motion_intent": {
+      "motion": "STATIC"
+    },
+    "duration_sec": 4.5,
+    "seed": 1251,
+    "validation": {
+      "delta_passed": true,
+      "stage_view_checked": true
+    }
+  },
+  {
+    "scene_id": "SCENE_003",
+    "shot_id": "SH_003",
+    "shot_index": 2,
+    "beat_ids": [
+      "B003"
+    ],
+    "year": 1914,
+    "location_id": "LOC_MUNICH",
+    "shot_purpose": "COMEDY",
+    "purpose_reason": "Beat COMEDY requires COMEDY visual emphasis.",
+    "camera": {
+      "shot": "MEDIUM",
+      "height": "EYE",
+      "height_m": 1.6,
+      "yaw_deg": 0.0,
+      "pitch_deg": 0.0,
+      "lens": "NORMAL",
+      "perspective": "ONE_POINT",
+      "horizon_y": 0.5,
+      "vanishing_point": [
+        0.58,
+        0.5
+      ],
+      "vanishing_point_secondary": null,
+      "depth_layout": "LAYERED",
+      "subject_height_px": 420.0,
+      "subject_position": [
+        0.38,
+        0.8
+      ],
+      "motion": "STATIC"
+    },
+    "actors": [
+      {
+        "character_id": "C_SOLDIER1",
+        "variant_id": "VARIANT_DEFAULT",
+        "costume_id": "COS_SOLDIER",
+        "detail_level": "SUPPORT",
+        "action": "SPEAK",
+        "emotion": "AMUSED",
+        "intensity": "NORMAL",
+        "body_weight": "CENTERED",
+        "orientation": "THREE_QUARTER_RIGHT",
+        "eyeline_target": null,
+        "contact_target": null,
+        "screen_x": 0.38,
+        "depth": 0.35,
+        "depth_plane": "MG",
+        "height_px": 420.0,
+        "silhouette": false
+      }
+    ],
+    "props": [
+      {
+        "instance_id": "PROP_01",
+        "semantic": "wooden street bench",
+        "asset_id": "generic_bench_wood_01",
+        "resolution_status": "MATCH",
+        "category": "BENCH",
+        "role": "DRESSING",
+        "depth_plane": "MG",
+        "screen_x": 0.25,
+        "depth": 0.5,
+        "state": "STATIC",
+        "mount": "FLOOR"
+      },
+      {
+        "instance_id": "PROP_02",
+        "semantic": "wrought iron street lamp",
+        "asset_id": "generic_lamp_lantern_01",
+        "resolution_status": "MATCH",
+        "category": "LAMP",
+        "role": "DRESSING",
+        "depth_plane": "FG",
+        "screen_x": 0.75,
+        "depth": 0.25,
+        "state": "STATIC",
+        "mount": "FLOOR"
+      }
+    ],
+    "object_states": {},
+    "depth_planes": {
+      "NEAR_FG": 0.05,
+      "FG": 0.18,
+      "MG": 0.35,
+      "BG": 0.65,
+      "FAR_BG": 0.9
+    },
+    "lighting_story": {
+      "direction": "KEY_LEFT",
+      "mood": "OVERCAST"
+    },
+    "vitality": {
+      "density": "BALANCED"
+    },
+    "visual_eye_path": {
+      "steps": [
+        "ACTOR:C_SOLDIER1",
+        "OBJECT:generic_bench_wood_01"
+      ]
+    },
+    "historical_metadata": [
+      {
+        "item": "Year 1914",
+        "confidence": "PLAUSIBLE_RECONSTRUCTION",
+        "note": ""
+      }
+    ],
+    "continuity": {},
+    "dialogue": [
+      {
+        "speaker_id": "C_SOLDIER1",
+        "voice_id": "voice_c_soldier1",
+        "text": "Hóa ra họ không nói rõ Giáng sinh năm nào.",
+        "delivery": "NEUTRAL"
+      }
+    ],
+    "narration": "",
+    "motion_intent": {
+      "motion": "STATIC"
+    },
+    "duration_sec": 4.0,
+    "seed": 1268,
+    "validation": {
+      "delta_passed": true,
+      "stage_view_checked": true
+    }
+  },
+  {
+    "scene_id": "SCENE_004",
+    "shot_id": "SH_004",
+    "shot_index": 3,
+    "beat_ids": [
+      "B004"
+    ],
+    "year": 1914,
+    "location_id": "LOC_WESTERN_FRONT",
+    "shot_purpose": "INFORMATION",
+    "purpose_reason": "Beat EXPOSITION requires INFORMATION visual emphasis.",
+    "camera": {
+      "shot": "OTS",
+      "height": "EYE",
+      "height_m": 1.6,
+      "yaw_deg": 0.0,
+      "pitch_deg": 0.0,
+      "lens": "NORMAL",
+      "perspective": "ONE_POINT",
+      "horizon_y": 0.5,
+      "vanishing_point": [
+        0.42,
+        0.5
+      ],
+      "vanishing_point_secondary": null,
+      "depth_layout": "LAYERED",
+      "subject_height_px": 420.0,
+      "subject_position": [
+        0.62,
+        0.8
+      ],
+      "motion": "STATIC"
+    },
+    "actors": [
+      {
+        "character_id": "C_HITLER",
+        "variant_id": "VARIANT_DEFAULT",
+        "costume_id": "COS_HITLER_SOLDIER",
+        "detail_level": "HERO",
+        "action": "STAND",
+        "emotion": "CALM",
+        "intensity": "NORMAL",
+        "body_weight": "CENTERED",
+        "orientation": "THREE_QUARTER_LEFT",
+        "eyeline_target": null,
+        "contact_target": null,
+        "screen_x": 0.6499999999999999,
+        "depth": 0.35,
+        "depth_plane": "MG",
+        "height_px": 420.0,
+        "silhouette": false
+      }
+    ],
+    "props": [
+      {
+        "instance_id": "PROP_01",
+        "semantic": "sandbag wall fortification",
+        "asset_id": "generic_sandbags_01",
+        "resolution_status": "MATCH",
+        "category": "SANDBAGS",
+        "role": "WALL",
+        "depth_plane": "MG",
+        "screen_x": 0.25,
+        "depth": 0.5,
+        "state": "STATIC",
+        "mount": "FLOOR"
+      },
+      {
+        "instance_id": "PROP_02",
+        "semantic": "tangled barbed wire entanglement",
+        "asset_id": "hospital_bed_iron_01",
+        "resolution_status": "MATCH",
+        "category": "WIRE",
+        "role": "BARRIER",
+        "depth_plane": "FG",
+        "screen_x": 0.75,
+        "depth": 0.25,
+        "state": "STATIC",
+        "mount": "FLOOR"
+      }
+    ],
+    "object_states": {},
+    "depth_planes": {
+      "NEAR_FG": 0.05,
+      "FG": 0.18,
+      "MG": 0.35,
+      "BG": 0.65,
+      "FAR_BG": 0.9
+    },
+    "lighting_story": {
+      "direction": "KEY_LEFT",
+      "mood": "OVERCAST"
+    },
+    "vitality": {
+      "density": "BALANCED"
+    },
+    "visual_eye_path": {
+      "steps": [
+        "ACTOR:C_HITLER",
+        "OBJECT:generic_sandbags_01"
+      ]
+    },
+    "historical_metadata": [
+      {
+        "item": "Year 1914",
+        "confidence": "PLAUSIBLE_RECONSTRUCTION",
+        "note": ""
+      }
+    ],
+    "continuity": {},
+    "dialogue": [
+      {
+        "speaker_id": "C_NARRATOR",
+        "voice_id": "voice_c_narrator",
+        "text": "Hitler gia nhập Trung đoàn Bộ binh Dự bị Bavaria số 16. Bùn, chuột và pháo binh thay thế cho mọi ảo tưởng vinh quang.",
+        "delivery": "NEUTRAL"
+      }
+    ],
+    "narration": "",
+    "motion_intent": {
+      "motion": "STATIC"
+    },
+    "duration_sec": 7.0,
+    "seed": 1285,
+    "validation": {
+      "delta_passed": true,
+      "stage_view_checked": true
+    }
+  },
+  {
+    "scene_id": "SCENE_005",
+    "shot_id": "SH_005",
+    "shot_index": 4,
+    "beat_ids": [
+      "B005"
+    ],
+    "year": 1914,
+    "location_id": "LOC_WESTERN_FRONT",
+    "shot_purpose": "TENSION",
+    "purpose_reason": "Beat CONFLICT requires TENSION visual emphasis.",
+    "camera": {
+      "shot": "LOW_ANGLE",
+      "height": "LOW",
+      "height_m": 0.8,
+      "yaw_deg": 0.0,
+      "pitch_deg": 18.0,
+      "lens": "WIDE",
+      "perspective": "ONE_POINT",
+      "horizon_y": 0.32,
+      "vanishing_point": [
+        0.42,
+        0.32
+      ],
+      "vanishing_point_secondary": null,
+      "depth_layout": "LAYERED",
+      "subject_height_px": 420.0,
+      "subject_position": [
+        0.48,
+        0.8
+      ],
+      "motion": "STATIC"
+    },
+    "actors": [
+      {
+        "character_id": "C_OFFICER",
+        "variant_id": "VARIANT_DEFAULT",
+        "costume_id": "COS_OFFICER",
+        "detail_level": "SUPPORT",
+        "action": "HAND_OVER",
+        "emotion": "CALM",
+        "intensity": "NORMAL",
+        "body_weight": "CENTERED",
+        "orientation": "THREE_QUARTER_RIGHT",
+        "eyeline_target": null,
+        "contact_target": null,
+        "screen_x": 0.35,
+        "depth": 0.35,
+        "depth_plane": "MG",
+        "height_px": 420.0,
+        "silhouette": false
+      },
+      {
+        "character_id": "C_HITLER",
+        "variant_id": "VARIANT_DEFAULT",
+        "costume_id": "COS_HITLER_SOLDIER",
+        "detail_level": "HERO",
+        "action": "STAND",
+        "emotion": "CALM",
+        "intensity": "NORMAL",
+        "body_weight": "CENTERED",
+        "orientation": "THREE_QUARTER_LEFT",
+        "eyeline_target": null,
+        "contact_target": null,
+        "screen_x": 0.6499999999999999,
+        "depth": 0.35,
+        "depth_plane": "MG",
+        "height_px": 420.0,
+        "silhouette": false
+      }
+    ],
+    "props": [
+      {
+        "instance_id": "PROP_01",
+        "semantic": "sandbag wall fortification",
+        "asset_id": "generic_sandbags_01",
+        "resolution_status": "MATCH",
+        "category": "SANDBAGS",
+        "role": "WALL",
+        "depth_plane": "MG",
+        "screen_x": 0.25,
+        "depth": 0.5,
+        "state": "STATIC",
+        "mount": "FLOOR"
+      },
+      {
+        "instance_id": "PROP_02",
+        "semantic": "tangled barbed wire entanglement",
+        "asset_id": "hospital_bed_iron_01",
+        "resolution_status": "MATCH",
+        "category": "WIRE",
+        "role": "BARRIER",
+        "depth_plane": "FG",
+        "screen_x": 0.75,
+        "depth": 0.25,
+        "state": "STATIC",
+        "mount": "FLOOR"
+      }
+    ],
+    "object_states": {},
+    "depth_planes": {
+      "NEAR_FG": 0.05,
+      "FG": 0.18,
+      "MG": 0.35,
+      "BG": 0.65,
+      "FAR_BG": 0.9
+    },
+    "lighting_story": {
+      "direction": "KEY_LEFT",
+      "mood": "OVERCAST"
+    },
+    "vitality": {
+      "density": "BALANCED"
+    },
+    "visual_eye_path": {
+      "steps": [
+        "ACTOR:C_OFFICER",
+        "OBJECT:generic_sandbags_01",
+        "REACTION:C_HITLER"
+      ]
+    },
+    "historical_metadata": [
+      {
+        "item": "Year 1914",
+        "confidence": "PLAUSIBLE_RECONSTRUCTION",
+        "note": ""
+      }
+    ],
+    "continuity": {},
+    "dialogue": [
+      {
+        "speaker_id": "C_OFFICER",
+        "voice_id": "voice_c_officer",
+        "text": "Mang bức thư này qua khu vực đang bị pháo kích.",
+        "delivery": "NEUTRAL"
+      }
+    ],
+    "narration": "",
+    "motion_intent": {
+      "motion": "STATIC"
+    },
+    "duration_sec": 4.0,
+    "seed": 1302,
+    "validation": {
+      "delta_passed": true,
+      "stage_view_checked": true
+    }
+  },
+  {
+    "scene_id": "SCENE_006",
+    "shot_id": "SH_006",
+    "shot_index": 5,
+    "beat_ids": [
+      "B006"
+    ],
+    "year": 1914,
+    "location_id": "LOC_WESTERN_FRONT",
+    "shot_purpose": "COMEDY",
+    "purpose_reason": "Beat COMEDY requires COMEDY visual emphasis.",
+    "camera": {
+      "shot": "TWO_SHOT",
+      "height": "EYE",
+      "height_m": 1.6,
+      "yaw_deg": 0.0,
+      "pitch_deg": 0.0,
+      "lens": "NORMAL",
+      "perspective": "ONE_POINT",
+      "horizon_y": 0.5,
+      "vanishing_point": [
+        0.42,
+        0.5
+      ],
+      "vanishing_point_secondary": null,
+      "depth_layout": "LAYERED",
+      "subject_height_px": 420.0,
+      "subject_position": [
+        0.62,
+        0.8
+      ],
+      "motion": "STATIC"
+    },
+    "actors": [
+      {
+        "character_id": "C_HITLER",
+        "variant_id": "VARIANT_DEFAULT",
+        "costume_id": "COS_HITLER_SOLDIER",
+        "detail_level": "HERO",
+        "action": "SPEAK",
+        "emotion": "NERVOUS",
+        "intensity": "NORMAL",
+        "body_weight": "CENTERED",
+        "orientation": "THREE_QUARTER_RIGHT",
+        "eyeline_target": null,
+        "contact_target": null,
+        "screen_x": 0.35,
+        "depth": 0.35,
+        "depth_plane": "MG",
+        "height_px": 420.0,
+        "silhouette": false
+      },
+      {
+        "character_id": "C_OFFICER",
+        "variant_id": "VARIANT_DEFAULT",
+        "costume_id": "COS_OFFICER",
+        "detail_level": "SUPPORT",
+        "action": "STAND",
+        "emotion": "CALM",
+        "intensity": "NORMAL",
+        "body_weight": "CENTERED",
+        "orientation": "THREE_QUARTER_LEFT",
+        "eyeline_target": null,
+        "contact_target": null,
+        "screen_x": 0.6499999999999999,
+        "depth": 0.35,
+        "depth_plane": "MG",
+        "height_px": 420.0,
+        "silhouette": false
+      }
+    ],
+    "props": [
+      {
+        "instance_id": "PROP_01",
+        "semantic": "sandbag wall fortification",
+        "asset_id": "generic_sandbags_01",
+        "resolution_status": "MATCH",
+        "category": "SANDBAGS",
+        "role": "WALL",
+        "depth_plane": "MG",
+        "screen_x": 0.25,
+        "depth": 0.5,
+        "state": "STATIC",
+        "mount": "FLOOR"
+      },
+      {
+        "instance_id": "PROP_02",
+        "semantic": "tangled barbed wire entanglement",
+        "asset_id": "hospital_bed_iron_01",
+        "resolution_status": "MATCH",
+        "category": "WIRE",
+        "role": "BARRIER",
+        "depth_plane": "FG",
+        "screen_x": 0.75,
+        "depth": 0.25,
+        "state": "STATIC",
+        "mount": "FLOOR"
+      }
+    ],
+    "object_states": {},
+    "depth_planes": {
+      "NEAR_FG": 0.05,
+      "FG": 0.18,
+      "MG": 0.35,
+      "BG": 0.65,
+      "FAR_BG": 0.9
+    },
+    "lighting_story": {
+      "direction": "KEY_LEFT",
+      "mood": "OVERCAST"
+    },
+    "vitality": {
+      "density": "BALANCED"
+    },
+    "visual_eye_path": {
+      "steps": [
+        "ACTOR:C_HITLER",
+        "OBJECT:generic_sandbags_01",
+        "REACTION:C_OFFICER"
+      ]
+    },
+    "historical_metadata": [
+      {
+        "item": "Year 1914",
+        "confidence": "PLAUSIBLE_RECONSTRUCTION",
+        "note": ""
+      }
+    ],
+    "continuity": {},
+    "dialogue": [
+      {
+        "speaker_id": "C_HITLER",
+        "voice_id": "voice_c_hitler",
+        "text": "Tôi phải đi qua đó? Có đường nào an toàn hơn không?",
+        "delivery": "NEUTRAL"
+      }
+    ],
+    "narration": "",
+    "motion_intent": {
+      "motion": "STATIC"
+    },
+    "duration_sec": 4.5,
+    "seed": 1319,
+    "validation": {
+      "delta_passed": true,
+      "stage_view_checked": true
+    }
+  },
+  {
+    "scene_id": "SCENE_007",
+    "shot_id": "SH_007",
+    "shot_index": 6,
+    "beat_ids": [
+      "B007"
+    ],
+    "year": 1914,
+    "location_id": "LOC_WESTERN_FRONT",
+    "shot_purpose": "COMEDY",
+    "purpose_reason": "Beat COMEDY requires COMEDY visual emphasis.",
+    "camera": {
+      "shot": "MEDIUM",
+      "height": "EYE",
+      "height_m": 1.6,
+      "yaw_deg": 0.0,
+      "pitch_deg": 0.0,
+      "lens": "NORMAL",
+      "perspective": "ONE_POINT",
+      "horizon_y": 0.5,
+      "vanishing_point": [
+        0.58,
+        0.5
+      ],
+      "vanishing_point_secondary": null,
+      "depth_layout": "LAYERED",
+      "subject_height_px": 420.0,
+      "subject_position": [
+        0.38,
+        0.8
+      ],
+      "motion": "STATIC"
+    },
+    "actors": [
+      {
+        "character_id": "C_OFFICER",
+        "variant_id": "VARIANT_DEFAULT",
+        "costume_id": "COS_OFFICER",
+        "detail_level": "SUPPORT",
+        "action": "SPEAK",
+        "emotion": "CALM",
+        "intensity": "NORMAL",
+        "body_weight": "CENTERED",
+        "orientation": "THREE_QUARTER_RIGHT",
+        "eyeline_target": null,
+        "contact_target": null,
+        "screen_x": 0.35,
+        "depth": 0.35,
+        "depth_plane": "MG",
+        "height_px": 420.0,
+        "silhouette": false
+      },
+      {
+        "character_id": "C_HITLER",
+        "variant_id": "VARIANT_DEFAULT",
+        "costume_id": "COS_HITLER_SOLDIER",
+        "detail_level": "HERO",
+        "action": "STAND",
+        "emotion": "CALM",
+        "intensity": "NORMAL",
+        "body_weight": "CENTERED",
+        "orientation": "THREE_QUARTER_LEFT",
+        "eyeline_target": null,
+        "contact_target": null,
+        "screen_x": 0.6499999999999999,
+        "depth": 0.35,
+        "depth_plane": "MG",
+        "height_px": 420.0,
+        "silhouette": false
+      }
+    ],
+    "props": [
+      {
+        "instance_id": "PROP_01",
+        "semantic": "sandbag wall fortification",
+        "asset_id": "generic_sandbags_01",
+        "resolution_status": "MATCH",
+        "category": "SANDBAGS",
+        "role": "WALL",
+        "depth_plane": "MG",
+        "screen_x": 0.25,
+        "depth": 0.5,
+        "state": "STATIC",
+        "mount": "FLOOR"
+      },
+      {
+        "instance_id": "PROP_02",
+        "semantic": "tangled barbed wire entanglement",
+        "asset_id": "hospital_bed_iron_01",
+        "resolution_status": "MATCH",
+        "category": "WIRE",
+        "role": "BARRIER",
+        "depth_plane": "FG",
+        "screen_x": 0.75,
+        "depth": 0.25,
+        "state": "STATIC",
+        "mount": "FLOOR"
+      }
+    ],
+    "object_states": {},
+    "depth_planes": {
+      "NEAR_FG": 0.05,
+      "FG": 0.18,
+      "MG": 0.35,
+      "BG": 0.65,
+      "FAR_BG": 0.9
+    },
+    "lighting_story": {
+      "direction": "KEY_LEFT",
+      "mood": "OVERCAST"
+    },
+    "vitality": {
+      "density": "BALANCED"
+    },
+    "visual_eye_path": {
+      "steps": [
+        "ACTOR:C_OFFICER",
+        "OBJECT:generic_sandbags_01",
+        "REACTION:C_HITLER"
+      ]
+    },
+    "historical_metadata": [
+      {
+        "item": "Year 1914",
+        "confidence": "PLAUSIBLE_RECONSTRUCTION",
+        "note": ""
+      }
+    ],
+    "continuity": {},
+    "dialogue": [
+      {
+        "speaker_id": "C_OFFICER",
+        "voice_id": "voice_c_officer",
+        "text": "Không.",
+        "delivery": "NEUTRAL"
+      }
+    ],
+    "narration": "",
+    "motion_intent": {
+      "motion": "STATIC"
+    },
+    "duration_sec": 1.5,
+    "seed": 1336,
+    "validation": {
+      "delta_passed": true,
+      "stage_view_checked": true
+    }
+  },
+  {
+    "scene_id": "SCENE_008",
+    "shot_id": "SH_008",
+    "shot_index": 7,
+    "beat_ids": [
+      "B008"
+    ],
+    "year": 1914,
+    "location_id": "LOC_WESTERN_FRONT",
+    "shot_purpose": "COMEDY",
+    "purpose_reason": "Beat COMEDY requires COMEDY visual emphasis.",
+    "camera": {
+      "shot": "OTS",
+      "height": "EYE",
+      "height_m": 1.6,
+      "yaw_deg": 0.0,
+      "pitch_deg": 0.0,
+      "lens": "NORMAL",
+      "perspective": "ONE_POINT",
+      "horizon_y": 0.5,
+      "vanishing_point": [
+        0.42,
+        0.5
+      ],
+      "vanishing_point_secondary": null,
+      "depth_layout": "LAYERED",
+      "subject_height_px": 420.0,
+      "subject_position": [
+        0.62,
+        0.8
+      ],
+      "motion": "STATIC"
+    },
+    "actors": [
+      {
+        "character_id": "C_HITLER",
+        "variant_id": "VARIANT_DEFAULT",
+        "costume_id": "COS_HITLER_SOLDIER",
+        "detail_level": "HERO",
+        "action": "SPEAK",
+        "emotion": "SAD",
+        "intensity": "NORMAL",
+        "body_weight": "CENTERED",
+        "orientation": "PROFILE_RIGHT",
+        "eyeline_target": null,
+        "contact_target": null,
+        "screen_x": 0.62,
+        "depth": 0.35,
+        "depth_plane": "MG",
+        "height_px": 420.0,
+        "silhouette": false
+      }
+    ],
+    "props": [
+      {
+        "instance_id": "PROP_01",
+        "semantic": "sandbag wall fortification",
+        "asset_id": "generic_sandbags_01",
+        "resolution_status": "MATCH",
+        "category": "SANDBAGS",
+        "role": "WALL",
+        "depth_plane": "MG",
+        "screen_x": 0.25,
+        "depth": 0.5,
+        "state": "STATIC",
+        "mount": "FLOOR"
+      },
+      {
+        "instance_id": "PROP_02",
+        "semantic": "tangled barbed wire entanglement",
+        "asset_id": "hospital_bed_iron_01",
+        "resolution_status": "MATCH",
+        "category": "WIRE",
+        "role": "BARRIER",
+        "depth_plane": "FG",
+        "screen_x": 0.75,
+        "depth": 0.25,
+        "state": "STATIC",
+        "mount": "FLOOR"
+      }
+    ],
+    "object_states": {},
+    "depth_planes": {
+      "NEAR_FG": 0.05,
+      "FG": 0.18,
+      "MG": 0.35,
+      "BG": 0.65,
+      "FAR_BG": 0.9
+    },
+    "lighting_story": {
+      "direction": "KEY_LEFT",
+      "mood": "OVERCAST"
+    },
+    "vitality": {
+      "density": "BALANCED"
+    },
+    "visual_eye_path": {
+      "steps": [
+        "ACTOR:C_HITLER",
+        "OBJECT:generic_sandbags_01"
+      ]
+    },
+    "historical_metadata": [
+      {
+        "item": "Year 1914",
+        "confidence": "PLAUSIBLE_RECONSTRUCTION",
+        "note": ""
+      }
+    ],
+    "continuity": {},
+    "dialogue": [
+      {
+        "speaker_id": "C_HITLER",
+        "voice_id": "voice_c_hitler",
+        "text": "Tuyệt vời.",
+        "delivery": "NEUTRAL"
+      }
+    ],
+    "narration": "",
+    "motion_intent": {
+      "motion": "STATIC"
+    },
+    "duration_sec": 1.5,
+    "seed": 1353,
+    "validation": {
+      "delta_passed": true,
+      "stage_view_checked": true
+    }
+  },
+  {
+    "scene_id": "SCENE_009",
+    "shot_id": "SH_009",
+    "shot_index": 8,
+    "beat_ids": [
+      "B009"
+    ],
+    "year": 1916,
+    "location_id": "LOC_SOMME",
+    "shot_purpose": "INFORMATION",
+    "purpose_reason": "Beat ESCALATION requires INFORMATION visual emphasis.",
+    "camera": {
+      "shot": "MEDIUM_WIDE",
+      "height": "EYE",
+      "height_m": 1.6,
+      "yaw_deg": 0.0,
+      "pitch_deg": 0.0,
+      "lens": "NORMAL",
+      "perspective": "ONE_POINT",
+      "horizon_y": 0.5,
+      "vanishing_point": [
+        0.58,
+        0.5
+      ],
+      "vanishing_point_secondary": null,
+      "depth_layout": "LAYERED",
+      "subject_height_px": 420.0,
+      "subject_position": [
+        0.38,
+        0.8
+      ],
+      "motion": "STATIC"
+    },
+    "actors": [
+      {
+        "character_id": "C_HITLER",
+        "variant_id": "VARIANT_DEFAULT",
+        "costume_id": "COS_HITLER_SOLDIER",
+        "detail_level": "HERO",
+        "action": "STAND",
+        "emotion": "CALM",
+        "intensity": "NORMAL",
+        "body_weight": "CENTERED",
+        "orientation": "THREE_QUARTER_LEFT",
+        "eyeline_target": null,
+        "contact_target": null,
+        "screen_x": 0.6499999999999999,
+        "depth": 0.35,
+        "depth_plane": "MG",
+        "height_px": 420.0,
+        "silhouette": false
+      }
+    ],
+    "props": [
+      {
+        "instance_id": "PROP_01",
+        "semantic": "scattered artillery debris",
+        "asset_id": "hospital_bed_iron_01",
+        "resolution_status": "COMPATIBLE_FALLBACK",
+        "category": "DEBRIS",
+        "role": "DRESSING",
+        "depth_plane": "MG",
+        "screen_x": 0.25,
+        "depth": 0.5,
+        "state": "STATIC",
+        "mount": "FLOOR"
+      }
+    ],
+    "object_states": {},
+    "depth_planes": {
+      "NEAR_FG": 0.05,
+      "FG": 0.18,
+      "MG": 0.35,
+      "BG": 0.65,
+      "FAR_BG": 0.9
+    },
+    "lighting_story": {
+      "direction": "KEY_LEFT",
+      "mood": "HARSH_SUN"
+    },
+    "vitality": {
+      "density": "BALANCED"
+    },
+    "visual_eye_path": {
+      "steps": [
+        "ACTOR:C_HITLER",
+        "OBJECT:hospital_bed_iron_01"
+      ]
+    },
+    "historical_metadata": [
+      {
+        "item": "Year 1916",
+        "confidence": "PLAUSIBLE_RECONSTRUCTION",
+        "note": ""
+      }
+    ],
+    "continuity": {},
+    "dialogue": [
+      {
+        "speaker_id": "C_NARRATOR",
+        "voice_id": "voice_c_narrator",
+        "text": "Năm 1916 tại Mặt trận Somme, mảnh đạn pháo làm Hitler bị thương ở chân.",
+        "delivery": "EMPHATIC"
+      }
+    ],
+    "narration": "",
+    "motion_intent": {
+      "motion": "STATIC"
+    },
+    "duration_sec": 5.5,
+    "seed": 1370,
+    "validation": {
+      "delta_passed": true,
+      "stage_view_checked": true
+    }
+  },
+  {
+    "scene_id": "SCENE_010",
+    "shot_id": "SH_010",
+    "shot_index": 9,
+    "beat_ids": [
+      "B010"
+    ],
+    "year": 1918,
+    "location_id": "LOC_YPRES",
+    "shot_purpose": "INFORMATION",
+    "purpose_reason": "Beat REVERSAL requires INFORMATION visual emphasis.",
+    "camera": {
+      "shot": "CLOSE_UP",
+      "height": "EYE",
+      "height_m": 1.6,
+      "yaw_deg": 0.0,
+      "pitch_deg": 0.0,
+      "lens": "NORMAL",
+      "perspective": "ONE_POINT",
+      "horizon_y": 0.52,
+      "vanishing_point": [
+        0.5,
+        0.5
+      ],
+      "vanishing_point_secondary": null,
+      "depth_layout": "LAYERED",
+      "subject_height_px": 420.0,
+      "subject_position": [
+        0.5,
+        0.85
+      ],
+      "motion": "STATIC"
+    },
+    "actors": [
+      {
+        "character_id": "C_HITLER",
+        "variant_id": "VAR_HITLER_WOUNDED",
+        "costume_id": "COS_HITLER_SOLDIER",
+        "detail_level": "HERO",
+        "action": "STAND",
+        "emotion": "CALM",
+        "intensity": "NORMAL",
+        "body_weight": "CENTERED",
+        "orientation": "THREE_QUARTER_LEFT",
+        "eyeline_target": null,
+        "contact_target": null,
+        "screen_x": 0.6499999999999999,
+        "depth": 0.35,
+        "depth_plane": "MG",
+        "height_px": 420.0,
+        "silhouette": false
+      }
+    ],
+    "props": [
+      {
+        "instance_id": "PROP_01",
+        "semantic": "metal framed hospital bed with white sheets",
+        "asset_id": "hospital_bed_iron_01",
+        "resolution_status": "MATCH",
+        "category": "BED",
+        "role": "HERO",
+        "depth_plane": "MG",
+        "screen_x": 0.25,
+        "depth": 0.5,
+        "state": "STATIC",
+        "mount": "FLOOR"
+      },
+      {
+        "instance_id": "PROP_02",
+        "semantic": "wooden bedside table",
+        "asset_id": "generic_table_wood_01",
+        "resolution_status": "MATCH",
+        "category": "TABLE",
+        "role": "DRESSING",
+        "depth_plane": "FG",
+        "screen_x": 0.75,
+        "depth": 0.25,
+        "state": "STATIC",
+        "mount": "FLOOR"
+      }
+    ],
+    "object_states": {},
+    "depth_planes": {
+      "NEAR_FG": 0.05,
+      "FG": 0.18,
+      "MG": 0.35,
+      "BG": 0.65,
+      "FAR_BG": 0.9
+    },
+    "lighting_story": {
+      "direction": "KEY_LEFT",
+      "mood": "WINDOW_SHAFTS"
+    },
+    "vitality": {
+      "density": "BALANCED"
+    },
+    "visual_eye_path": {
+      "steps": [
+        "ACTOR:C_HITLER",
+        "OBJECT:hospital_bed_iron_01"
+      ]
+    },
+    "historical_metadata": [
+      {
+        "item": "Year 1918",
+        "confidence": "PLAUSIBLE_RECONSTRUCTION",
+        "note": ""
+      }
+    ],
+    "continuity": {},
+    "dialogue": [
+      {
+        "speaker_id": "C_NARRATOR",
+        "voice_id": "voice_c_narrator",
+        "text": "Tháng 10 năm 1918 tại Ypres, khí độc khiến Hitler tạm thời mù mắt và phải nằm viện tại Pasewalk.",
+        "delivery": "EMPHATIC"
+      }
+    ],
+    "narration": "",
+    "motion_intent": {
+      "motion": "STATIC"
+    },
+    "duration_sec": 7.5,
+    "seed": 1387,
+    "validation": {
+      "delta_passed": true,
+      "stage_view_checked": true
+    }
+  },
+  {
+    "scene_id": "SCENE_011",
+    "shot_id": "SH_011",
+    "shot_index": 10,
+    "beat_ids": [
+      "B011"
+    ],
+    "year": 1918,
+    "location_id": "LOC_YPRES",
+    "shot_purpose": "INFORMATION",
+    "purpose_reason": "Beat ESCALATION requires INFORMATION visual emphasis.",
+    "camera": {
+      "shot": "MEDIUM",
+      "height": "EYE",
+      "height_m": 1.6,
+      "yaw_deg": 0.0,
+      "pitch_deg": 0.0,
+      "lens": "NORMAL",
+      "perspective": "ONE_POINT",
+      "horizon_y": 0.5,
+      "vanishing_point": [
+        0.58,
+        0.5
+      ],
+      "vanishing_point_secondary": null,
+      "depth_layout": "LAYERED",
+      "subject_height_px": 420.0,
+      "subject_position": [
+        0.38,
+        0.8
+      ],
+      "motion": "STATIC"
+    },
+    "actors": [
+      {
+        "character_id": "C_SOLDIER1",
+        "variant_id": "VARIANT_DEFAULT",
+        "costume_id": "COS_SOLDIER",
+        "detail_level": "SUPPORT",
+        "action": "SPEAK",
+        "emotion": "RELIEVED",
+        "intensity": "NORMAL",
+        "body_weight": "CENTERED",
+        "orientation": "THREE_QUARTER_RIGHT",
+        "eyeline_target": null,
+        "contact_target": null,
+        "screen_x": 0.35,
+        "depth": 0.35,
+        "depth_plane": "MG",
+        "height_px": 420.0,
+        "silhouette": false
+      },
+      {
+        "character_id": "C_HITLER",
+        "variant_id": "VAR_HITLER_WOUNDED",
+        "costume_id": "COS_HITLER_SOLDIER",
+        "detail_level": "HERO",
+        "action": "STAND",
+        "emotion": "CALM",
+        "intensity": "NORMAL",
+        "body_weight": "CENTERED",
+        "orientation": "THREE_QUARTER_LEFT",
+        "eyeline_target": null,
+        "contact_target": null,
+        "screen_x": 0.6499999999999999,
+        "depth": 0.35,
+        "depth_plane": "MG",
+        "height_px": 420.0,
+        "silhouette": false
+      }
+    ],
+    "props": [
+      {
+        "instance_id": "PROP_01",
+        "semantic": "metal framed hospital bed with white sheets",
+        "asset_id": "hospital_bed_iron_01",
+        "resolution_status": "MATCH",
+        "category": "BED",
+        "role": "HERO",
+        "depth_plane": "MG",
+        "screen_x": 0.25,
+        "depth": 0.5,
+        "state": "STATIC",
+        "mount": "FLOOR"
+      },
+      {
+        "instance_id": "PROP_02",
+        "semantic": "wooden bedside table",
+        "asset_id": "generic_table_wood_01",
+        "resolution_status": "MATCH",
+        "category": "TABLE",
+        "role": "DRESSING",
+        "depth_plane": "FG",
+        "screen_x": 0.75,
+        "depth": 0.25,
+        "state": "STATIC",
+        "mount": "FLOOR"
+      }
+    ],
+    "object_states": {},
+    "depth_planes": {
+      "NEAR_FG": 0.05,
+      "FG": 0.18,
+      "MG": 0.35,
+      "BG": 0.65,
+      "FAR_BG": 0.9
+    },
+    "lighting_story": {
+      "direction": "KEY_LEFT",
+      "mood": "WINDOW_SHAFTS"
+    },
+    "vitality": {
+      "density": "BALANCED"
+    },
+    "visual_eye_path": {
+      "steps": [
+        "ACTOR:C_SOLDIER1",
+        "OBJECT:hospital_bed_iron_01",
+        "REACTION:C_HITLER"
+      ]
+    },
+    "historical_metadata": [
+      {
+        "item": "Year 1918",
+        "confidence": "PLAUSIBLE_RECONSTRUCTION",
+        "note": ""
+      }
+    ],
+    "continuity": {},
+    "dialogue": [
+      {
+        "speaker_id": "C_SOLDIER1",
+        "voice_id": "voice_c_soldier1",
+        "text": "Đức đã ký đình chiến. Chiến tranh kết thúc rồi.",
+        "delivery": "EMPHATIC"
+      }
+    ],
+    "narration": "",
+    "motion_intent": {
+      "motion": "STATIC"
+    },
+    "duration_sec": 4.5,
+    "seed": 1404,
+    "validation": {
+      "delta_passed": true,
+      "stage_view_checked": true
+    }
+  },
+  {
+    "scene_id": "SCENE_012",
+    "shot_id": "SH_012",
+    "shot_index": 11,
+    "beat_ids": [
+      "B012"
+    ],
+    "year": 1919,
+    "location_id": "LOC_BEER_HALL",
+    "shot_purpose": "INFORMATION",
+    "purpose_reason": "Beat TRANSITION requires INFORMATION visual emphasis.",
+    "camera": {
+      "shot": "OTS",
+      "height": "EYE",
+      "height_m": 1.6,
+      "yaw_deg": 0.0,
+      "pitch_deg": 0.0,
+      "lens": "NORMAL",
+      "perspective": "ONE_POINT",
+      "horizon_y": 0.5,
+      "vanishing_point": [
+        0.42,
+        0.5
+      ],
+      "vanishing_point_secondary": null,
+      "depth_layout": "LAYERED",
+      "subject_height_px": 420.0,
+      "subject_position": [
+        0.62,
+        0.8
+      ],
+      "motion": "STATIC"
+    },
+    "actors": [
+      {
+        "character_id": "C_HITLER",
+        "variant_id": "VARIANT_DEFAULT",
+        "costume_id": "COS_HITLER_CIVILIAN",
+        "detail_level": "HERO",
+        "action": "STAND",
+        "emotion": "CALM",
+        "intensity": "NORMAL",
+        "body_weight": "CENTERED",
+        "orientation": "THREE_QUARTER_LEFT",
+        "eyeline_target": null,
+        "contact_target": null,
+        "screen_x": 0.6499999999999999,
+        "depth": 0.35,
+        "depth_plane": "MG",
+        "height_px": 420.0,
+        "silhouette": false
+      }
+    ],
+    "props": [
+      {
+        "instance_id": "PROP_01",
+        "semantic": "long wooden beer table with benches",
+        "asset_id": "generic_table_wood_01",
+        "resolution_status": "MATCH",
+        "category": "TABLE",
+        "role": "HERO",
+        "depth_plane": "MG",
+        "screen_x": 0.25,
+        "depth": 0.5,
+        "state": "STATIC",
+        "mount": "FLOOR"
+      },
+      {
+        "instance_id": "PROP_02",
+        "semantic": "ceramic beer stein",
+        "asset_id": "beer_steins_keferloher_01",
+        "resolution_status": "COMPATIBLE_FALLBACK",
+        "category": "VESSEL",
+        "role": "DRESSING",
+        "depth_plane": "FG",
+        "screen_x": 0.75,
+        "depth": 0.25,
+        "state": "STATIC",
+        "mount": "FLOOR"
+      }
+    ],
+    "object_states": {},
+    "depth_planes": {
+      "NEAR_FG": 0.05,
+      "FG": 0.18,
+      "MG": 0.35,
+      "BG": 0.65,
+      "FAR_BG": 0.9
+    },
+    "lighting_story": {
+      "direction": "KEY_LEFT",
+      "mood": "CANDLELIGHT"
+    },
+    "vitality": {
+      "density": "BALANCED"
+    },
+    "visual_eye_path": {
+      "steps": [
+        "ACTOR:C_HITLER",
+        "OBJECT:generic_table_wood_01"
+      ]
+    },
+    "historical_metadata": [
+      {
+        "item": "Year 1919",
+        "confidence": "PLAUSIBLE_RECONSTRUCTION",
+        "note": ""
+      }
+    ],
+    "continuity": {},
+    "dialogue": [
+      {
+        "speaker_id": "C_NARRATOR",
+        "voice_id": "voice_c_narrator",
+        "text": "Năm 1919, giữa khủng hoảng và bạo loạn, Hitler tới quán bia quan sát cuộc họp Đảng Công nhân Đức.",
+        "delivery": "NEUTRAL"
+      }
+    ],
+    "narration": "",
+    "motion_intent": {
+      "motion": "STATIC"
+    },
+    "duration_sec": 6.5,
+    "seed": 1421,
+    "validation": {
+      "delta_passed": true,
+      "stage_view_checked": true
+    }
+  },
+  {
+    "scene_id": "SCENE_013",
+    "shot_id": "SH_013",
+    "shot_index": 12,
+    "beat_ids": [
+      "B013"
+    ],
+    "year": 1919,
+    "location_id": "LOC_BEER_HALL",
+    "shot_purpose": "INFORMATION",
+    "purpose_reason": "Beat SETUP requires INFORMATION visual emphasis.",
+    "camera": {
+      "shot": "MEDIUM_WIDE",
+      "height": "EYE",
+      "height_m": 1.6,
+      "yaw_deg": 0.0,
+      "pitch_deg": 0.0,
+      "lens": "NORMAL",
+      "perspective": "ONE_POINT",
+      "horizon_y": 0.5,
+      "vanishing_point": [
+        0.58,
+        0.5
+      ],
+      "vanishing_point_secondary": null,
+      "depth_layout": "LAYERED",
+      "subject_height_px": 420.0,
+      "subject_position": [
+        0.38,
+        0.8
+      ],
+      "motion": "STATIC"
+    },
+    "actors": [
+      {
+        "character_id": "C_DAP_MEMBER",
+        "variant_id": "VARIANT_DEFAULT",
+        "costume_id": "COS_DAP",
+        "detail_level": "SUPPORT",
+        "action": "SPEAK",
+        "emotion": "SUSPICIOUS",
+        "intensity": "NORMAL",
+        "body_weight": "CENTERED",
+        "orientation": "THREE_QUARTER_RIGHT",
+        "eyeline_target": null,
+        "contact_target": null,
+        "screen_x": 0.35,
+        "depth": 0.35,
+        "depth_plane": "MG",
+        "height_px": 420.0,
+        "silhouette": false
+      },
+      {
+        "character_id": "C_HITLER",
+        "variant_id": "VARIANT_DEFAULT",
+        "costume_id": "COS_HITLER_CIVILIAN",
+        "detail_level": "HERO",
+        "action": "STAND",
+        "emotion": "CALM",
+        "intensity": "NORMAL",
+        "body_weight": "CENTERED",
+        "orientation": "THREE_QUARTER_LEFT",
+        "eyeline_target": null,
+        "contact_target": null,
+        "screen_x": 0.6499999999999999,
+        "depth": 0.35,
+        "depth_plane": "MG",
+        "height_px": 420.0,
+        "silhouette": false
+      }
+    ],
+    "props": [
+      {
+        "instance_id": "PROP_01",
+        "semantic": "long wooden beer table with benches",
+        "asset_id": "generic_table_wood_01",
+        "resolution_status": "MATCH",
+        "category": "TABLE",
+        "role": "HERO",
+        "depth_plane": "MG",
+        "screen_x": 0.25,
+        "depth": 0.5,
+        "state": "STATIC",
+        "mount": "FLOOR"
+      },
+      {
+        "instance_id": "PROP_02",
+        "semantic": "ceramic beer stein",
+        "asset_id": "beer_steins_keferloher_01",
+        "resolution_status": "COMPATIBLE_FALLBACK",
+        "category": "VESSEL",
+        "role": "DRESSING",
+        "depth_plane": "FG",
+        "screen_x": 0.75,
+        "depth": 0.25,
+        "state": "STATIC",
+        "mount": "FLOOR"
+      }
+    ],
+    "object_states": {},
+    "depth_planes": {
+      "NEAR_FG": 0.05,
+      "FG": 0.18,
+      "MG": 0.35,
+      "BG": 0.65,
+      "FAR_BG": 0.9
+    },
+    "lighting_story": {
+      "direction": "KEY_LEFT",
+      "mood": "CANDLELIGHT"
+    },
+    "vitality": {
+      "density": "BALANCED"
+    },
+    "visual_eye_path": {
+      "steps": [
+        "ACTOR:C_DAP_MEMBER",
+        "OBJECT:generic_table_wood_01",
+        "REACTION:C_HITLER"
+      ]
+    },
+    "historical_metadata": [
+      {
+        "item": "Year 1919",
+        "confidence": "PLAUSIBLE_RECONSTRUCTION",
+        "note": ""
+      }
+    ],
+    "continuity": {},
+    "dialogue": [
+      {
+        "speaker_id": "C_DAP_MEMBER",
+        "voice_id": "voice_c_dap_member",
+        "text": "Anh tới đây để quan sát thôi đúng không?",
+        "delivery": "NEUTRAL"
+      }
+    ],
+    "narration": "",
+    "motion_intent": {
+      "motion": "STATIC"
+    },
+    "duration_sec": 3.5,
+    "seed": 1438,
+    "validation": {
+      "delta_passed": true,
+      "stage_view_checked": true
+    }
+  },
+  {
+    "scene_id": "SCENE_014",
+    "shot_id": "SH_014",
+    "shot_index": 13,
+    "beat_ids": [
+      "B014"
+    ],
+    "year": 1919,
+    "location_id": "LOC_BEER_HALL",
+    "shot_purpose": "PAYOFF",
+    "purpose_reason": "Beat PAYOFF requires PAYOFF visual emphasis.",
+    "camera": {
+      "shot": "TWO_SHOT",
+      "height": "EYE",
+      "height_m": 1.6,
+      "yaw_deg": 0.0,
+      "pitch_deg": 0.0,
+      "lens": "NORMAL",
+      "perspective": "ONE_POINT",
+      "horizon_y": 0.5,
+      "vanishing_point": [
+        0.42,
+        0.5
+      ],
+      "vanishing_point_secondary": null,
+      "depth_layout": "LAYERED",
+      "subject_height_px": 420.0,
+      "subject_position": [
+        0.62,
+        0.8
+      ],
+      "motion": "STATIC"
+    },
+    "actors": [
+      {
+        "character_id": "C_HITLER",
+        "variant_id": "VARIANT_DEFAULT",
+        "costume_id": "COS_HITLER_CIVILIAN",
+        "detail_level": "HERO",
+        "action": "SPEAK",
+        "emotion": "CONFIDENT",
+        "intensity": "NORMAL",
+        "body_weight": "CENTERED",
+        "orientation": "THREE_QUARTER_RIGHT",
+        "eyeline_target": null,
+        "contact_target": null,
+        "screen_x": 0.35,
+        "depth": 0.35,
+        "depth_plane": "MG",
+        "height_px": 420.0,
+        "silhouette": false
+      },
+      {
+        "character_id": "C_DAP_MEMBER",
+        "variant_id": "VARIANT_DEFAULT",
+        "costume_id": "COS_DAP",
+        "detail_level": "SUPPORT",
+        "action": "STAND",
+        "emotion": "CALM",
+        "intensity": "NORMAL",
+        "body_weight": "CENTERED",
+        "orientation": "THREE_QUARTER_LEFT",
+        "eyeline_target": null,
+        "contact_target": null,
+        "screen_x": 0.6499999999999999,
+        "depth": 0.35,
+        "depth_plane": "MG",
+        "height_px": 420.0,
+        "silhouette": false
+      }
+    ],
+    "props": [
+      {
+        "instance_id": "PROP_01",
+        "semantic": "long wooden beer table with benches",
+        "asset_id": "generic_table_wood_01",
+        "resolution_status": "MATCH",
+        "category": "TABLE",
+        "role": "HERO",
+        "depth_plane": "MG",
+        "screen_x": 0.25,
+        "depth": 0.5,
+        "state": "STATIC",
+        "mount": "FLOOR"
+      },
+      {
+        "instance_id": "PROP_02",
+        "semantic": "ceramic beer stein",
+        "asset_id": "beer_steins_keferloher_01",
+        "resolution_status": "COMPATIBLE_FALLBACK",
+        "category": "VESSEL",
+        "role": "DRESSING",
+        "depth_plane": "FG",
+        "screen_x": 0.75,
+        "depth": 0.25,
+        "state": "STATIC",
+        "mount": "FLOOR"
+      }
+    ],
+    "object_states": {},
+    "depth_planes": {
+      "NEAR_FG": 0.05,
+      "FG": 0.18,
+      "MG": 0.35,
+      "BG": 0.65,
+      "FAR_BG": 0.9
+    },
+    "lighting_story": {
+      "direction": "KEY_LEFT",
+      "mood": "CANDLELIGHT"
+    },
+    "vitality": {
+      "density": "BALANCED"
+    },
+    "visual_eye_path": {
+      "steps": [
+        "ACTOR:C_HITLER",
+        "OBJECT:generic_table_wood_01",
+        "REACTION:C_DAP_MEMBER"
+      ]
+    },
+    "historical_metadata": [
+      {
+        "item": "Year 1919",
+        "confidence": "PLAUSIBLE_RECONSTRUCTION",
+        "note": ""
+      }
+    ],
+    "continuity": {},
+    "dialogue": [
+      {
+        "speaker_id": "C_HITLER",
+        "voice_id": "voice_c_hitler",
+        "text": "Ban đầu là thế. Tôi có vài ý kiến.",
+        "delivery": "NEUTRAL"
+      }
+    ],
+    "narration": "",
+    "motion_intent": {
+      "motion": "STATIC"
+    },
+    "duration_sec": 4.0,
+    "seed": 1455,
+    "validation": {
+      "delta_passed": true,
+      "stage_view_checked": true
+    }
+  }
+]

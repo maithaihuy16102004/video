@@ -1,0 +1,19 @@
+1
+00:00:00,000 --> 00:00:03,000
+Đây là cách để bạn tự làm một AI editor
+
+2
+00:00:03,000 --> 00:00:07,000
+cho riêng mình bằng Claude Code, chỉ 4 bước
+
+3
+00:00:07,000 --> 00:00:12,000
+Bước một: tạo cấu trúc thư mục video
+
+4
+00:00:12,000 --> 00:00:16,000
+Bước hai: cài công cụ FFmpeg và Whisper
+
+5
+00:00:16,000 --> 00:00:20,000
+Bước ba: học phong cách từ video tham khảo

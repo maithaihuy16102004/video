@@ -1,0 +1,60 @@
+{
+  "engine_name": "Premium Stickman Cinematic Universal Engine",
+  "engine_version": "5.0.0",
+  "renderer_stack": {
+    "3d_world_engine": "Three.js WebGL 2.0 (Hardware Accelerated via Angle D3D11)",
+    "2d_vector_compositor": "Motion Canvas 3.17.2 Canvas2D Compositor",
+    "headless_browser_host": "Google Chrome 131+ via Puppeteer Core",
+    "encoder_muxer": "FFmpeg libx264 (1920x1080 @ 24fps, yuv420p, faststart)",
+    "audio_synthesis": "VieNeu-TTS v3 Turbo 48kHz (ONNX Runtime)"
+  },
+  "visual_style_lock": "PREMIUM STICKMAN CINEMATIC — STYLE B",
+  "webgl_specifications": {
+    "tonemapping": "ACESFilmicToneMapping",
+    "exposure": 1.45,
+    "key_to_ambient_ratio": "2.6:1",
+    "background_luminance_floor": 0.45,
+    "average_draw_calls_per_frame": 48,
+    "color_space": "sRGB",
+    "depth_test": true,
+    "antialias": true
+  },
+  "prohibited_renderers_check": {
+    "pycairo_final_frame_rendered": false,
+    "pillow_final_frame_rendered": false,
+    "opencv_final_frame_rendered": false,
+    "pure_webgl_motion_canvas_verified": true
+  },
+  "rendered_proof_artifacts": [
+    {
+      "script_id": "shanghai_1930",
+      "mp4_file": "v5_shanghai_1930_master.mp4",
+      "resolution": "1920x1080",
+      "fps": 24,
+      "duration_sec": 20.0,
+      "frames_rendered": 480,
+      "sha256": "0426d0c863116741563d967dba7d4ebcb67d13c46e1d46c6efa1139be3d83a93",
+      "contact_sheet": "v5_shanghai_1930_contact.png"
+    },
+    {
+      "script_id": "choray_er",
+      "mp4_file": "v5_choray_er_master.mp4",
+      "resolution": "1920x1080",
+      "fps": 24,
+      "duration_sec": 20.0,
+      "frames_rendered": 480,
+      "sha256": "6849a41ab48fd50012fa3e56fa4ddddcf11c63b36eac5d803b3106e9f88b817c",
+      "contact_sheet": "v5_choray_er_contact.png"
+    },
+    {
+      "script_id": "sahara_2050",
+      "mp4_file": "v5_sahara_2050_master.mp4",
+      "resolution": "1920x1080",
+      "fps": 24,
+      "duration_sec": 20.0,
+      "frames_rendered": 480,
+      "sha256": "c69a0cfc461787ee6a75abe95bf78c18384fe9edfbce3988ca52d2a79b6c1180",
+      "contact_sheet": "v5_sahara_2050_contact.png"
+    }
+  ]
+}

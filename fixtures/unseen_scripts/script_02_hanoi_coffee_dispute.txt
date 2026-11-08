@@ -1,0 +1,13 @@
+TRANH LUẬN BẢN KẾ HOẠCH BỊ HỦY BỎ
+Bối cảnh: Quán cà phê phong cách công nghiệp hiện đại tại Hà Nội, năm 2026. Sàn bê tông mài bóng loáng phản chiếu ánh đèn vàng, các chậu cây nhiệt đới xanh mướt bên cạnh khung cửa kính lớn nhìn ra phố phường nhộn nhịp.
+
+Nhân vật:
+- Minh: Lập trình viên AI 26 tuổi, năng động, mặc áo hoodie đen, quần jeans, cầm máy tính bảng hiển thị biểu đồ mô hình thần kinh.
+- Linh: Giám đốc sản phẩm 28 tuổi, đĩnh đạc, áo sơ mi trắng, sắc sảo.
+
+Nội dung:
+Minh giơ máy tính bảng ra trước mặt Linh, biểu đồ thuật toán nhảy số liên tục:
+Minh: "Nhìn đi Linh! Mô hình mới chạy nhanh gấp ba lần, độ trễ chỉ còn mười lăm mili-giây. Tại sao ban điều hành lại muốn dừng triển khai?!"
+Linh điềm tĩnh đặt tách cà phê xuống mặt bàn gỗ, ánh mắt nhìn thẳng vào Minh:
+Linh: "Tốc độ nhanh vô nghĩa nếu tỷ lệ ảo giác tăng thêm bốn mươi phần trăm. Khách hàng của chúng ta không cần câu trả lời tức thì nhưng sai lệch, Minh à."
+Minh sững lại một nhịp, nhìn vào dòng thông số đỏ vừa hiện lên trên màn hình máy tính bảng.

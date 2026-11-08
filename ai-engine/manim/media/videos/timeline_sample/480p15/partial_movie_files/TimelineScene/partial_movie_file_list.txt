@@ -1,0 +1,7 @@
+# This file records the segment order used by Manim.
+file 'file:D:/Agent/ai-engine/manim/media/videos/timeline_sample/480p15/partial_movie_files/TimelineScene/316b8aa205497f39c0c07cdf2d0d7f058bf430acbf99e930ced83692cdd4a58a.mp4'
+file 'file:D:/Agent/ai-engine/manim/media/videos/timeline_sample/480p15/partial_movie_files/TimelineScene/87857abf14f609141777474fddcf94bdc8ba367e6c21e775163d6aa75c621bc9.mp4'
+file 'file:D:/Agent/ai-engine/manim/media/videos/timeline_sample/480p15/partial_movie_files/TimelineScene/bed19515c53cec1c93be3d188c41cfaca78b226d83316ca096c0f5b7dff1550e.mp4'
+file 'file:D:/Agent/ai-engine/manim/media/videos/timeline_sample/480p15/partial_movie_files/TimelineScene/38549bb57d0724f7fa8c9c495366f9a7a738f0c987d5b3f75b105321f3e5cc19.mp4'
+file 'file:D:/Agent/ai-engine/manim/media/videos/timeline_sample/480p15/partial_movie_files/TimelineScene/8194e5b19e028bbe211b805d2dbaec867286e72f8b8f049ea4ee1077585b6229.mp4'
+file 'file:D:/Agent/ai-engine/manim/media/videos/timeline_sample/480p15/partial_movie_files/TimelineScene/68aed8794cf4458808b7a974e607b4519778ee70123e9efa8cc35a272929665f.mp4'

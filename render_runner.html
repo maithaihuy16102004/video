@@ -416,28 +416,36 @@
         }
       }
 
+      // Ensure character feet are grounded to environment terrain/floor
+      if (typeof world.getGroundHeight === 'function' && action !== 'hang' && action !== 'hang_from_ledge' && action !== 'jump') {
+        const floorY = world.getGroundHeight(pos[0], pos[2]);
+        pos[1] = Math.max(pos[1], floorY);
+      }
+
       // Project 3D World Anchor into Screen Pixel Space
       const proj = world.projectToScreen(pos);
 
       // Semantic Eyeline & Constraint Resolving
       let handConstraintR = undefined;
       let handConstraintL = undefined;
-      if (action === 'hang_from_ledge') {
-        handConstraintL = [proj.x - 15 * proj.scale, proj.y - 85 * proj.scale];
-      }
+
+      const isHaru = actor.actor_id === 'haru' || (actor.dna && (actor.dna.characterId === 'haru' || actor.dna.id === 'haru'));
+      const isBridgeScene = activePackage.scene_world?.location_id?.includes('BRIDGE') ?? false;
+      const isPostBridgeScene = (activePackage.scene_world?.location_id?.includes('HOUSE') ?? false) || (activePackage.project_id && activePackage.project_id.includes('draft_3'));
 
       const charState = {
         screenX: proj.x,
         screenY: proj.y,
-        scale: 0.95 * proj.scale,
+        scale: proj.scale,
         facing: facing,
         action: action,
         progress: t,
         emotion: emotion,
         eyeline: action === 'hang_from_ledge' ? (t > 7.5 ? [0.6, -0.8] : [0.0, 0.8]) : [facing * 0.7, -0.2],
         handConstraintL: handConstraintL,
-        lostSandalRight: t > 3.2 && actor.actor_id === 'haru' && activePackage.scene_world?.location_id?.includes('BRIDGE'),
-        soaked: activePackage.scene_world?.weather === 'RAIN'
+        lostSandalRight: isHaru && ((isBridgeScene && t >= 4.5) || isPostBridgeScene),
+        soaked: activePackage.scene_world?.weather === 'RAIN',
+        debugSkeleton: activePackage.debug_skeleton || window.__debugSkeleton || false,
       };
 
       charEngine.render(actor.dna, charState);

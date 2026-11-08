@@ -1,0 +1,204 @@
+{
+  "characters": [
+    {
+      "character_id": "NARRATOR",
+      "name": "Narrator",
+      "role": "NARRATOR",
+      "detail_level": "BACKGROUND",
+      "on_screen": false,
+      "is_narrator": true,
+      "historical_person": false,
+      "birth_year": null,
+      "visual_identity": "Invisible narrative voice",
+      "hair": {
+        "shape": "BALD",
+        "hairline": "BALD",
+        "part": "NONE",
+        "length": "BUZZ",
+        "fringe": "NONE",
+        "volume": 0.0,
+        "roughness": 0.0,
+        "strand_clusters": 0,
+        "color": "#000000"
+      },
+      "face": {
+        "head_width": 1.0,
+        "head_height": 1.0,
+        "jaw_shape": "ROUND",
+        "eye_spacing": 1.0,
+        "eye_shape": "DOT",
+        "brow_shape": "FLAT",
+        "nose_style": "BUTTON",
+        "mouth_style": "LINE",
+        "ear_style": "SMALL",
+        "facial_hair": "NONE",
+        "facial_hair_color": null,
+        "skin_tone": "#000000",
+        "distinctive_anchors": []
+      },
+      "body": {
+        "height": 1.0,
+        "build": "AVERAGE",
+        "shoulder_width": 1.0,
+        "posture": "UPRIGHT",
+        "head_scale": 1.0
+      },
+      "costumes": [
+        {
+          "costume_id": "COSTUME_NARRATOR_DEFAULT",
+          "label": "Default Costume",
+          "year_from": null,
+          "year_to": null,
+          "location_ids": [],
+          "contexts": [],
+          "costume": {
+            "headwear": "NONE",
+            "upper_garment": "SHIRT",
+            "outerwear": "NONE",
+            "lower_garment": "TROUSERS",
+            "footwear": "SHOES",
+            "equipment": [],
+            "accessories": [],
+            "insignia": [],
+            "condition": "CLEAN",
+            "palette": {
+              "primary": "#5b6470",
+              "secondary": "#3b3f46",
+              "accent": "#b08d57",
+              "trim": "#2a2a2a"
+            }
+          },
+          "historical_confidence": "PLAUSIBLE_RECONSTRUCTION"
+        }
+      ],
+      "variants": [],
+      "performance": {
+        "gesture_scale": 1.0,
+        "posture_bias": 0.0,
+        "movement_energy": 1.0,
+        "personal_space": 1.0,
+        "reaction_scale": 1.0,
+        "dominant_hand": "RIGHT",
+        "confidence_bias": 0.0
+      },
+      "voice_id": "",
+      "continuity_rules": [],
+      "historical_confidence": "CONFIRMED",
+      "proposal_source": "UNKNOWN"
+    },
+    {
+      "character_id": "DR_JULIAN",
+      "name": "Dr. Julian Aris",
+      "role": "PROTAGONIST",
+      "detail_level": "HERO",
+      "on_screen": true,
+      "is_narrator": false,
+      "historical_person": false,
+      "birth_year": 1855,
+      "visual_identity": "Victorian gentleman scientist with swept-back hair and a tweed vest over a white shirt.",
+      "hair": {
+        "shape": "SWEPT_BACK",
+        "hairline": "MEDIUM",
+        "part": "LEFT",
+        "length": "MEDIUM",
+        "fringe": "SIDE_SWEEP",
+        "volume": 0.6,
+        "roughness": 0.3,
+        "strand_clusters": 5,
+        "color": "#3b2f2f"
+      },
+      "face": {
+        "head_width": 1.0,
+        "head_height": 1.05,
+        "jaw_shape": "SQUARE",
+        "eye_spacing": 1.0,
+        "eye_shape": "ROUND",
+        "brow_shape": "ARCHED",
+        "nose_style": "LONG",
+        "mouth_style": "THIN",
+        "ear_style": "NORMAL",
+        "facial_hair": "FULL_BEARD",
+        "facial_hair_color": "#3b2f2f",
+        "skin_tone": "#f5d6c6",
+        "distinctive_anchors": [
+          "WRINKLES"
+        ]
+      },
+      "body": {
+        "height": 1.05,
+        "build": "AVERAGE",
+        "shoulder_width": 1.05,
+        "posture": "UPRIGHT",
+        "head_scale": 1.0
+      },
+      "costumes": [
+        {
+          "costume_id": "C_JULIAN_LAB",
+          "label": "Laboratory Attire",
+          "year_from": 1892,
+          "year_to": 1892,
+          "location_ids": [
+            "LOC_LAB"
+          ],
+          "contexts": [
+            "WORK"
+          ],
+          "costume": {
+            "headwear": "NONE",
+            "upper_garment": "SHIRT",
+            "outerwear": "NONE",
+            "lower_garment": "TROUSERS",
+            "footwear": "BOOTS",
+            "equipment": [
+              "SATCHEL",
+              "BOOK"
+            ],
+            "accessories": [
+              "POCKET_WATCH",
+              "BUTTONS_DOUBLE_ROW"
+            ],
+            "insignia": [],
+            "condition": "WORN",
+            "palette": {
+              "primary": "#4a3b32",
+              "secondary": "#f4f1ea",
+              "accent": "#8c6239",
+              "trim": "#222222"
+            }
+          },
+          "historical_confidence": "WELL_SUPPORTED"
+        }
+      ],
+      "variants": [
+        {
+          "variant_id": "V_JULIAN_1892",
+          "year_from": 1892,
+          "year_to": 1892,
+          "age": 37,
+          "hair": null,
+          "face": null,
+          "body": null,
+          "conditions": [
+            "NONE"
+          ],
+          "default_costume_id": "C_JULIAN_LAB"
+        }
+      ],
+      "performance": {
+        "gesture_scale": 1.0,
+        "posture_bias": 0.1,
+        "movement_energy": 1.0,
+        "personal_space": 1.0,
+        "reaction_scale": 1.0,
+        "dominant_hand": "RIGHT",
+        "confidence_bias": 0.2
+      },
+      "voice_id": "",
+      "continuity_rules": [
+        "Must wear Victorian vest and trousers in the lab."
+      ],
+      "historical_confidence": "WELL_SUPPORTED",
+      "proposal_source": "UNKNOWN"
+    }
+  ]
+}

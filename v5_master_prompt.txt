@@ -1,0 +1,872 @@
+<USER_REQUEST>
+# MASTER ENGINEERING DIRECTIVE — V5.0
+# PREMIUM STICKMAN CINEMATIC UNIVERSAL VIDEO ENGINE
+
+## PROJECT CONFIGURATION
+
+Existing workspace: `D:/Agent`
+
+Permanent Google Drive root:
+`1HFOuxsP6ir_vLiMFX0o7VMyuersAYVSm`
+
+Create a new V5 review folder under the permanent root.
+
+Existing reference baseline:
+V4.2.3, frozen commit:
+`243d5666f22d8a611a922839358a0a8cd00542e3`
+
+Do not assume that the existing codebase is fully functional merely because previous reports marked tests as PASS.
+
+Audit and verify actual behavior.
+
+## MISSION
+
+Build a complete, reusable, autonomous cinematic video generation application.
+
+The user must be able to submit a new Vietnamese script through the existing frontend and generate a finished animated video without requesting additional source-code changes from Antigravity or another coding agent.
+
+The system must support multiple stories, genres, historical periods, characters, locations and actions through reusable software capabilities and data-driven production plans.
+
+**ONE APPLICATION. ONE PRODUCTION RENDERER. MANY STORIES. ZERO PER-STORY CODING.**
+
+---
+
+# PART I — PERMANENT VISUAL STYLE LOCK
+
+## 1.1 APPROVED STYLE
+
+The permanent approved art direction is:
+
+**PREMIUM STICKMAN CINEMATIC — STYLE B**
+
+This style must be used throughout the V5 production pipeline.
+
+It combines:
+
+- Expressive, professionally designed 2D stickman characters.
+- Organic ink-like linework.
+- Simple but distinctive character silhouettes.
+- Stylized faces with expressive eyes, eyebrows and mouths.
+- Character-specific hairstyles, clothing and accessories.
+- High-quality articulated animation.
+- Rich stylized 3D environments.
+- Cinematic lighting and camera direction.
+- Strong visual storytelling.
+- Consistent color grading and typography.
+
+The characters must remain recognizable as stickmen.
+
+Do not convert the art direction into realistic human anatomy, generic anime, Pixar-style 3D characters or low-effort geometric figures.
+
+## 1.2 CHARACTER DESIGN RULES
+
+Character anatomy:
+
+- Simple stylized head.
+- Minimal torso with intentional silhouette.
+- Elegant tapered limbs.
+- Clean elbow and knee articulation.
+- Simplified expressive hands.
+- Distinctive hairstyles and accessories.
+- Clothing that clearly identifies character identity and context.
+
+The character must be recognizable from silhouette alone.
+
+At least five distinct character archetypes must be available at launch.
+
+Character identity must not depend exclusively on clothing color.
+
+Support variations in:
+
+- Head proportions.
+- Body proportions.
+- Posture.
+- Hair.
+- Costume.
+- Facial expression.
+- Movement personality.
+- Accessories.
+- Cultural and historical context.
+
+## 1.3 LINEWORK RULES
+
+Use a consistent illustrated line system:
+
+- Smooth Bézier curves.
+- Controlled variable stroke widths.
+- Clean rounded line joins where appropriate.
+- Anti-aliased vector rendering.
+- Stable outlines during animation.
+- Consistent visual weight across camera distances.
+- No jitter from unstable geometry.
+- No raw debugging shapes in production output.
+
+Line thickness must be configurable according to resolution, camera framing and visual style.
+
+Do not force every body part to use identical stroke width.
+
+## 1.4 ENVIRONMENT DESIGN RULES
+
+The world should be more detailed than the stickman characters.
+
+Three.js environments must provide:
+
+- Readable architectural silhouettes.
+- Spatial depth.
+- Appropriate props.
+- Ground contact.
+- Motivated light sources.
+- Atmospheric perspective.
+- Material variation.
+- Weather effects where relevant.
+- Environmental motion.
+- Foreground, midground and background composition.
+
+The scene must communicate its location even when subtitles and title cards are hidden.
+
+Do not substitute unrelated generic architecture when the scene requires a specific environment.
+
+## 1.5 CINEMATIC PRESENTATION
+
+Apply:
+
+- Strong composition.
+- Readable staging.
+- Motivated camera movement.
+- Consistent lighting direction.
+- Character/background contrast.
+- Purposeful depth of field.
+- Controlled color grading.
+- Shot-to-shot continuity.
+- Natural pacing.
+
+Never sacrifice story readability for visual effects.
+
+## 1.6 STYLE ENFORCEMENT
+
+Create a machine-readable VisualStyleBible configuration.
+
+All characters, environments, lighting presets, materials, graphics and production templates must reference this configuration.
+
+The frontend must expose the active style as:
+
+`Premium Stickman Cinematic — V5`
+
+Do not allow the engine to silently change art styles between scenes.
+
+Future style changes require explicit configuration versioning.
+
+---
+
+# PART II — ENGINE ARCHITECTURE
+
+## 2.1 AUTHORITATIVE RENDERING STACK
+
+The only approved production visual renderer is:
+
+**Motion Canvas + Three.js**
+
+Motion Canvas responsibilities:
+
+- Character scene graph.
+- 2D character illustration.
+- Character animation.
+- Motion graphics.
+- Typography.
+- Subtitles.
+- Timeline composition.
+- Visual transitions.
+
+Three.js responsibilities:
+
+- 3D architecture.
+- World geometry.
+- Spatial props.
+- Lighting.
+- Shadows.
+- Weather.
+- Environment materials.
+- 3D camera projection.
+
+Use a deterministic, synchronized render clock.
+
+Python may orchestrate production jobs, analyze scripts, process assets, synthesize voices and validate outputs.
+
+Python must not render final story frames.
+
+FFmpeg may encode, mix and mux.
+
+FFmpeg must not replace the production visual renderer.
+
+No silent PyCairo, Pillow, OpenCV or static-image fallback.
+
+## 2.2 SINGLE PRODUCTION PIPELINE
+
+Implement:
+
+```text
+Vietnamese Script
+        |
+        v
+Gemini Universal Story Director
+        |
+        v
+Validated ProductionScenePackage
+        |
+        v
+Asset Resolver + Capability Validator
+        |
+        v
+Universal Character Builder
+        |
+        v
+Universal World Builder
+        |
+        v
+Animation & Camera Director
+        |
+        v
+Unified Production Timeline
+        |
+        v
+Motion Canvas + Three.js
+        |
+        v
+Rendered Frames
+        |
+        +---- VietNeu-TTS
+        +---- Foley / SFX / Music
+        |
+        v
+FFmpeg Encoding & Muxing
+        |
+        v
+Validated MP4
+        |
+        v
+Frontend Playback / Download / Drive
+```
+
+Every stage must have an explicit data contract.
+
+Do not allow scene-specific source code to bypass this pipeline.
+
+---
+
+# PART III — UNIVERSAL CHARACTER ASSET SYSTEM
+
+## 3.1 REUSABLE CHARACTER COMPONENT LIBRARY
+
+Build a modular Premium Stickman character library.
+
+Required components:
+
+- Head silhouettes.
+- Facial feature sets.
+- Hair sets.
+- Torso silhouettes.
+- Arm and leg styles.
+- Hand shapes.
+- Footwear.
+- Clothing layers.
+- Accessories.
+- Held-object attachment points.
+
+Each component must be independently reusable.
+
+Assets must be parameterized without losing visual quality.
+
+Support vector assets such as SVG where appropriate, but render them through the approved Motion Canvas production stack.
+
+## 3.2 CHARACTER DNA CONTRACT
+
+Define a versioned CharacterDNA schema.
+
+Include:
+
+- Character ID.
+- Identity.
+- Visual archetype.
+- Body proportions.
+- Face style.
+- Hair style.
+- Costume modules.
+- Color palette.
+- Accessories.
+- Movement personality.
+- Voice assignment.
+- Rig configuration.
+- Animation capabilities.
+
+CharacterDNA must not contain executable code.
+
+A new character must be generated by combining existing components.
+
+No new TypeScript file may be required for an ordinary new character.
+
+## 3.3 CHARACTER RIG
+
+Implement a reusable skeletal rig.
+
+Required joints:
+
+- Root.
+- Torso.
+- Neck.
+- Head.
+- Shoulders.
+- Elbows.
+- Wrists.
+- Hands.
+- Hips.
+- Knees.
+- Ankles.
+- Feet.
+
+Support:
+
+- Two-bone IK.
+- Forward kinematics.
+- Foot locking.
+- Hand-object constraints.
+- Look-at targeting.
+- Pose blending.
+- Expression blending.
+- Secondary motion.
+- Procedural gait adjustment.
+
+Avoid robotic movement.
+
+## 3.4 CHARACTER ANIMATION QUALITY
+
+Use established animation principles:
+
+- Anticipation.
+- Squash and stretch where stylistically appropriate.
+- Arcs.
+- Ease-in and ease-out.
+- Follow-through.
+- Overlapping action.
+- Exaggeration.
+- Staging.
+- Timing.
+- Secondary action.
+
+The animation system must preserve object ownership and physical continuity.
+
+---
+
+# PART IV — UNIVERSAL ACTION LIBRARY
+
+## 4.1 ACTION CATALOG
+
+Implement reusable action families.
+
+Locomotion:
+
+- Idle.
+- Walk.
+- Run.
+- Sprint.
+- Stop.
+- Turn.
+- Climb.
+- Jump.
+
+Interaction:
+
+- Reach.
+- Grab.
+- Hold.
+- Carry.
+- Give.
+- Receive.
+- Open.
+- Close.
+- Read.
+- Write.
+- Point.
+
+Performance:
+
+- Speak.
+- Listen.
+- Laugh.
+- Cry.
+- Surprise.
+- Fear.
+- Anger.
+- Relief.
+- Think.
+- React.
+
+Physical events:
+
+- Slip.
+- Trip.
+- Fall.
+- Catch balance.
+- Hang.
+- Recover.
+- Sit.
+- Stand.
+
+## 4.2 ACTION COMPOSITION
+
+Actions must be combined from data.
+
+Example:
+
+```text
+RUN
+→ SLIP
+→ GRAB_RAIL
+→ PROTECT_LETTER
+→ LOSE_SANDAL
+→ RECOVER
+```
+
+This is an example of an action sequence, not a hardcoded Edo animation.
+
+The same system must support unrelated object interactions.
+
+Use reusable constraints and action graphs.
+
+Do not create custom animation code for each story.
+
+## 4.3 ACTION STATE MACHINE
+
+Implement:
+
+- Action priorities.
+- Interruptibility.
+- Transition blending.
+- Object attachment.
+- Character orientation.
+- Spatial navigation.
+- Collision avoidance.
+- Recovery behavior.
+- Action completion events.
+
+When a requested action is unsupported, report the limitation or use an approved semantic fallback.
+
+Do not silently replace an important story action with idle animation.
+
+---
+
+# PART V — UNIVERSAL THREE.JS WORLD SYSTEM
+
+## 5.1 MODULAR ENVIRONMENT ASSETS
+
+Build reusable environment kits.
+
+Required launch categories:
+
+- Historical urban.
+- Modern urban.
+- Interior residential.
+- Commercial interior.
+- Industrial and laboratory.
+- Rural and natural.
+- Water and bridge environments.
+- Cold-weather and polar environments.
+
+Use reusable meshes, materials, props and architecture modules.
+
+Do not rely exclusively on primitive boxes and cylinders.
+
+## 5.2 ENVIRONMENT DNA
+
+Define LocationDNA with:
+
+- Environment category.
+- Time period.
+- Geographic context.
+- Architectural style.
+- Terrain.
+- Weather.
+- Time of day.
+- Lighting mood.
+- Required semantic props.
+- Required action spaces.
+- Camera-safe zones.
+- Background detail level.
+
+World construction must be driven by this data.
+
+## 5.3 SEMANTIC ASSET RESOLVER
+
+The asset resolver must understand required scene objects.
+
+Examples:
+
+A café requires:
+
+- Tables.
+- Chairs.
+- Service counter.
+- Coffee-related equipment.
+- Appropriate lighting.
+- Relevant interior details.
+
+A polar research station requires:
+
+- Snow or ice terrain.
+- Research infrastructure.
+- Scientific equipment.
+- Appropriate environmental conditions.
+
+A historical riverside requires:
+
+- Water.
+- Quay or embankment.
+- Period-appropriate architecture.
+- Appropriate street furniture.
+
+Do not place industrial servers in a café merely because both are modern environments.
+
+Do not place generic vegetation in Antarctica.
+
+## 5.4 ASSET QUALITY AND LICENSING
+
+Track:
+
+- Asset ID.
+- Source.
+- License.
+- Permitted usage.
+- Attribution requirements.
+- Geometry complexity.
+- Material dependencies.
+- Supported animation.
+- Style compatibility.
+
+Use properly licensed assets.
+
+Do not download and redistribute copyrighted commercial assets without permission.
+
+Prefer reusable, locally cached assets.
+
+Do not introduce paid asset dependencies without approval.
+
+---
+
+# PART VI — GEMINI UNIVERSAL DIRECTOR
+
+## 6.1 SCRIPT UNDERSTANDING
+
+Gemini must analyze arbitrary supported Vietnamese scripts.
+
+Extract:
+
+- Story structure.
+- Characters.
+- Locations.
+- Events.
+- Dialogue.
+- Narration.
+- Emotional arcs.
+- Props.
+- Actions.
+- Camera opportunities.
+- Environmental effects.
+- Sound events.
+- Timing.
+
+Use structured output.
+
+Do not use fragile substring classification.
+
+## 6.2 PRODUCTION COMPILER
+
+Compile the script into a validated ProductionScenePackage.
+
+The package must contain:
+
+- Story metadata.
+- CharacterDNA.
+- LocationDNA.
+- Prop definitions.
+- Scene graph.
+- Shot list.
+- Action graph.
+- Camera tracks.
+- Lighting tracks.
+- Audio timeline.
+- Subtitle timeline.
+- Continuity graph.
+- Asset manifest.
+
+The package must be declarative data.
+
+Do not generate source code for each script.
+
+## 6.3 CAPABILITY VALIDATION
+
+Before rendering, verify:
+
+- Required assets exist.
+- Requested actions are supported.
+- Character rigs are compatible.
+- Props can be attached.
+- Locations can be constructed.
+- Camera paths are valid.
+- Audio resources are available.
+
+If a requirement cannot be satisfied, produce a clear capability report.
+
+Avoid misleading success statuses.
+
+---
+
+# PART VII — CINEMATIC CAMERA DIRECTOR
+
+Implement reusable camera planning.
+
+Support:
+
+- Establishing shots.
+- Wide shots.
+- Medium shots.
+- Close-ups.
+- Tracking shots.
+- Over-the-shoulder shots.
+- Reaction shots.
+- Object inserts.
+
+Camera selection must follow narrative intent.
+
+Implement automatic validation for:
+
+- Character visibility.
+- Subject size.
+- Occlusion.
+- Headroom.
+- Safe margins.
+- Camera clipping.
+- Screen direction.
+- Object visibility.
+
+Critical story actions must remain readable.
+
+Do not allow a camera angle that hides the principal action behind architecture.
+
+---
+
+# PART VIII — AUDIO AND TIMELINE
+
+Preserve VietNeu-TTS.
+
+Support:
+
+- Narration.
+- Multi-speaker dialogue.
+- Character-to-voice mapping.
+- Natural pauses.
+- Event-based Foley.
+- Environmental ambience.
+- Music.
+- Subtitle synchronization.
+
+Use actual voice durations to construct the authoritative timeline.
+
+Do not accelerate voices merely to fit arbitrary scene durations.
+
+All visual and audio events must use the same time base.
+
+Implement audio mixing, ducking and loudness validation.
+
+---
+
+# PART IX — FRONTEND PRODUCT EXPERIENCE
+
+The application must be operable without Antigravity.
+
+Required workflow:
+
+1. User pastes a Vietnamese script.
+2. User clicks Analyze.
+3. Gemini generates the production plan.
+4. User previews characters and environments.
+5. User optionally edits production settings.
+6. User clicks Generate Video.
+7. Backend starts the actual production job.
+8. Frontend displays real progress.
+9. Engine renders the video.
+10. Audio is generated and synchronized.
+11. MP4 is validated.
+12. User watches or downloads the video.
+13. User may upload it to Drive.
+
+No mocked controls.
+
+No demo-video substitutions.
+
+No manual source-code changes.
+
+No per-story developer prompts.
+
+---
+
+# PART X — AUTOMATED QUALITY GATES
+
+Implement production validation.
+
+Visual:
+
+- Character visibility.
+- Scene exposure.
+- Camera framing.
+- Asset presence.
+- Semantic environment consistency.
+- Object continuity.
+- Typography correctness.
+
+Animation:
+
+- Foot sliding.
+- Hand-object attachment.
+- Pose discontinuities.
+- Broken action transitions.
+- Character clipping.
+
+Technical:
+
+- Renderer provenance.
+- Frame completeness.
+- Audio/video sync.
+- MP4 decodability.
+- Drive upload integrity.
+
+Artistic quality must also undergo human review.
+
+Do not claim cinematic quality based only on luminance or WebGL draw calls.
+
+---
+
+# PART XI — CODE FREEZE AND GENERALIZATION
+
+This is a mandatory acceptance phase.
+
+After completing the reusable engine:
+
+1. Commit all source code.
+2. Record the frozen Git SHA.
+3. Verify the working tree is clean.
+4. Submit three previously unseen Vietnamese scripts.
+5. Use the actual frontend/backend workflow.
+6. Generate real MP4 files.
+7. Record source hashes before and after.
+8. Confirm zero application source modifications.
+9. Confirm no story-specific renderer files were generated.
+10. Confirm all videos used the same renderer.
+
+If a test reveals a missing reusable capability, implement it as a general engine feature.
+
+Then freeze a new commit and restart the complete test suite.
+
+Do not patch one test story and declare generalization.
+
+---
+
+# PART XII — DELIVERY REQUIREMENTS
+
+Deliver:
+
+- `V5_VISUAL_STYLE_BIBLE.md`
+- `V5_ENGINE_ARCHITECTURE.md`
+- `V5_CHARACTER_ASSET_LIBRARY.md`
+- `V5_ENVIRONMENT_ASSET_LIBRARY.md`
+- `V5_ANIMATION_CAPABILITY_MATRIX.md`
+- `V5_PRODUCTION_SCENE_SCHEMA.json`
+- `V5_RENDERER_PROVENANCE.json`
+- `V5_FRONTEND_E2E_TEST_REPORT.md`
+- `V5_GENERALIZATION_TEST_REPORT.md`
+- `V5_SOURCE_FREEZE_VALIDATION.json`
+- `V5_KNOWN_LIMITATIONS.md`
+- `V5_INSTALL_AND_RUN.md`
+
+Provide actual rendered visual proof videos and contact sheets.
+
+Upload review artifacts to the permanent Google Drive root:
+
+`1HFOuxsP6ir_vLiMFX0o7VMyuersAYVSm`
+
+Create a dedicated V5 review folder.
+
+Do not overwrite historical V4 artifacts.
+
+---
+
+# PART XIII — EXECUTION DISCIPLINE
+
+Work through the engineering phases autonomously.
+
+Do not stop at planning.
+
+Do not claim completion merely because source files exist.
+
+Do not fabricate tests.
+
+Do not hardcode acceptance scenes.
+
+Do not introduce duplicate rendering engines.
+
+Do not introduce paid APIs without approval.
+
+Do not create a new application if the existing one can be upgraded.
+
+Do not render the full 152-second Edo Master before human approval.
+
+Keep the existing application operational throughout development.
+
+Implement and verify each subsystem.
+
+Use actual generated frames as evidence.
+
+---
+
+# FINAL ACCEPTANCE
+
+The product is accepted only when:
+
+1. The frontend accepts a new Vietnamese script.
+2. Gemini produces a valid production plan.
+3. CharacterDNA generates distinct Premium Stickman characters.
+4. LocationDNA constructs semantically appropriate 3D worlds.
+5. The animation library performs required actions.
+6. Motion Canvas + Three.js render the actual production frames.
+7. VietNeu-TTS and sound effects are synchronized.
+8. A valid MP4 is produced.
+9. The user can play and download the video.
+10. No source-code edits are required for new supported scripts.
+11. The visual style remains consistently Premium Stickman Cinematic.
+12. Human artistic review approves the result.
+
+**FINAL PRODUCT: AUTONOMOUS PREMIUM STICKMAN CINEMATIC VIDEO GENERATOR.**
+
+Final status:
+
+`AWAITING_HUMAN_V5_PRODUCT_ACCEPTANCE`
+3. Cách nghiệm thu để không lặp lại sai lầm V4
+Lần này, mình khuyên không cho agent báo hoàn thành chỉ vì có 3 video và các file JSON PASS.
+
+Hãy kiểm tra ba tầng riêng biệt:
+Tầng 1 — Chất lượng hình ảnh
+
+Nhân vật Premium Stickman có đẹp, dễ nhận diện và diễn xuất tốt không? Bối cảnh có thực sự phù hợp nội dung không?
+
+Tầng 2 — Chất lượng hoạt hình
+
+Có chuyển động liên tục, tương tác vật thể đúng, camera rõ hành động và âm thanh đồng bộ không?
+
+Tầng 3 — Khả năng tự động hóa
+
+Khóa code, nhập một kịch bản mới chưa từng dùng, nhấn Generate và nhận MP4 mà không có Antigravity can thiệp.
+
+
+Điểm chốt: Từ V5, Antigravity phải phát triển thư viện mỹ thuật và năng lực hoạt họa dùng chung, thay vì tiếp tục cố làm đẹp từng video bằng những đoạn code riêng. Đó là cách có cơ hội nâng chất lượng rõ rệt mà vẫn giữ được mục tiêu tạo video tự động lâu dài.
+</USER_REQUEST>
+<ADDITIONAL_METADATA>
+The current local time is: 2026-11-08T19:30:14+07:00.
+</ADDITIONAL_METADATA>

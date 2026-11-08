@@ -1,0 +1,137 @@
+{
+  "locations": [
+    {
+      "location_id": "LOC_LAB",
+      "name": "Secluded Laboratory",
+      "period_from": 1892,
+      "period_to": 1892,
+      "region": "London, England",
+      "architecture": "Victorian industrial workshop with brick and timber elements.",
+      "enclosure": "INTERIOR",
+      "ceiling": "BEAMED",
+      "wall_treatment": "BRICK",
+      "floor_feature": "PLANKS",
+      "openings": "WINDOWS_TALL",
+      "horizon_feature": "CITY_SKYLINE",
+      "materials": [
+        "WOOD",
+        "BRICK",
+        "METAL",
+        "GLASS"
+      ],
+      "palette": {
+        "sky_top": "#2c3e50",
+        "sky_bottom": "#bdc3c7",
+        "wall": "#8b5a2b",
+        "floor": "#5c4033",
+        "accent": "#d35400",
+        "shadow": "#1a1a1a"
+      },
+      "lighting_behavior": "WINDOW_SHAFTS",
+      "weather": "CLEAR",
+      "atmosphere": [
+        "DUST_MOTES",
+        "LIGHT_SHAFTS",
+        "TOBACCO_SMOKE"
+      ],
+      "wear": 0.3,
+      "density": "BALANCED",
+      "props": [
+        {
+          "semantic": "High-voltage induction coils and brass terminals",
+          "category": "APPARATUS",
+          "role": "HERO",
+          "materials": [
+            "COPPER",
+            "BRASS",
+            "WOOD"
+          ],
+          "count": 1,
+          "affordances": [
+            "OPERATE",
+            "GRIP",
+            "OBSERVE"
+          ]
+        },
+        {
+          "semantic": "Heavy oak workbench with scratches",
+          "category": "DESK",
+          "role": "DRESSING",
+          "materials": [
+            "WOOD"
+          ],
+          "count": 2,
+          "affordances": [
+            "SIT",
+            "LEAN",
+            "CARRY"
+          ]
+        },
+        {
+          "semantic": "Leather-bound scientific journal and papers",
+          "category": "DOCUMENTS",
+          "role": "FOREGROUND",
+          "materials": [
+            "LEATHER",
+            "PAPER"
+          ],
+          "count": 3,
+          "affordances": [
+            "READ",
+            "CARRY",
+            "GRIP"
+          ]
+        },
+        {
+          "semantic": "Brass oil desk lamp",
+          "category": "LAMP",
+          "role": "DRESSING",
+          "materials": [
+            "BRASS",
+            "GLASS"
+          ],
+          "count": 1,
+          "affordances": [
+            "OPERATE",
+            "CARRY"
+          ]
+        },
+        {
+          "semantic": "Wooden storage crate for glass tubes",
+          "category": "CRATE",
+          "role": "BACKGROUND",
+          "materials": [
+            "WOOD"
+          ],
+          "count": 4,
+          "affordances": [
+            "PUSH",
+            "CARRY"
+          ]
+        }
+      ],
+      "foreground_vocabulary": [
+        {
+          "semantic": "Loose copper wiring on the floor",
+          "category": "DEBRIS",
+          "role": "FOREGROUND",
+          "materials": [
+            "METAL"
+          ],
+          "count": 1,
+          "affordances": []
+        }
+      ],
+      "background_activity": [
+        "SMOKE_COLUMNS",
+        "DISTANT_FIGURES"
+      ],
+      "historical_constraints": [
+        "Electric lighting is rare; illumination must be from gas, oil, or early incandescent bulbs."
+      ],
+      "reusable_masters": [],
+      "historical_confidence": "WELL_SUPPORTED",
+      "proposal_source": "UNKNOWN"
+    }
+  ]
+}

@@ -1,0 +1,114 @@
+<USER_REQUEST>
+Mình chọn một kịch bản hoàn toàn khác các bài test V4.2 trước đó: bối cảnh Nhật Bản thời Edo, nhân vật chính là một người đưa thư, có mưa, phố cổ, cầu gỗ, đèn lồng, tương tác vật thể và một tình huống bất ngờ.
+Kịch bản này là hư cấu lịch sử, không dựa trên một sự kiện có thật. Nó rất phù hợp để kiểm tra Gemini có tự tạo được thế giới, nhân vật, hành động, camera và sound effect từ đầu hay không.
+TẬP THỬ — BỨC THƯ KHÔNG ĐƯỢC PHÉP ƯỚT
+Test V4.2
+[浮世絵AIアート：日本の木版画ジェネレーター | Morphic](https://images.openai.com/static-rsc-4/kCd2yIHpuPY8AnCbUc1eu4G4WsOcuYUqooWQop9T8Wlk6cf26SaOnSgk0Kun8tyhmbvQxWN0Vx0f0HRTG6LzX7fUNxHmZfe0a71C76NeW-jbipIAl2XKxyfaPar8AVoXnOf-35kKCOsy3YeMdbATe11Y6hMcSCSg2fCDaLSU59E?purpose=inline)
+[morphic.com](https://morphic.com/jp/resources/images/ukiyo-e-ai?utm_source=chatgpt.com)
+~75–90 giây
+Ước tính
+3 nhân vật
+Có đối thoại
+5 bối cảnh
+Có chuyển cảnh
+Kịch bản để dán trực tiếp vào frontend
+BỨC THƯ KHÔNG ĐƯỢC PHÉP ƯỚT
+Truyện hư cấu lấy bối cảnh Nhật Bản thời Edo, khoảng năm 1800.
+Nhân vật chính: Haru — người đưa thư trẻ, khoảng 22 tuổi. Kể chuyện ngôi thứ nhất, giọng nam trẻ, nhanh nhẹn, đôi lúc hài hước.
+Nhân vật phụ: Ông chủ trạm thư — khoảng 60 tuổi, nghiêm khắc. Aiko — cô gái khoảng 24 tuổi, bình tĩnh nhưng quyết đoán.
+CẢNH 1 — TRẠM THƯ LÚC CHIỀU MUỘN
+HARU (kể chuyện):
+Tôi tên Haru. Năm ấy, tôi làm nghề đưa thư ở Edo. Một công việc rất đơn giản: nhận thư, chạy thật nhanh, và cố gắng không chết trên đường.
+Cho đến một buổi chiều, ông chủ đưa cho tôi một phong thư được bọc trong giấy dầu.
+ÔNG CHỦ TRẠM THƯ:
+“Đưa nó tới nhà Aiko trước khi chuông tối vang lên. Và nhớ kỹ… tuyệt đối không được để ướt!”
+HARU (kể chuyện):
+Tôi nhìn phong thư. Rồi nhìn bầu trời.
+Một giọt mưa rơi trúng mũi tôi.
+Tuyệt vời. Đúng là ngày đẹp trời để bắt đầu một thảm họa.
+CẢNH 2 — CON PHỐ EDO DƯỚI CƠN MƯA
+HARU (kể chuyện):
+Chưa đầy năm phút sau, cả con phố biến thành một dòng sông nhỏ.
+Tôi chạy qua những cửa hàng gỗ, né một chiếc xe kéo, rồi suýt đâm đầu vào người bán cá.
+NGƯỜI BÁN CÁ (hét):
+“Nhìn đường chứ, nhóc!”
+HARU (kể chuyện):
+Tôi cúi đầu xin lỗi, nhưng chân vẫn chạy.
+Bởi vì trong tay tôi là một bức thư quan trọng.
+Còn trong đầu tôi lúc ấy chỉ có một suy nghĩ:
+Nếu thư ướt, ông chủ sẽ biến tôi thành cá khô.
+CẢNH 3 — CÂY CẦU GỖ
+HARU (kể chuyện):
+Đến cây cầu bắc qua con kênh, tôi nhận ra một vấn đề.
+Một tấm ván đã gãy. Nước mưa chảy qua mặt cầu. Và bên dưới là dòng nước đen ngòm.
+Tôi hít sâu, kẹp phong thư vào trong áo, rồi bước lên.
+Một bước.
+Hai bước.
+RẮC!
+Tấm ván dưới chân tôi bật tung.
+Tôi ngã nhào, một tay bám vào lan can, tay còn lại ôm chặt phong thư.
+HARU (kể chuyện):
+Thật kỳ lạ.
+Giữa lúc mạng sống treo trên một thanh gỗ mục, điều tôi lo nhất vẫn là…
+Bức thư có bị ướt không?
+CẢNH 4 — NGÔI NHÀ DƯỚI ÁNH ĐÈN LỒNG
+HARU (kể chuyện):
+Khi tôi tới nơi, trời đã tối hẳn.
+Tôi đứng trước một ngôi nhà gỗ, toàn thân ướt sũng, tóc dính bết vào trán.
+Một cô gái mở cửa.
+AIKO:
+“Anh là người đưa thư?”
+HARU:
+“Vâng. Và tôi xin thông báo… bức thư vẫn khô.”
+Tôi đưa phong thư cho cô ấy bằng cả hai tay, như thể đang trao một báu vật.
+Aiko mở thư.
+Cô đọc rất nhanh.
+Rồi đột nhiên bật cười.
+HARU (kể chuyện):
+Tôi đứng chết lặng.
+Tôi đã chạy xuyên cơn bão, suýt rơi xuống kênh, và mất gần hết lòng tự trọng.
+Vậy mà cô ấy… cười?
+CẢNH 5 — NỘI DUNG BỨC THƯ
+AIKO:
+“Anh có biết trong thư viết gì không?”
+HARU:
+“Tôi chỉ biết nó không được phép ướt.”
+Aiko xoay lá thư về phía tôi.
+Trên giấy chỉ có một dòng:
+“Aiko, nhớ mang ô. Chiều nay có thể mưa.”
+HARU (kể chuyện):
+Tôi nhìn dòng chữ.
+Nhìn cơn mưa phía sau lưng.
+Rồi nhìn đôi dép của mình… một chiếc đã mất từ lúc qua cầu.
+Hôm ấy, tôi học được một bài học vô cùng quý giá.
+Đôi khi, thứ quan trọng nhất trong một bức thư…
+Là biết nó viết cái quái gì trước khi mang đi.
+HẾT.
+Kịch bản này sẽ kiểm tra được gì?
+Hệ thống
+Bài kiểm tra thực tế
+Gemini
+Tự phát hiện nhân vật, đồ vật, địa điểm, tình huống và cú twist
+Three.js
+Phố Edo, trạm thư, kênh nước, cầu gỗ, nhà Aiko
+Stickman
+Chạy, né xe, trượt chân, bám lan can, trao thư
+Motion Canvas
+Camera theo nhân vật, cận cảnh thư, nhịp dựng hài
+VietNeu-TTS
+Giọng Haru kể chuyện, hai giọng đối thoại riêng
+Sound Design
+Mưa, bước chân, tiếng gỗ gãy, nước chảy, giấy mở
+Motion Graphics
+Thẻ địa điểm, chữ trên thư, nhấn nhá cú twist
+Cách test: Dán nguyên kịch bản vào http://localhost:4173, không tự khai báo CharacterDNA, LocationDNA hay ShotPlan. Để Gemini tự phân tích.
+Sau khi render, hãy gửi mình video. Mình sẽ kiểm tra đặc biệt ba khoảnh khắc: Haru suýt rơi khỏi cầu, Aiko mở thư và cú chốt hài ở cuối. Nếu ba đoạn này thể hiện rõ bằng hình ảnh, diễn xuất và âm thanh, đó sẽ là bằng chứng tốt hơn nhiều cho khả năng sản xuất kịch bản mới của V4.2.
+sao frontend báo 1 cảnh 10s thooinhir 
+</USER_REQUEST>
+<ADDITIONAL_METADATA>
+The current local time is: 2026-11-08T16:35:35+07:00.
+
+The user has uploaded 1 image(s):
+- C:/Users/Administrator/.gemini/antigravity/brain/f88cd54c-7572-4af9-b078-ce82af94eed7/.user_uploaded/media_1794130524646_3d96b720.jpg
+You can embed this image in an artifact if you need the USER to review it.
+</ADDITIONAL_METADATA>

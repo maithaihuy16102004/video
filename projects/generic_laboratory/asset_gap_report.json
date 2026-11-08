@@ -1,0 +1,205 @@
+{
+  "total_requirements": 18,
+  "exact_matches": 12,
+  "fallback_matches": 6,
+  "gaps": [
+    {
+      "requirement_id": "REQ_LOC_LAB_1",
+      "semantic": "High-voltage induction coils and brass terminals",
+      "category": "APPARATUS",
+      "period_year": 1892,
+      "region": "London, England",
+      "available_exact": true,
+      "fallback_used": "generic_apparatus_01",
+      "confidence": "HIGH",
+      "reason": "High affinity score (8.5) across category, era, and semantic keywords."
+    },
+    {
+      "requirement_id": "REQ_LOC_LAB_2",
+      "semantic": "Heavy oak workbench with scratches",
+      "category": "DESK",
+      "period_year": 1892,
+      "region": "London, England",
+      "available_exact": true,
+      "fallback_used": "tavern_table_oak_01",
+      "confidence": "HIGH",
+      "reason": "High affinity score (8.5) across category, era, and semantic keywords."
+    },
+    {
+      "requirement_id": "REQ_LOC_LAB_3",
+      "semantic": "Leather-bound scientific journal and papers",
+      "category": "DOCUMENTS",
+      "period_year": 1892,
+      "region": "London, England",
+      "available_exact": false,
+      "fallback_used": "generic_table_wood_01",
+      "confidence": "LOW",
+      "reason": "No specific match; using generic period fallback."
+    },
+    {
+      "requirement_id": "REQ_LOC_LAB_1",
+      "semantic": "High-voltage induction coils and brass terminals",
+      "category": "APPARATUS",
+      "period_year": 1892,
+      "region": "London, England",
+      "available_exact": true,
+      "fallback_used": "generic_apparatus_01",
+      "confidence": "HIGH",
+      "reason": "High affinity score (8.5) across category, era, and semantic keywords."
+    },
+    {
+      "requirement_id": "REQ_LOC_LAB_2",
+      "semantic": "Heavy oak workbench with scratches",
+      "category": "DESK",
+      "period_year": 1892,
+      "region": "London, England",
+      "available_exact": true,
+      "fallback_used": "tavern_table_oak_01",
+      "confidence": "HIGH",
+      "reason": "High affinity score (8.5) across category, era, and semantic keywords."
+    },
+    {
+      "requirement_id": "REQ_LOC_LAB_3",
+      "semantic": "Leather-bound scientific journal and papers",
+      "category": "DOCUMENTS",
+      "period_year": 1892,
+      "region": "London, England",
+      "available_exact": false,
+      "fallback_used": "generic_table_wood_01",
+      "confidence": "LOW",
+      "reason": "No specific match; using generic period fallback."
+    },
+    {
+      "requirement_id": "REQ_LOC_LAB_1",
+      "semantic": "High-voltage induction coils and brass terminals",
+      "category": "APPARATUS",
+      "period_year": 1892,
+      "region": "London, England",
+      "available_exact": true,
+      "fallback_used": "generic_apparatus_01",
+      "confidence": "HIGH",
+      "reason": "High affinity score (8.5) across category, era, and semantic keywords."
+    },
+    {
+      "requirement_id": "REQ_LOC_LAB_2",
+      "semantic": "Heavy oak workbench with scratches",
+      "category": "DESK",
+      "period_year": 1892,
+      "region": "London, England",
+      "available_exact": true,
+      "fallback_used": "tavern_table_oak_01",
+      "confidence": "HIGH",
+      "reason": "High affinity score (8.5) across category, era, and semantic keywords."
+    },
+    {
+      "requirement_id": "REQ_LOC_LAB_3",
+      "semantic": "Leather-bound scientific journal and papers",
+      "category": "DOCUMENTS",
+      "period_year": 1892,
+      "region": "London, England",
+      "available_exact": false,
+      "fallback_used": "generic_table_wood_01",
+      "confidence": "LOW",
+      "reason": "No specific match; using generic period fallback."
+    },
+    {
+      "requirement_id": "REQ_LOC_LAB_1",
+      "semantic": "High-voltage induction coils and brass terminals",
+      "category": "APPARATUS",
+      "period_year": 1892,
+      "region": "London, England",
+      "available_exact": true,
+      "fallback_used": "generic_apparatus_01",
+      "confidence": "HIGH",
+      "reason": "High affinity score (8.5) across category, era, and semantic keywords."
+    },
+    {
+      "requirement_id": "REQ_LOC_LAB_2",
+      "semantic": "Heavy oak workbench with scratches",
+      "category": "DESK",
+      "period_year": 1892,
+      "region": "London, England",
+      "available_exact": true,
+      "fallback_used": "tavern_table_oak_01",
+      "confidence": "HIGH",
+      "reason": "High affinity score (8.5) across category, era, and semantic keywords."
+    },
+    {
+      "requirement_id": "REQ_LOC_LAB_3",
+      "semantic": "Leather-bound scientific journal and papers",
+      "category": "DOCUMENTS",
+      "period_year": 1892,
+      "region": "London, England",
+      "available_exact": false,
+      "fallback_used": "generic_table_wood_01",
+      "confidence": "LOW",
+      "reason": "No specific match; using generic period fallback."
+    },
+    {
+      "requirement_id": "REQ_LOC_LAB_1",
+      "semantic": "High-voltage induction coils and brass terminals",
+      "category": "APPARATUS",
+      "period_year": 1892,
+      "region": "London, England",
+      "available_exact": true,
+      "fallback_used": "generic_apparatus_01",
+      "confidence": "HIGH",
+      "reason": "High affinity score (8.5) across category, era, and semantic keywords."
+    },
+    {
+      "requirement_id": "REQ_LOC_LAB_2",
+      "semantic": "Heavy oak workbench with scratches",
+      "category": "DESK",
+      "period_year": 1892,
+      "region": "London, England",
+      "available_exact": true,
+      "fallback_used": "tavern_table_oak_01",
+      "confidence": "HIGH",
+      "reason": "High affinity score (8.5) across category, era, and semantic keywords."
+    },
+    {
+      "requirement_id": "REQ_LOC_LAB_3",
+      "semantic": "Leather-bound scientific journal and papers",
+      "category": "DOCUMENTS",
+      "period_year": 1892,
+      "region": "London, England",
+      "available_exact": false,
+      "fallback_used": "generic_table_wood_01",
+      "confidence": "LOW",
+      "reason": "No specific match; using generic period fallback."
+    },
+    {
+      "requirement_id": "REQ_LOC_LAB_1",
+      "semantic": "High-voltage induction coils and brass terminals",
+      "category": "APPARATUS",
+      "period_year": 1892,
+      "region": "London, England",
+      "available_exact": true,
+      "fallback_used": "generic_apparatus_01",
+      "confidence": "HIGH",
+      "reason": "High affinity score (8.5) across category, era, and semantic keywords."
+    },
+    {
+      "requirement_id": "REQ_LOC_LAB_2",
+      "semantic": "Heavy oak workbench with scratches",
+      "category": "DESK",
+      "period_year": 1892,
+      "region": "London, England",
+      "available_exact": true,
+      "fallback_used": "tavern_table_oak_01",
+      "confidence": "HIGH",
+      "reason": "High affinity score (8.5) across category, era, and semantic keywords."
+    },
+    {
+      "requirement_id": "REQ_LOC_LAB_3",
+      "semantic": "Leather-bound scientific journal and papers",
+      "category": "DOCUMENTS",
+      "period_year": 1892,
+      "region": "London, England",
+      "available_exact": false,
+      "fallback_used": "generic_table_wood_01",
+      "confidence": "LOW",
+      "reason": "No specific match; using generic period fallback."
+    }
+  ]
+}

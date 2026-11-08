@@ -1,0 +1,74 @@
+{
+  "engine": "edge-tts",
+  "default_voice": "hoaimy",
+  "voices": {
+    "hoaimy": {
+      "id": "vi-VN-HoaiMyNeural",
+      "gender": "female",
+      "description": "Giọng nữ trong trẻo, tự nhiên — kể chuyện, tin tức, shorts"
+    },
+    "namminh": {
+      "id": "vi-VN-NamMinhNeural",
+      "gender": "male",
+      "description": "Giọng nam trầm ấm, rõ ràng — báo cáo, documentary, daily"
+    },
+    "vieneu-minhquan": {
+      "id": "vieneu-Minh Quân",
+      "gender": "male",
+      "description": "VieNeu-TTS: Nam Bắc tự nhiên, chân thực"
+    },
+    "vieneu-aihan": {
+      "id": "vieneu-Ái Hân",
+      "gender": "female",
+      "description": "VieNeu-TTS: Nữ Nam tin tức, rõ ràng"
+    },
+    "vieneu-myduyen": {
+      "id": "vieneu-Mỹ Duyên",
+      "gender": "female",
+      "description": "VieNeu-TTS: Nữ Bắc đọc truyện cảm xúc"
+    },
+    "vieneu-ductri": {
+      "id": "vieneu-Đức Trí",
+      "gender": "male",
+      "description": "VieNeu-TTS: Nam Bắc đọc truyện truyền cảm"
+    },
+    "vieneu-huuquan": {
+      "id": "vieneu-Hữu Quân",
+      "gender": "male",
+      "description": "VieNeu-TTS: Nam Bắc tin tức đĩnh đạc"
+    },
+    "vieneu-xuantien": {
+      "id": "vieneu-Xuân Tiên",
+      "gender": "female",
+      "description": "VieNeu-TTS: Nữ Bắc thời sự, chuyên nghiệp"
+    },
+    "vieneu-maianh": {
+      "id": "vieneu-Mai Anh",
+      "gender": "female",
+      "description": "VieNeu-TTS: Nữ Bắc tin tức, lưu loát"
+    },
+    "vieneu-trucly": {
+      "id": "vieneu-Trúc Ly",
+      "gender": "female",
+      "description": "VieNeu-TTS: Nữ Bắc tự nhiên, duyên dáng"
+    },
+    "vieneu-anhkhoi": {
+      "id": "vieneu-Anh Khôi",
+      "gender": "male",
+      "description": "VieNeu-TTS: Nam Bắc kể chuyện hào sảng"
+    },
+    "vieneu-manhdung": {
+      "id": "vieneu-Mạnh Dũng",
+      "gender": "male",
+      "description": "VieNeu-TTS: Nam Bắc tự nhiên, mạnh mẽ"
+    },
+    "vieneu-adam": {
+      "id": "vieneu-Adam",
+      "gender": "male",
+      "description": "VieNeu-TTS: Nam Nam tự nhiên, phóng khoáng"
+    }
+  },
+  "rate": "+0%",
+  "pitch": "+0Hz",
+  "volume": "+0%"
+}

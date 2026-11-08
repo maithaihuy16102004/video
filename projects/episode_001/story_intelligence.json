@@ -1,0 +1,764 @@
+{
+  "title": "Hitler Trong Thế Chiến I",
+  "language": "vi",
+  "genre": "Documentary",
+  "period": {
+    "start_year": 1914,
+    "end_year": 1919
+  },
+  "timeline": [
+    {
+      "event_id": "E01",
+      "year": 1914,
+      "month": null,
+      "description": "Hitler nhập ngũ vào Trung đoàn Bộ binh Dự bị Bavaria số 16.",
+      "location_id": "LOC_MUNICH",
+      "confidence": "CONFIRMED"
+    },
+    {
+      "event_id": "E02",
+      "year": 1916,
+      "month": null,
+      "description": "Hitler bị thương ở chân tại Trận Somme.",
+      "location_id": "LOC_SOMME",
+      "confidence": "CONFIRMED"
+    },
+    {
+      "event_id": "E03",
+      "year": 1918,
+      "month": 10,
+      "description": "Hitler bị thương do khí độc tại Ypres và điều trị ở Pasewalk.",
+      "location_id": "LOC_YPRES",
+      "confidence": "CONFIRMED"
+    },
+    {
+      "event_id": "E04",
+      "year": 1919,
+      "month": null,
+      "description": "Hitler tham dự cuộc họp của Đảng Công nhân Đức tại Munich.",
+      "location_id": "LOC_BEER_HALL",
+      "confidence": "CONFIRMED"
+    }
+  ],
+  "characters": [
+    {
+      "character_id": "C_NARRATOR",
+      "name": "Người Dẫn",
+      "role": "NARRATOR",
+      "aliases": [
+        "NGƯỜI DẪN"
+      ],
+      "is_narrator": true,
+      "on_screen": false,
+      "speaking": true,
+      "historical_person": false,
+      "birth_year": null,
+      "description": "Giọng đọc dẫn chuyện chính, khách quan và châm biếm nhẹ."
+    },
+    {
+      "character_id": "C_HITLER",
+      "name": "Adolf Hitler",
+      "role": "PROTAGONIST",
+      "aliases": [
+        "HITLER"
+      ],
+      "is_narrator": false,
+      "on_screen": true,
+      "speaking": true,
+      "historical_person": true,
+      "birth_year": 1889,
+      "description": "Thanh niên trẻ tuổi vô danh tham gia Thế chiến I."
+    },
+    {
+      "character_id": "C_SOLDIER1",
+      "name": "Người Lính",
+      "role": "MINOR",
+      "aliases": [
+        "NGƯỜI LÍNH"
+      ],
+      "is_narrator": false,
+      "on_screen": true,
+      "speaking": true,
+      "historical_person": false,
+      "birth_year": null,
+      "description": "Đồng đội của Hitler."
+    },
+    {
+      "character_id": "C_OFFICER",
+      "name": "Sĩ Quan",
+      "role": "SUPPORTING",
+      "aliases": [
+        "SĨ QUAN"
+      ],
+      "is_narrator": false,
+      "on_screen": true,
+      "speaking": true,
+      "historical_person": false,
+      "birth_year": null,
+      "description": "Sĩ quan chỉ huy đưa mệnh lệnh nguy hiểm."
+    },
+    {
+      "character_id": "C_DAP_MEMBER",
+      "name": "Thành viên DAP",
+      "role": "MINOR",
+      "aliases": [
+        "THÀNH VIÊN DAP"
+      ],
+      "is_narrator": false,
+      "on_screen": true,
+      "speaking": true,
+      "historical_person": false,
+      "birth_year": null,
+      "description": "Thành viên Đảng Công nhân Đức."
+    }
+  ],
+  "locations": [
+    {
+      "location_id": "LOC_MUNICH",
+      "name": "Munich 1914",
+      "year": 1914,
+      "region": "Germany",
+      "description": "Đường phố Munich nhộn nhịp thời điểm chiến tranh bùng nổ.",
+      "enclosure": "EXTERIOR"
+    },
+    {
+      "location_id": "LOC_WESTERN_FRONT",
+      "name": "Mặt trận phía Tây",
+      "year": 1914,
+      "region": "France",
+      "description": "Chiến hào ngập bùn và pháo kích.",
+      "enclosure": "EXTERIOR"
+    },
+    {
+      "location_id": "LOC_SOMME",
+      "name": "Trận Somme",
+      "year": 1916,
+      "region": "France",
+      "description": "Chiến trường khốc liệt với pháo đạn.",
+      "enclosure": "EXTERIOR"
+    },
+    {
+      "location_id": "LOC_YPRES",
+      "name": "Ypres và Bệnh viện Pasewalk",
+      "year": 1918,
+      "region": "Belgium/Germany",
+      "description": "Bệnh viện quân đội Đức.",
+      "enclosure": "INTERIOR"
+    },
+    {
+      "location_id": "LOC_BEER_HALL",
+      "name": "Quán bia Munich",
+      "year": 1919,
+      "region": "Germany",
+      "description": "Quán bia đông đúc khói thuốc và các cuộc thảo luận chính trị.",
+      "enclosure": "INTERIOR"
+    }
+  ],
+  "story_beats": [
+    {
+      "beat_id": "B001",
+      "index": 0,
+      "text": "Hãy tưởng tượng bạn 25 tuổi. Sự nghiệp chưa có gì, tương lai mờ mịt. Đúng lúc đó, cả châu Âu lao vào cuộc chiến tranh khổng lồ.",
+      "speaker_id": "C_NARRATOR",
+      "is_dialogue": true,
+      "location_id": "LOC_MUNICH",
+      "year": 1914,
+      "characters": [
+        "C_NARRATOR"
+      ],
+      "actions": [
+        {
+          "actor_id": "C_NARRATOR",
+          "verb": "SPEAK",
+          "target": null,
+          "emotion": "CALM"
+        }
+      ],
+      "beat_type": "HOOK",
+      "suggested_purpose": "INFORMATION",
+      "emotional_intensity": 0.4,
+      "tension": 0.3,
+      "new_information": true,
+      "comedy": "NONE",
+      "opens_loops": [
+        "L1"
+      ],
+      "closes_loops": [],
+      "objects": [],
+      "visual_opportunities": [
+        "Street of Munich in 1914",
+        "Young man looking uncertain"
+      ],
+      "weather": "Clear",
+      "est_duration_sec": 6.0
+    },
+    {
+      "beat_id": "B002",
+      "index": 1,
+      "text": "Người ta nói chiến tranh sẽ kết thúc trước Giáng sinh. Nghe cũng ổn.",
+      "speaker_id": "C_HITLER",
+      "is_dialogue": true,
+      "location_id": "LOC_MUNICH",
+      "year": 1914,
+      "characters": [
+        "C_HITLER"
+      ],
+      "actions": [
+        {
+          "actor_id": "C_HITLER",
+          "verb": "SPEAK",
+          "target": null,
+          "emotion": "CONFIDENT"
+        }
+      ],
+      "beat_type": "COMEDY",
+      "suggested_purpose": "COMEDY",
+      "emotional_intensity": 0.3,
+      "tension": 0.1,
+      "new_information": true,
+      "comedy": "SETUP",
+      "opens_loops": [],
+      "closes_loops": [],
+      "objects": [],
+      "visual_opportunities": [
+        "Hitler smiling optimistically"
+      ],
+      "weather": "Clear",
+      "est_duration_sec": 4.5
+    },
+    {
+      "beat_id": "B003",
+      "index": 2,
+      "text": "Hóa ra họ không nói rõ Giáng sinh năm nào.",
+      "speaker_id": "C_SOLDIER1",
+      "is_dialogue": true,
+      "location_id": "LOC_MUNICH",
+      "year": 1914,
+      "characters": [
+        "C_SOLDIER1"
+      ],
+      "actions": [
+        {
+          "actor_id": "C_SOLDIER1",
+          "verb": "SPEAK",
+          "target": null,
+          "emotion": "AMUSED"
+        }
+      ],
+      "beat_type": "COMEDY",
+      "suggested_purpose": "COMEDY",
+      "emotional_intensity": 0.3,
+      "tension": 0.1,
+      "new_information": true,
+      "comedy": "PAYOFF",
+      "opens_loops": [],
+      "closes_loops": [],
+      "objects": [],
+      "visual_opportunities": [
+        "Soldier shrugging"
+      ],
+      "weather": "Clear",
+      "est_duration_sec": 4.0
+    },
+    {
+      "beat_id": "B004",
+      "index": 3,
+      "text": "Hitler gia nhập Trung đoàn Bộ binh Dự bị Bavaria số 16. Bùn, chuột và pháo binh thay thế cho mọi ảo tưởng vinh quang.",
+      "speaker_id": "C_NARRATOR",
+      "is_dialogue": true,
+      "location_id": "LOC_WESTERN_FRONT",
+      "year": 1914,
+      "characters": [
+        "C_NARRATOR",
+        "C_HITLER"
+      ],
+      "actions": [
+        {
+          "actor_id": "C_NARRATOR",
+          "verb": "SPEAK",
+          "target": null,
+          "emotion": "CALM"
+        }
+      ],
+      "beat_type": "EXPOSITION",
+      "suggested_purpose": "INFORMATION",
+      "emotional_intensity": 0.5,
+      "tension": 0.4,
+      "new_information": true,
+      "comedy": "NONE",
+      "opens_loops": [],
+      "closes_loops": [],
+      "objects": [
+        "SANDBAGS",
+        "WIRE"
+      ],
+      "visual_opportunities": [
+        "Muddy trenches",
+        "Rats in trench"
+      ],
+      "weather": "Rain",
+      "est_duration_sec": 7.0
+    },
+    {
+      "beat_id": "B005",
+      "index": 4,
+      "text": "Mang bức thư này qua khu vực đang bị pháo kích.",
+      "speaker_id": "C_OFFICER",
+      "is_dialogue": true,
+      "location_id": "LOC_WESTERN_FRONT",
+      "year": 1914,
+      "characters": [
+        "C_OFFICER",
+        "C_HITLER"
+      ],
+      "actions": [
+        {
+          "actor_id": "C_OFFICER",
+          "verb": "HAND_OVER",
+          "target": "C_HITLER",
+          "emotion": "CALM"
+        }
+      ],
+      "beat_type": "CONFLICT",
+      "suggested_purpose": "TENSION",
+      "emotional_intensity": 0.6,
+      "tension": 0.7,
+      "new_information": false,
+      "comedy": "NONE",
+      "opens_loops": [],
+      "closes_loops": [],
+      "objects": [
+        "DOCUMENTS"
+      ],
+      "visual_opportunities": [
+        "Officer handing dispatch to Hitler"
+      ],
+      "weather": "Overcast",
+      "est_duration_sec": 4.0
+    },
+    {
+      "beat_id": "B006",
+      "index": 5,
+      "text": "Tôi phải đi qua đó? Có đường nào an toàn hơn không?",
+      "speaker_id": "C_HITLER",
+      "is_dialogue": true,
+      "location_id": "LOC_WESTERN_FRONT",
+      "year": 1914,
+      "characters": [
+        "C_HITLER",
+        "C_OFFICER"
+      ],
+      "actions": [
+        {
+          "actor_id": "C_HITLER",
+          "verb": "SPEAK",
+          "target": "C_OFFICER",
+          "emotion": "NERVOUS"
+        }
+      ],
+      "beat_type": "COMEDY",
+      "suggested_purpose": "COMEDY",
+      "emotional_intensity": 0.5,
+      "tension": 0.5,
+      "new_information": false,
+      "comedy": "SETUP",
+      "opens_loops": [],
+      "closes_loops": [],
+      "objects": [],
+      "visual_opportunities": [
+        "Hitler looking worried at exploding shells"
+      ],
+      "weather": "Overcast",
+      "est_duration_sec": 4.5
+    },
+    {
+      "beat_id": "B007",
+      "index": 6,
+      "text": "Không.",
+      "speaker_id": "C_OFFICER",
+      "is_dialogue": true,
+      "location_id": "LOC_WESTERN_FRONT",
+      "year": 1914,
+      "characters": [
+        "C_OFFICER",
+        "C_HITLER"
+      ],
+      "actions": [
+        {
+          "actor_id": "C_OFFICER",
+          "verb": "SPEAK",
+          "target": "C_HITLER",
+          "emotion": "CALM"
+        }
+      ],
+      "beat_type": "COMEDY",
+      "suggested_purpose": "COMEDY",
+      "emotional_intensity": 0.4,
+      "tension": 0.4,
+      "new_information": false,
+      "comedy": "PAYOFF",
+      "opens_loops": [],
+      "closes_loops": [],
+      "objects": [],
+      "visual_opportunities": [
+        "Officer stone-faced"
+      ],
+      "weather": "Overcast",
+      "est_duration_sec": 1.5
+    },
+    {
+      "beat_id": "B008",
+      "index": 7,
+      "text": "Tuyệt vời.",
+      "speaker_id": "C_HITLER",
+      "is_dialogue": true,
+      "location_id": "LOC_WESTERN_FRONT",
+      "year": 1914,
+      "characters": [
+        "C_HITLER"
+      ],
+      "actions": [
+        {
+          "actor_id": "C_HITLER",
+          "verb": "SPEAK",
+          "target": null,
+          "emotion": "SAD"
+        }
+      ],
+      "beat_type": "COMEDY",
+      "suggested_purpose": "COMEDY",
+      "emotional_intensity": 0.4,
+      "tension": 0.3,
+      "new_information": false,
+      "comedy": "PAYOFF",
+      "opens_loops": [],
+      "closes_loops": [],
+      "objects": [],
+      "visual_opportunities": [
+        "Hitler sighing heavily"
+      ],
+      "weather": "Overcast",
+      "est_duration_sec": 1.5
+    },
+    {
+      "beat_id": "B009",
+      "index": 8,
+      "text": "Năm 1916 tại Mặt trận Somme, mảnh đạn pháo làm Hitler bị thương ở chân.",
+      "speaker_id": "C_NARRATOR",
+      "is_dialogue": true,
+      "location_id": "LOC_SOMME",
+      "year": 1916,
+      "characters": [
+        "C_NARRATOR",
+        "C_HITLER"
+      ],
+      "actions": [
+        {
+          "actor_id": "C_NARRATOR",
+          "verb": "SPEAK",
+          "target": null,
+          "emotion": "CALM"
+        }
+      ],
+      "beat_type": "ESCALATION",
+      "suggested_purpose": "INFORMATION",
+      "emotional_intensity": 0.7,
+      "tension": 0.6,
+      "new_information": true,
+      "comedy": "NONE",
+      "opens_loops": [],
+      "closes_loops": [],
+      "objects": [
+        "DEBRIS"
+      ],
+      "visual_opportunities": [
+        "Explosion at Somme",
+        "Hitler falling down"
+      ],
+      "weather": "Smoke",
+      "est_duration_sec": 5.5
+    },
+    {
+      "beat_id": "B010",
+      "index": 9,
+      "text": "Tháng 10 năm 1918 tại Ypres, khí độc khiến Hitler tạm thời mù mắt và phải nằm viện tại Pasewalk.",
+      "speaker_id": "C_NARRATOR",
+      "is_dialogue": true,
+      "location_id": "LOC_YPRES",
+      "year": 1918,
+      "characters": [
+        "C_NARRATOR",
+        "C_HITLER"
+      ],
+      "actions": [
+        {
+          "actor_id": "C_NARRATOR",
+          "verb": "SPEAK",
+          "target": null,
+          "emotion": "CALM"
+        }
+      ],
+      "beat_type": "REVERSAL",
+      "suggested_purpose": "INFORMATION",
+      "emotional_intensity": 0.8,
+      "tension": 0.7,
+      "new_information": true,
+      "comedy": "NONE",
+      "opens_loops": [],
+      "closes_loops": [],
+      "objects": [
+        "BED"
+      ],
+      "visual_opportunities": [
+        "Hospital ward in Pasewalk",
+        "Hitler with bandage over eyes"
+      ],
+      "weather": "Indoor",
+      "est_duration_sec": 7.5
+    },
+    {
+      "beat_id": "B011",
+      "index": 10,
+      "text": "Đức đã ký đình chiến. Chiến tranh kết thúc rồi.",
+      "speaker_id": "C_SOLDIER1",
+      "is_dialogue": true,
+      "location_id": "LOC_YPRES",
+      "year": 1918,
+      "characters": [
+        "C_SOLDIER1",
+        "C_HITLER"
+      ],
+      "actions": [
+        {
+          "actor_id": "C_SOLDIER1",
+          "verb": "SPEAK",
+          "target": null,
+          "emotion": "RELIEVED"
+        }
+      ],
+      "beat_type": "ESCALATION",
+      "suggested_purpose": "INFORMATION",
+      "emotional_intensity": 0.7,
+      "tension": 0.5,
+      "new_information": true,
+      "comedy": "NONE",
+      "opens_loops": [],
+      "closes_loops": [],
+      "objects": [],
+      "visual_opportunities": [
+        "Soldier entering hospital room with news"
+      ],
+      "weather": "Indoor",
+      "est_duration_sec": 4.5
+    },
+    {
+      "beat_id": "B012",
+      "index": 11,
+      "text": "Năm 1919, giữa khủng hoảng và bạo loạn, Hitler tới quán bia quan sát cuộc họp Đảng Công nhân Đức.",
+      "speaker_id": "C_NARRATOR",
+      "is_dialogue": true,
+      "location_id": "LOC_BEER_HALL",
+      "year": 1919,
+      "characters": [
+        "C_NARRATOR",
+        "C_HITLER"
+      ],
+      "actions": [
+        {
+          "actor_id": "C_NARRATOR",
+          "verb": "SPEAK",
+          "target": null,
+          "emotion": "CALM"
+        }
+      ],
+      "beat_type": "TRANSITION",
+      "suggested_purpose": "INFORMATION",
+      "emotional_intensity": 0.5,
+      "tension": 0.4,
+      "new_information": true,
+      "comedy": "NONE",
+      "opens_loops": [],
+      "closes_loops": [],
+      "objects": [
+        "TABLE",
+        "CHAIR"
+      ],
+      "visual_opportunities": [
+        "Crowded beer hall in Munich 1919",
+        "Hitler sitting at a table"
+      ],
+      "weather": "Indoor",
+      "est_duration_sec": 6.5
+    },
+    {
+      "beat_id": "B013",
+      "index": 12,
+      "text": "Anh tới đây để quan sát thôi đúng không?",
+      "speaker_id": "C_DAP_MEMBER",
+      "is_dialogue": true,
+      "location_id": "LOC_BEER_HALL",
+      "year": 1919,
+      "characters": [
+        "C_DAP_MEMBER",
+        "C_HITLER"
+      ],
+      "actions": [
+        {
+          "actor_id": "C_DAP_MEMBER",
+          "verb": "SPEAK",
+          "target": "C_HITLER",
+          "emotion": "SUSPICIOUS"
+        }
+      ],
+      "beat_type": "SETUP",
+      "suggested_purpose": "INFORMATION",
+      "emotional_intensity": 0.4,
+      "tension": 0.5,
+      "new_information": false,
+      "comedy": "NONE",
+      "opens_loops": [],
+      "closes_loops": [],
+      "objects": [],
+      "visual_opportunities": [
+        "DAP member looking at Hitler"
+      ],
+      "weather": "Indoor",
+      "est_duration_sec": 3.5
+    },
+    {
+      "beat_id": "B014",
+      "index": 13,
+      "text": "Ban đầu là thế. Tôi có vài ý kiến.",
+      "speaker_id": "C_HITLER",
+      "is_dialogue": true,
+      "location_id": "LOC_BEER_HALL",
+      "year": 1919,
+      "characters": [
+        "C_HITLER",
+        "C_DAP_MEMBER"
+      ],
+      "actions": [
+        {
+          "actor_id": "C_HITLER",
+          "verb": "SPEAK",
+          "target": "C_DAP_MEMBER",
+          "emotion": "CONFIDENT"
+        }
+      ],
+      "beat_type": "PAYOFF",
+      "suggested_purpose": "PAYOFF",
+      "emotional_intensity": 0.6,
+      "tension": 0.6,
+      "new_information": true,
+      "comedy": "NONE",
+      "opens_loops": [],
+      "closes_loops": [
+        "L1"
+      ],
+      "objects": [],
+      "visual_opportunities": [
+        "Hitler standing up with intense expression"
+      ],
+      "weather": "Indoor",
+      "est_duration_sec": 4.0
+    }
+  ],
+  "relationships": [
+    {
+      "a": "C_HITLER",
+      "b": "C_SOLDIER1",
+      "type": "comrade"
+    },
+    {
+      "a": "C_HITLER",
+      "b": "C_OFFICER",
+      "type": "subordinate to superior"
+    },
+    {
+      "a": "C_HITLER",
+      "b": "C_DAP_MEMBER",
+      "type": "acquaintance"
+    }
+  ],
+  "objects": [
+    {
+      "object_id": "DOCUMENTS",
+      "semantic": "military dispatch letter",
+      "category": "DOCUMENTS",
+      "materials": [
+        "PAPER"
+      ],
+      "period_year": 1914
+    },
+    {
+      "object_id": "BED",
+      "semantic": "hospital bed",
+      "category": "BED",
+      "materials": [
+        "WOOD",
+        "METAL"
+      ],
+      "period_year": 1918
+    }
+  ],
+  "historical_entities": [
+    {
+      "entity": "List 16 Bavarian Reserve Infantry Regiment",
+      "category": "CHARACTER_AGE",
+      "year": 1914,
+      "claim": "Hitler served in this regiment during WWI.",
+      "confidence": "CONFIRMED",
+      "needs_verification": false
+    },
+    {
+      "entity": "Pasewalk hospital",
+      "category": "ARCHITECTUR",
+      "year": 1918,
+      "claim": "Hitler recovered from mustard gas poisoning here.",
+      "confidence": "CONFIRMED",
+      "needs_verification": false
+    }
+  ],
+  "emotional_curve": [
+    0.4,
+    0.3,
+    0.3,
+    0.5,
+    0.6,
+    0.5,
+    0.4,
+    0.4,
+    0.7,
+    0.8,
+    0.7,
+    0.5,
+    0.4,
+    0.6
+  ],
+  "open_loops": [
+    {
+      "loop_id": "L1",
+      "question": "What happens when Hitler joins the political meeting?",
+      "opened_beat": "B001",
+      "closed_beat": "B014"
+    }
+  ],
+  "comedy_opportunities": [
+    "The cynical remark about Christmas 1914.",
+    "Hitler's awkward request for a safer route in the trenches."
+  ],
+  "tension_points": [
+    "The dangerous shellfire mission.",
+    "The hospital ward news about the armistice."
+  ],
+  "cliffhanger": "Hitler stepping into German politics in 1919.",
+  "research_requirements": [
+    {
+      "item": "German World War I uniforms",
+      "category": "UNIFORM",
+      "question": "What was the exact appearance of Bavarian infantry uniforms in 1914?",
+      "confidence": "CONFIRMED"
+    }
+  ],
+  "reasoning_source": "UNKNOWN"
+}

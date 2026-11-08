@@ -1,0 +1,17 @@
+[SCENE - SECLUDED LABORATORY, 1892]
+NARRATOR:
+In late autumn 1892, Dr. Julian Aris entered his secluded electrical research laboratory.
+DR. JULIAN:
+The induction coils are finally aligned. Let us see if the current holds.
+
+[SCENE - EXPERIMENT BENCH, 1892]
+NARRATOR:
+Julian adjusted the rheostat and carefully recorded the voltage readings in his leather journal.
+DR. JULIAN:
+Steady at four hundred volts. The secondary circuit is energized.
+
+[SCENE - DISCHARGE GAP, 1892]
+NARRATOR:
+Suddenly, a violent electrical spark bridged the brass electrodes, casting harsh shadows across the workshop.
+DR. JULIAN:
+Fascinating! The ionization threshold is far lower than Maxwell predicted.

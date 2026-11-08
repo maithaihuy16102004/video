@@ -1,0 +1,5 @@
+# This file records the segment order used by Manim.
+file 'file:D:/Agent/ai-engine/manim/vfx_cache/09af504421/videos/kinetic_title/480p15/partial_movie_files/KineticTitleScene/a2dcea9639ea2993720f1ffa047cffab8d2c024b88ad6e2280c091d04557532a.mp4'
+file 'file:D:/Agent/ai-engine/manim/vfx_cache/09af504421/videos/kinetic_title/480p15/partial_movie_files/KineticTitleScene/b820253ed21861711bb5128363133dac20c257a1522181fd6a1bf586d8e45207.mp4'
+file 'file:D:/Agent/ai-engine/manim/vfx_cache/09af504421/videos/kinetic_title/480p15/partial_movie_files/KineticTitleScene/82cf6b67d10e0d4b4a8f98e3979eeecea3a01140675ab1a0a5fbd73c297a8e75.mp4'
+file 'file:D:/Agent/ai-engine/manim/vfx_cache/09af504421/videos/kinetic_title/480p15/partial_movie_files/KineticTitleScene/a22b1ad958709390a0de29c3d368e449aab1dc182407c3e614aabe417d7e586d.mp4'

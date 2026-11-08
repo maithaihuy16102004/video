@@ -67,12 +67,12 @@ export type PropAttachment =
   | 'walking_cane';
 
 export interface CharacterProportionsV5 {
-  readonly headRatio: number;          // e.g. 0.26 - 0.30
-  readonly standingHeightPx: number;   // e.g. 250 - 280
-  readonly shoulderWidthPx: number;    // e.g. 48 - 60
-  readonly limbThicknessPx: number;    // e.g. 9 - 13
-  readonly torsoLengthPx: number;      // e.g. 68 - 82
-  readonly legLengthPx: number;        // e.g. 110 - 130
+  readonly headRatio: number;          // e.g. 0.14 - 0.16 (6.3 to 7.0 heads tall, never chibi)
+  readonly standingHeightPx: number;   // e.g. 285 - 325px
+  readonly shoulderWidthPx: number;    // e.g. 46 - 60px
+  readonly limbThicknessPx: number;    // e.g. 9 - 12px
+  readonly torsoLengthPx: number;      // e.g. 92 - 108px (Chest + Lumbar)
+  readonly legLengthPx: number;        // e.g. 146 - 168px (Thigh + Shin)
 }
 
 export interface CharacterDNA_V5 {
@@ -127,12 +127,12 @@ export const V5_CORE_ARCHETYPES: Record<string, CharacterDNA_V5> = {
     archetypeId: 'young_courier',
     voiceId: 'vieneu-Quang Sơn',
     proportions: {
-      headRatio: 0.28,
-      standingHeightPx: 250,
+      headRatio: 0.155,
+      standingHeightPx: 290,
       shoulderWidthPx: 50,
       limbThicknessPx: 10,
-      torsoLengthPx: 70,
-      legLengthPx: 115,
+      torsoLengthPx: 94,
+      legLengthPx: 148,
     },
     face: {
       headContour: 'round_youth',
@@ -169,12 +169,12 @@ export const V5_CORE_ARCHETYPES: Record<string, CharacterDNA_V5> = {
     archetypeId: 'noblewoman',
     voiceId: 'vieneu-Trúc Ly',
     proportions: {
-      headRatio: 0.26,
-      standingHeightPx: 260,
+      headRatio: 0.150,
+      standingHeightPx: 285,
       shoulderWidthPx: 46,
       limbThicknessPx: 9,
-      torsoLengthPx: 74,
-      legLengthPx: 122,
+      torsoLengthPx: 92,
+      legLengthPx: 146,
     },
     face: {
       headContour: 'delicate_heart',
@@ -210,12 +210,12 @@ export const V5_CORE_ARCHETYPES: Record<string, CharacterDNA_V5> = {
     archetypeId: 'detective_scholar',
     voiceId: 'vieneu-Hải Đăng',
     proportions: {
-      headRatio: 0.25,
-      standingHeightPx: 275,
-      shoulderWidthPx: 56,
+      headRatio: 0.142,
+      standingHeightPx: 325,
+      shoulderWidthPx: 60,
       limbThicknessPx: 11,
-      torsoLengthPx: 80,
-      legLengthPx: 128,
+      torsoLengthPx: 108,
+      legLengthPx: 168,
     },
     face: {
       headContour: 'oval_gaunt',
@@ -253,12 +253,12 @@ export const V5_CORE_ARCHETYPES: Record<string, CharacterDNA_V5> = {
     archetypeId: 'tech_founder',
     voiceId: 'vieneu-Thiện Minh',
     proportions: {
-      headRatio: 0.27,
-      standingHeightPx: 265,
+      headRatio: 0.148,
+      standingHeightPx: 305,
       shoulderWidthPx: 58,
       limbThicknessPx: 11,
-      torsoLengthPx: 75,
-      legLengthPx: 124,
+      torsoLengthPx: 100,
+      legLengthPx: 156,
     },
     face: {
       headContour: 'square_jaw',
@@ -296,12 +296,12 @@ export const V5_CORE_ARCHETYPES: Record<string, CharacterDNA_V5> = {
     archetypeId: 'polar_scientist',
     voiceId: 'vieneu-Mai Anh',
     proportions: {
-      headRatio: 0.26,
-      standingHeightPx: 265,
-      shoulderWidthPx: 52,
-      limbThicknessPx: 12,
-      torsoLengthPx: 76,
-      legLengthPx: 120,
+      headRatio: 0.150,
+      standingHeightPx: 295,
+      shoulderWidthPx: 54,
+      limbThicknessPx: 11,
+      torsoLengthPx: 96,
+      legLengthPx: 152,
     },
     face: {
       headContour: 'athletic_lean',

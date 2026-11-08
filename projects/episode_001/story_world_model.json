@@ -1,0 +1,936 @@
+{
+  "schema_version": "story-world-v1",
+  "script_hash": "8e08a6a1f180b5070a91ff06ef5652547462be7cbde19d5549473778a515c407",
+  "title": "[HOOK - MUNICH, 1914]",
+  "status": "DETERMINISTIC_FALLBACK",
+  "characters": {
+    "CHARACTER_001": {
+      "character_id": "CHARACTER_001",
+      "canonical_name": "Adolf Hitler",
+      "aliases": [
+        "Adolf"
+      ],
+      "story_role": "LEAD",
+      "importance": "PRIMARY",
+      "identity_anchors": [
+        "distinct head silhouette",
+        "context-derived hair shape",
+        "recognizable costume silhouette",
+        "consistent posture"
+      ],
+      "appearance_confidence": 0.55,
+      "age_timeline": [
+        {
+          "time": "1914",
+          "age_band": "context-derived",
+          "changes": [
+            "baseline identity"
+          ]
+        },
+        {
+          "time": "1916",
+          "age_band": "context-derived",
+          "changes": [
+            "age",
+            "costume",
+            "role"
+          ]
+        },
+        {
+          "time": "1918",
+          "age_band": "context-derived",
+          "changes": [
+            "age",
+            "costume",
+            "role"
+          ]
+        },
+        {
+          "time": "1919",
+          "age_band": "context-derived",
+          "changes": [
+            "age",
+            "costume",
+            "role"
+          ]
+        }
+      ],
+      "appearance_timeline": [
+        {
+          "time": "1914",
+          "age_band": "context-derived",
+          "changes": [
+            "baseline identity"
+          ]
+        },
+        {
+          "time": "1916",
+          "age_band": "context-derived",
+          "changes": [
+            "age",
+            "costume",
+            "role"
+          ]
+        },
+        {
+          "time": "1918",
+          "age_band": "context-derived",
+          "changes": [
+            "age",
+            "costume",
+            "role"
+          ]
+        },
+        {
+          "time": "1919",
+          "age_band": "context-derived",
+          "changes": [
+            "age",
+            "costume",
+            "role"
+          ]
+        }
+      ],
+      "costume_timeline": [
+        {
+          "time": "1914",
+          "description": "occupation/date/location appropriate attire"
+        },
+        {
+          "time": "1916",
+          "description": "occupation/date/location appropriate attire"
+        },
+        {
+          "time": "1918",
+          "description": "occupation/date/location appropriate attire"
+        },
+        {
+          "time": "1919",
+          "description": "occupation/date/location appropriate attire"
+        }
+      ],
+      "hair_timeline": [
+        {
+          "time": "1914",
+          "description": "identity-preserving contextual hair"
+        },
+        {
+          "time": "1916",
+          "description": "identity-preserving contextual hair"
+        },
+        {
+          "time": "1918",
+          "description": "identity-preserving contextual hair"
+        },
+        {
+          "time": "1919",
+          "description": "identity-preserving contextual hair"
+        }
+      ],
+      "facial_hair_timeline": [],
+      "performance_profile": {
+        "baseline": "script-derived",
+        "gesture": "semantic action"
+      },
+      "continuity_rules": [
+        "preserve identity anchors across time",
+        "costume changes require context"
+      ],
+      "uncertainties": [
+        "exact appearance requires Gemini/context/reference"
+      ],
+      "provenance": {
+        "identity_anchors": {
+          "source": "PLAUSIBLE_RECONSTRUCTION",
+          "confidence": 0.55,
+          "evidence": "script role and visual simplification"
+        }
+      },
+      "ideal_character_design": {
+        "description": "script/context interpreted illustrated identity"
+      },
+      "executable_character_dna": {
+        "hair_shape": "CONTEXTUAL",
+        "head_shape": "OVAL",
+        "body_proportion": "ROLE_BASED",
+        "costume_family": "CONTEXTUAL"
+      },
+      "capability_gaps": []
+    }
+  },
+  "locations": {
+    "LOCATION_001": {
+      "location_id": "LOCATION_001",
+      "canonical_name": "HOOK - MUNICH, 1914",
+      "aliases": [
+        "the room"
+      ],
+      "location_type": "INTERIOR",
+      "time_periods": [
+        "1914",
+        "1916",
+        "1918",
+        "1919"
+      ],
+      "architecture": "specific occupied enclosure",
+      "materials": [
+        "WOOD",
+        "PLASTER"
+      ],
+      "layout_intent": "supports event, movement and landmark",
+      "landmarks": [
+        "dominant opening or furniture axis"
+      ],
+      "prop_ecology": [
+        "TABLE",
+        "CHAIR",
+        "PAPER",
+        "BOOK",
+        "LAMP"
+      ],
+      "human_traces": [
+        "moved object",
+        "evidence of recent use"
+      ],
+      "environment_condition": "used",
+      "lighting_sources": [
+        "WINDOW",
+        "LAMP"
+      ],
+      "weather": "UNKNOWN",
+      "continuity_rules": [
+        "architecture and landmark persist between shots"
+      ],
+      "historical_context": {},
+      "executable_location_dna": {
+        "enclosure": "INTERIOR",
+        "architecture": "specific occupied enclosure",
+        "materials": [
+          "WOOD",
+          "PLASTER"
+        ],
+        "prop_ecology": [
+          "TABLE",
+          "CHAIR",
+          "PAPER",
+          "BOOK",
+          "LAMP"
+        ],
+        "landmark": "dominant opening or furniture axis"
+      }
+    },
+    "LOCATION_002": {
+      "location_id": "LOCATION_002",
+      "canonical_name": "MẶT TRẬN PHÍA TÂY, 1914",
+      "aliases": [
+        "the room"
+      ],
+      "location_type": "INTERIOR",
+      "time_periods": [
+        "1914",
+        "1916",
+        "1918",
+        "1919"
+      ],
+      "architecture": "specific occupied enclosure",
+      "materials": [
+        "WOOD",
+        "PLASTER"
+      ],
+      "layout_intent": "supports event, movement and landmark",
+      "landmarks": [
+        "dominant opening or furniture axis"
+      ],
+      "prop_ecology": [
+        "TABLE",
+        "CHAIR",
+        "PAPER",
+        "BOOK",
+        "LAMP"
+      ],
+      "human_traces": [
+        "moved object",
+        "evidence of recent use"
+      ],
+      "environment_condition": "used",
+      "lighting_sources": [
+        "WINDOW",
+        "LAMP"
+      ],
+      "weather": "UNKNOWN",
+      "continuity_rules": [
+        "architecture and landmark persist between shots"
+      ],
+      "historical_context": {},
+      "executable_location_dna": {
+        "enclosure": "INTERIOR",
+        "architecture": "specific occupied enclosure",
+        "materials": [
+          "WOOD",
+          "PLASTER"
+        ],
+        "prop_ecology": [
+          "TABLE",
+          "CHAIR",
+          "PAPER",
+          "BOOK",
+          "LAMP"
+        ],
+        "landmark": "dominant opening or furniture axis"
+      }
+    },
+    "LOCATION_003": {
+      "location_id": "LOCATION_003",
+      "canonical_name": "TRẬN SOMME, 1916",
+      "aliases": [
+        "the room"
+      ],
+      "location_type": "INTERIOR",
+      "time_periods": [
+        "1914",
+        "1916",
+        "1918",
+        "1919"
+      ],
+      "architecture": "specific occupied enclosure",
+      "materials": [
+        "WOOD",
+        "PLASTER"
+      ],
+      "layout_intent": "supports event, movement and landmark",
+      "landmarks": [
+        "dominant opening or furniture axis"
+      ],
+      "prop_ecology": [
+        "TABLE",
+        "CHAIR",
+        "PAPER",
+        "BOOK",
+        "LAMP"
+      ],
+      "human_traces": [
+        "moved object",
+        "evidence of recent use"
+      ],
+      "environment_condition": "used",
+      "lighting_sources": [
+        "WINDOW",
+        "LAMP"
+      ],
+      "weather": "UNKNOWN",
+      "continuity_rules": [
+        "architecture and landmark persist between shots"
+      ],
+      "historical_context": {},
+      "executable_location_dna": {
+        "enclosure": "INTERIOR",
+        "architecture": "specific occupied enclosure",
+        "materials": [
+          "WOOD",
+          "PLASTER"
+        ],
+        "prop_ecology": [
+          "TABLE",
+          "CHAIR",
+          "PAPER",
+          "BOOK",
+          "LAMP"
+        ],
+        "landmark": "dominant opening or furniture axis"
+      }
+    },
+    "LOCATION_004": {
+      "location_id": "LOCATION_004",
+      "canonical_name": "Mặt trận Somme",
+      "aliases": [
+        "the room"
+      ],
+      "location_type": "INTERIOR",
+      "time_periods": [
+        "1914",
+        "1916",
+        "1918",
+        "1919"
+      ],
+      "architecture": "specific occupied enclosure",
+      "materials": [
+        "WOOD",
+        "PLASTER"
+      ],
+      "layout_intent": "supports event, movement and landmark",
+      "landmarks": [
+        "dominant opening or furniture axis"
+      ],
+      "prop_ecology": [
+        "TABLE",
+        "CHAIR",
+        "PAPER",
+        "BOOK",
+        "LAMP"
+      ],
+      "human_traces": [
+        "moved object",
+        "evidence of recent use"
+      ],
+      "environment_condition": "used",
+      "lighting_sources": [
+        "WINDOW",
+        "LAMP"
+      ],
+      "weather": "UNKNOWN",
+      "continuity_rules": [
+        "architecture and landmark persist between shots"
+      ],
+      "historical_context": {},
+      "executable_location_dna": {
+        "enclosure": "INTERIOR",
+        "architecture": "specific occupied enclosure",
+        "materials": [
+          "WOOD",
+          "PLASTER"
+        ],
+        "prop_ecology": [
+          "TABLE",
+          "CHAIR",
+          "PAPER",
+          "BOOK",
+          "LAMP"
+        ],
+        "landmark": "dominant opening or furniture axis"
+      }
+    },
+    "LOCATION_005": {
+      "location_id": "LOCATION_005",
+      "canonical_name": "chân",
+      "aliases": [
+        "the room"
+      ],
+      "location_type": "INTERIOR",
+      "time_periods": [
+        "1914",
+        "1916",
+        "1918",
+        "1919"
+      ],
+      "architecture": "specific occupied enclosure",
+      "materials": [
+        "WOOD",
+        "PLASTER"
+      ],
+      "layout_intent": "supports event, movement and landmark",
+      "landmarks": [
+        "dominant opening or furniture axis"
+      ],
+      "prop_ecology": [
+        "TABLE",
+        "CHAIR",
+        "PAPER",
+        "BOOK",
+        "LAMP"
+      ],
+      "human_traces": [
+        "moved object",
+        "evidence of recent use"
+      ],
+      "environment_condition": "used",
+      "lighting_sources": [
+        "WINDOW",
+        "LAMP"
+      ],
+      "weather": "UNKNOWN",
+      "continuity_rules": [
+        "architecture and landmark persist between shots"
+      ],
+      "historical_context": {},
+      "executable_location_dna": {
+        "enclosure": "INTERIOR",
+        "architecture": "specific occupied enclosure",
+        "materials": [
+          "WOOD",
+          "PLASTER"
+        ],
+        "prop_ecology": [
+          "TABLE",
+          "CHAIR",
+          "PAPER",
+          "BOOK",
+          "LAMP"
+        ],
+        "landmark": "dominant opening or furniture axis"
+      }
+    },
+    "LOCATION_006": {
+      "location_id": "LOCATION_006",
+      "canonical_name": "YPRES VÀ BỆNH VIỆN PASEWALK, 1918",
+      "aliases": [
+        "the room"
+      ],
+      "location_type": "INTIMATE_INTERIOR",
+      "time_periods": [
+        "1914",
+        "1916",
+        "1918",
+        "1919"
+      ],
+      "architecture": "quiet vertical enclosure",
+      "materials": [
+        "PLASTER",
+        "FABRIC",
+        "WOOD"
+      ],
+      "layout_intent": "supports event, movement and landmark",
+      "landmarks": [
+        "tall window beside bed"
+      ],
+      "prop_ecology": [
+        "BED",
+        "CUP",
+        "LAMP",
+        "CLOTH"
+      ],
+      "human_traces": [
+        "moved object",
+        "evidence of recent use"
+      ],
+      "environment_condition": "used",
+      "lighting_sources": [
+        "WINDOW",
+        "LAMP"
+      ],
+      "weather": "UNKNOWN",
+      "continuity_rules": [
+        "architecture and landmark persist between shots"
+      ],
+      "historical_context": {},
+      "executable_location_dna": {
+        "enclosure": "INTIMATE_INTERIOR",
+        "architecture": "quiet vertical enclosure",
+        "materials": [
+          "PLASTER",
+          "FABRIC",
+          "WOOD"
+        ],
+        "prop_ecology": [
+          "BED",
+          "CUP",
+          "LAMP",
+          "CLOTH"
+        ],
+        "landmark": "tall window beside bed"
+      }
+    },
+    "LOCATION_007": {
+      "location_id": "LOCATION_007",
+      "canonical_name": "Ypres",
+      "aliases": [
+        "the room"
+      ],
+      "location_type": "INTERIOR",
+      "time_periods": [
+        "1914",
+        "1916",
+        "1918",
+        "1919"
+      ],
+      "architecture": "specific occupied enclosure",
+      "materials": [
+        "WOOD",
+        "PLASTER"
+      ],
+      "layout_intent": "supports event, movement and landmark",
+      "landmarks": [
+        "dominant opening or furniture axis"
+      ],
+      "prop_ecology": [
+        "TABLE",
+        "CHAIR",
+        "PAPER",
+        "BOOK",
+        "LAMP"
+      ],
+      "human_traces": [
+        "moved object",
+        "evidence of recent use"
+      ],
+      "environment_condition": "used",
+      "lighting_sources": [
+        "WINDOW",
+        "LAMP"
+      ],
+      "weather": "UNKNOWN",
+      "continuity_rules": [
+        "architecture and landmark persist between shots"
+      ],
+      "historical_context": {},
+      "executable_location_dna": {
+        "enclosure": "INTERIOR",
+        "architecture": "specific occupied enclosure",
+        "materials": [
+          "WOOD",
+          "PLASTER"
+        ],
+        "prop_ecology": [
+          "TABLE",
+          "CHAIR",
+          "PAPER",
+          "BOOK",
+          "LAMP"
+        ],
+        "landmark": "dominant opening or furniture axis"
+      }
+    },
+    "LOCATION_008": {
+      "location_id": "LOCATION_008",
+      "canonical_name": "Pasewalk",
+      "aliases": [
+        "the room"
+      ],
+      "location_type": "INTERIOR",
+      "time_periods": [
+        "1914",
+        "1916",
+        "1918",
+        "1919"
+      ],
+      "architecture": "specific occupied enclosure",
+      "materials": [
+        "WOOD",
+        "PLASTER"
+      ],
+      "layout_intent": "supports event, movement and landmark",
+      "landmarks": [
+        "dominant opening or furniture axis"
+      ],
+      "prop_ecology": [
+        "TABLE",
+        "CHAIR",
+        "PAPER",
+        "BOOK",
+        "LAMP"
+      ],
+      "human_traces": [
+        "moved object",
+        "evidence of recent use"
+      ],
+      "environment_condition": "used",
+      "lighting_sources": [
+        "WINDOW",
+        "LAMP"
+      ],
+      "weather": "UNKNOWN",
+      "continuity_rules": [
+        "architecture and landmark persist between shots"
+      ],
+      "historical_context": {},
+      "executable_location_dna": {
+        "enclosure": "INTERIOR",
+        "architecture": "specific occupied enclosure",
+        "materials": [
+          "WOOD",
+          "PLASTER"
+        ],
+        "prop_ecology": [
+          "TABLE",
+          "CHAIR",
+          "PAPER",
+          "BOOK",
+          "LAMP"
+        ],
+        "landmark": "dominant opening or furniture axis"
+      }
+    },
+    "LOCATION_009": {
+      "location_id": "LOCATION_009",
+      "canonical_name": "QUÁN BIA MUNICH, 1919",
+      "aliases": [
+        "the room"
+      ],
+      "location_type": "INTERIOR",
+      "time_periods": [
+        "1914",
+        "1916",
+        "1918",
+        "1919"
+      ],
+      "architecture": "specific occupied enclosure",
+      "materials": [
+        "WOOD",
+        "PLASTER"
+      ],
+      "layout_intent": "supports event, movement and landmark",
+      "landmarks": [
+        "dominant opening or furniture axis"
+      ],
+      "prop_ecology": [
+        "TABLE",
+        "CHAIR",
+        "PAPER",
+        "BOOK",
+        "LAMP"
+      ],
+      "human_traces": [
+        "moved object",
+        "evidence of recent use"
+      ],
+      "environment_condition": "used",
+      "lighting_sources": [
+        "WINDOW",
+        "LAMP"
+      ],
+      "weather": "UNKNOWN",
+      "continuity_rules": [
+        "architecture and landmark persist between shots"
+      ],
+      "historical_context": {},
+      "executable_location_dna": {
+        "enclosure": "INTERIOR",
+        "architecture": "specific occupied enclosure",
+        "materials": [
+          "WOOD",
+          "PLASTER"
+        ],
+        "prop_ecology": [
+          "TABLE",
+          "CHAIR",
+          "PAPER",
+          "BOOK",
+          "LAMP"
+        ],
+        "landmark": "dominant opening or furniture axis"
+      }
+    }
+  },
+  "objects": {
+    "OBJECT_001": {
+      "object_id": "OBJECT_001",
+      "name": "thư",
+      "importance": "INTERACTION",
+      "states": [
+        {
+          "event": 0,
+          "state": "INITIAL"
+        }
+      ]
+    }
+  },
+  "actions": [
+    {
+      "action_id": "ACTION_001",
+      "actor_id": "CHARACTER_001",
+      "primitives": [
+        "WALK"
+      ],
+      "object_id": "OBJECT_001",
+      "emotion": "FOCUSED",
+      "intensity": "NORMAL",
+      "eyeline": "OBJECT_001",
+      "hand_interaction": null,
+      "source_text": "Tôi phải đi qua đó?"
+    }
+  ],
+  "events": [
+    {
+      "event_id": "EVENT_001",
+      "scene_id": "SCENE_001",
+      "participants": [
+        "CHARACTER_001"
+      ],
+      "location_id": "LOCATION_001",
+      "time_label": "1914",
+      "actions": [
+        "WALK"
+      ],
+      "objects": [
+        "OBJECT_001"
+      ],
+      "cause": "",
+      "effect": "world/character state advances",
+      "information_change": "viewer gains event information",
+      "emotional_change": "",
+      "environment_change": ""
+    },
+    {
+      "event_id": "EVENT_002",
+      "scene_id": "SCENE_002",
+      "participants": [
+        "CHARACTER_001"
+      ],
+      "location_id": "LOCATION_002",
+      "time_label": "1916",
+      "actions": [
+        "WALK"
+      ],
+      "objects": [
+        "OBJECT_001"
+      ],
+      "cause": "",
+      "effect": "world/character state advances",
+      "information_change": "viewer gains event information",
+      "emotional_change": "",
+      "environment_change": ""
+    },
+    {
+      "event_id": "EVENT_003",
+      "scene_id": "SCENE_003",
+      "participants": [
+        "CHARACTER_001"
+      ],
+      "location_id": "LOCATION_003",
+      "time_label": "1918",
+      "actions": [
+        "WALK"
+      ],
+      "objects": [
+        "OBJECT_001"
+      ],
+      "cause": "",
+      "effect": "world/character state advances",
+      "information_change": "viewer gains event information",
+      "emotional_change": "",
+      "environment_change": ""
+    },
+    {
+      "event_id": "EVENT_004",
+      "scene_id": "SCENE_004",
+      "participants": [
+        "CHARACTER_001"
+      ],
+      "location_id": "LOCATION_004",
+      "time_label": "1919",
+      "actions": [
+        "WALK"
+      ],
+      "objects": [
+        "OBJECT_001"
+      ],
+      "cause": "",
+      "effect": "world/character state advances",
+      "information_change": "viewer gains event information",
+      "emotional_change": "",
+      "environment_change": ""
+    },
+    {
+      "event_id": "EVENT_005",
+      "scene_id": "SCENE_005",
+      "participants": [
+        "CHARACTER_001"
+      ],
+      "location_id": "LOCATION_005",
+      "time_label": "1919",
+      "actions": [
+        "WALK"
+      ],
+      "objects": [
+        "OBJECT_001"
+      ],
+      "cause": "",
+      "effect": "world/character state advances",
+      "information_change": "viewer gains event information",
+      "emotional_change": "",
+      "environment_change": ""
+    }
+  ],
+  "relationships": [],
+  "timeline": [
+    {
+      "time": "1914",
+      "characters": [
+        "CHARACTER_001"
+      ]
+    },
+    {
+      "time": "1916",
+      "characters": [
+        "CHARACTER_001"
+      ]
+    },
+    {
+      "time": "1918",
+      "characters": [
+        "CHARACTER_001"
+      ]
+    },
+    {
+      "time": "1919",
+      "characters": [
+        "CHARACTER_001"
+      ]
+    }
+  ],
+  "scenes": [
+    {
+      "scene_id": "SCENE_001",
+      "location_id": "LOCATION_001",
+      "character_ids": [
+        "CHARACTER_001"
+      ],
+      "object_ids": [
+        "OBJECT_001"
+      ],
+      "event_ids": [
+        "EVENT_001"
+      ],
+      "script_excerpt": "[HOOK - MUNICH, 1914]\nNGƯỜI DẪN:\nHãy tưởng tượng bạn 25 tuổi. Sự nghiệp chưa có gì, tương lai mờ mịt. Đúng lúc đó, cả châu Âu lao vào cuộc chiến tranh khổng lồ.\nHITLER:\nNgười ta nói chiến tranh sẽ kết thúc trước Giáng sinh. Nghe cũng ổn.\nNGƯỜI LÍNH:\nHóa ra họ không nói rõ Giáng sinh năm nào."
+    },
+    {
+      "scene_id": "SCENE_002",
+      "location_id": "LOCATION_002",
+      "character_ids": [
+        "CHARACTER_001"
+      ],
+      "object_ids": [
+        "OBJECT_001"
+      ],
+      "event_ids": [
+        "EVENT_002"
+      ],
+      "script_excerpt": "[CẢNH - MẶT TRẬN PHÍA TÂY, 1914]\nNGƯỜI DẪN:\nHitler gia nhập Trung đoàn Bộ binh Dự bị Bavaria số 16. Bùn, chuột và pháo binh thay thế cho mọi ảo tưởng vinh quang.\nSĨ QUAN:\nMang bức thư này qua khu vực đang bị pháo kích.\nHITLER:\nTôi phải đi qua đó? Có đường nào an toàn hơn không?\nSĨ QUAN:\nKhông.\nHITLER:\nTuyệt vời."
+    },
+    {
+      "scene_id": "SCENE_003",
+      "location_id": "LOCATION_003",
+      "character_ids": [
+        "CHARACTER_001"
+      ],
+      "object_ids": [
+        "OBJECT_001"
+      ],
+      "event_ids": [
+        "EVENT_003"
+      ],
+      "script_excerpt": "[CẢNH - TRẬN SOMME, 1916]\nNGƯỜI DẪN:\nNăm 1916 tại Mặt trận Somme, mảnh đạn pháo làm Hitler bị thương ở chân."
+    },
+    {
+      "scene_id": "SCENE_004",
+      "location_id": "LOCATION_004",
+      "character_ids": [
+        "CHARACTER_001"
+      ],
+      "object_ids": [
+        "OBJECT_001"
+      ],
+      "event_ids": [
+        "EVENT_004"
+      ],
+      "script_excerpt": "[CẢNH - YPRES VÀ BỆNH VIỆN PASEWALK, 1918]\nNGƯỜI DẪN:\nTháng 10 năm 1918 tại Ypres, khí độc khiến Hitler tạm thời mù mắt và phải nằm viện tại Pasewalk.\nNGƯỜI LÍNH:\nĐức đã ký đình chiến. Chiến tranh kết thúc rồi."
+    },
+    {
+      "scene_id": "SCENE_005",
+      "location_id": "LOCATION_005",
+      "character_ids": [
+        "CHARACTER_001"
+      ],
+      "object_ids": [
+        "OBJECT_001"
+      ],
+      "event_ids": [
+        "EVENT_005"
+      ],
+      "script_excerpt": "[CẢNH - QUÁN BIA MUNICH, 1919]\nNGƯỜI DẪN:\nNăm 1919, giữa khủng hoảng và bạo loạn, Hitler tới quán bia quan sát cuộc họp Đảng Công nhân Đức.\nTHÀNH VIÊN DAP:\nAnh tới đây để quan sát thôi đúng không?\nHITLER:\nBan đầu là thế. Tôi có vài ý kiến.\n"
+    }
+  ],
+  "continuity_state": {
+    "single_source_of_truth": true
+  },
+  "provider_audit": []
+}

@@ -1,0 +1,75 @@
+{
+  "width": 1080,
+  "height": 1920,
+  "fps": 30,
+  "scenes": [
+    {
+      "title": "hook",
+      "duration": 3.0,
+      "background": {"type": "tech", "top": [20, 25, 45], "bottom": [5, 10, 25], "grid_color": [70, 150, 230]},
+      "texts": [
+        {"text": "AI đang thay đổi mọi thứ!", "x": 0.5, "y": 0.3, "size": 88, "effect": "pop", "delay": 0.2, "duration": 1.5, "max_width": 950}
+      ],
+      "shapes": [
+        {"type": "lightbulb", "x": 0.5, "y": 0.58, "radius": 90, "color": [255, 200, 60], "delay": 0.4, "duration": 1.2}
+      ]
+    },
+    {
+      "title": "title",
+      "duration": 3.5,
+      "background": {"type": "gradient", "top": [20, 25, 45], "bottom": [8, 12, 28]},
+      "character": {"pose": "wave", "expression": "happy", "x": 0.5, "y": 0.72, "scale": 130},
+      "texts": [
+        {"text": "3 cách dùng AI mỗi ngày", "x": 0.5, "y": 0.22, "size": 90, "effect": "pop", "delay": 0.2, "duration": 1.6, "max_width": 950}
+      ]
+    },
+    {
+      "title": "point_1",
+      "duration": 4.0,
+      "background": {"type": "tech", "top": [20, 25, 45], "bottom": [5, 10, 25], "grid_color": [70, 150, 230]},
+      "character": {"pose": "talk", "expression": "neutral", "x": 0.3, "y": 0.72, "scale": 110, "talking": true},
+      "texts": [
+        {"text": "1", "x": 0.5, "y": 0.16, "size": 70, "effect": "pop", "delay": 0.1, "duration": 1.0, "color": [255, 200, 60]},
+        {"text": "Viết email và tóm tắt tài liệu", "x": 0.5, "y": 0.42, "size": 62, "effect": "slide_up", "delay": 0.4, "duration": 1.2, "max_width": 900}
+      ],
+      "shapes": [
+        {"type": "progress", "x": 0.5, "y": 0.88, "width": 700, "height": 26, "color": [255, 200, 60], "delay": 0.6, "duration": 2.0}
+      ]
+    },
+    {
+      "title": "point_2",
+      "duration": 4.0,
+      "background": {"type": "tech", "top": [20, 25, 45], "bottom": [5, 10, 25], "grid_color": [70, 150, 230]},
+      "character": {"pose": "talk", "expression": "neutral", "x": 0.3, "y": 0.72, "scale": 110, "talking": true},
+      "texts": [
+        {"text": "2", "x": 0.5, "y": 0.16, "size": 70, "effect": "pop", "delay": 0.1, "duration": 1.0, "color": [255, 200, 60]},
+        {"text": "Tạo ảnh minh họa bằng AI", "x": 0.5, "y": 0.42, "size": 62, "effect": "slide_up", "delay": 0.4, "duration": 1.2, "max_width": 900}
+      ],
+      "shapes": [
+        {"type": "progress", "x": 0.5, "y": 0.88, "width": 700, "height": 26, "color": [255, 200, 60], "delay": 0.6, "duration": 2.0}
+      ]
+    },
+    {
+      "title": "point_3",
+      "duration": 4.0,
+      "background": {"type": "tech", "top": [20, 25, 45], "bottom": [5, 10, 25], "grid_color": [70, 150, 230]},
+      "character": {"pose": "talk", "expression": "neutral", "x": 0.3, "y": 0.72, "scale": 110, "talking": true},
+      "texts": [
+        {"text": "3", "x": 0.5, "y": 0.16, "size": 70, "effect": "pop", "delay": 0.1, "duration": 1.0, "color": [255, 200, 60]},
+        {"text": "Lên ý tưởng nội dung nhanh", "x": 0.5, "y": 0.42, "size": 62, "effect": "slide_up", "delay": 0.4, "duration": 1.2, "max_width": 900}
+      ],
+      "shapes": [
+        {"type": "progress", "x": 0.5, "y": 0.88, "width": 700, "height": 26, "color": [255, 200, 60], "delay": 0.6, "duration": 2.0}
+      ]
+    },
+    {
+      "title": "outro",
+      "duration": 3.0,
+      "background": {"type": "gradient", "top": [255, 200, 60], "bottom": [200, 130, 30]},
+      "character": {"pose": "thumbs_up", "expression": "happy", "x": 0.5, "y": 0.7, "scale": 140},
+      "texts": [
+        {"text": "Follow để xem thêm!", "x": 0.5, "y": 0.25, "size": 80, "effect": "bounce", "delay": 0.3, "duration": 1.5, "max_width": 900}
+      ]
+    }
+  ]
+}

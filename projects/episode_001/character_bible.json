@@ -1,0 +1,537 @@
+{
+  "characters": [
+    {
+      "character_id": "C_NARRATOR",
+      "name": "Người Dẫn",
+      "role": "NARRATOR",
+      "detail_level": "SUPPORT",
+      "on_screen": false,
+      "is_narrator": true,
+      "historical_person": false,
+      "birth_year": null,
+      "visual_identity": "Voice-over narrator, no physical silhouette.",
+      "hair": {
+        "shape": "CROPPED",
+        "hairline": "MEDIUM",
+        "part": "LEFT",
+        "length": "SHORT",
+        "fringe": "NONE",
+        "volume": 0.5,
+        "roughness": 0.5,
+        "strand_clusters": 5,
+        "color": "#333333"
+      },
+      "face": {
+        "head_width": 1.0,
+        "head_height": 1.0,
+        "jaw_shape": "ROUND",
+        "eye_spacing": 1.0,
+        "eye_shape": "ROUND",
+        "brow_shape": "FLAT",
+        "nose_style": "POINTED",
+        "mouth_style": "LINE",
+        "ear_style": "NORMAL",
+        "facial_hair": "NONE",
+        "facial_hair_color": null,
+        "skin_tone": "#f5d0b1",
+        "distinctive_anchors": []
+      },
+      "body": {
+        "height": 1.0,
+        "build": "AVERAGE",
+        "shoulder_width": 1.0,
+        "posture": "UPRIGHT",
+        "head_scale": 1.0
+      },
+      "costumes": [
+        {
+          "costume_id": "COS_NARRATOR",
+          "label": "Default Narrator Outfit",
+          "year_from": 1914,
+          "year_to": 1919,
+          "location_ids": [],
+          "contexts": [
+            "CIVILIAN"
+          ],
+          "costume": {
+            "headwear": "NONE",
+            "upper_garment": "SHIRT",
+            "outerwear": "NONE",
+            "lower_garment": "TROUSERS",
+            "footwear": "SHOES",
+            "equipment": [],
+            "accessories": [],
+            "insignia": [],
+            "condition": "CLEAN",
+            "palette": {
+              "primary": "#222222",
+              "secondary": "#444444",
+              "accent": "#666666",
+              "trim": "#888888"
+            }
+          },
+          "historical_confidence": "CONFIRMED"
+        }
+      ],
+      "variants": [],
+      "performance": {
+        "gesture_scale": 1.0,
+        "posture_bias": 0.0,
+        "movement_energy": 1.0,
+        "personal_space": 1.0,
+        "reaction_scale": 1.0,
+        "dominant_hand": "RIGHT",
+        "confidence_bias": 0.0
+      },
+      "voice_id": "",
+      "continuity_rules": [
+        "Voice-only presence."
+      ],
+      "historical_confidence": "CONFIRMED",
+      "proposal_source": "UNKNOWN"
+    },
+    {
+      "character_id": "C_HITLER",
+      "name": "Adolf Hitler",
+      "role": "PROTAGONIST",
+      "detail_level": "HERO",
+      "on_screen": true,
+      "is_narrator": false,
+      "historical_person": true,
+      "birth_year": 1889,
+      "visual_identity": "Swept-back dark hair, toothbrush mustache (later variants), German military tunic or civilian suit.",
+      "hair": {
+        "shape": "SWEPT_BACK",
+        "hairline": "MEDIUM",
+        "part": "LEFT",
+        "length": "SHORT",
+        "fringe": "SIDE_SWEEP",
+        "volume": 0.6,
+        "roughness": 0.3,
+        "strand_clusters": 6,
+        "color": "#1a110a"
+      },
+      "face": {
+        "head_width": 1.0,
+        "head_height": 1.05,
+        "jaw_shape": "SQUARE",
+        "eye_spacing": 1.0,
+        "eye_shape": "NARROW",
+        "brow_shape": "HEAVY",
+        "nose_style": "LONG",
+        "mouth_style": "THIN",
+        "ear_style": "NORMAL",
+        "facial_hair": "MUSTACHE_SMALL",
+        "facial_hair_color": "#1a110a",
+        "skin_tone": "#f0d5be",
+        "distinctive_anchors": []
+      },
+      "body": {
+        "height": 1.0,
+        "build": "THIN",
+        "shoulder_width": 0.95,
+        "posture": "UPRIGHT",
+        "head_scale": 1.0
+      },
+      "costumes": [
+        {
+          "costume_id": "COS_HITLER_SOLDIER",
+          "label": "Bavarian Infantry Uniform",
+          "year_from": 1914,
+          "year_to": 1918,
+          "location_ids": [
+            "LOC_MUNICH",
+            "LOC_WESTERN_FRONT",
+            "LOC_SOMME"
+          ],
+          "contexts": [
+            "MILITARY"
+          ],
+          "costume": {
+            "headwear": "FIELD_CAP",
+            "upper_garment": "MILITARY_TUNIC",
+            "outerwear": "GREATCOAT",
+            "lower_garment": "BREECHES",
+            "footwear": "BOOTS",
+            "equipment": [
+              "BACKPACK",
+              "CANTEEN",
+              "BELT_POUCHES"
+            ],
+            "accessories": [
+              "BELT",
+              "BUTTONS_DOUBLE_ROW"
+            ],
+            "insignia": [
+              "Bavarian cockade"
+            ],
+            "condition": "WORN",
+            "palette": {
+              "primary": "#556b2f",
+              "secondary": "#8b4513",
+              "accent": "#d2b48c",
+              "trim": "#2f4f4f"
+            }
+          },
+          "historical_confidence": "CONFIRMED"
+        },
+        {
+          "costume_id": "COS_HITLER_CIVILIAN",
+          "label": "1919 Civilian Suit",
+          "year_from": 1919,
+          "year_to": 1919,
+          "location_ids": [
+            "LOC_BEER_HALL"
+          ],
+          "contexts": [
+            "CIVILIAN"
+          ],
+          "costume": {
+            "headwear": "NONE",
+            "upper_garment": "SHIRT",
+            "outerwear": "NONE",
+            "lower_garment": "TROUSERS",
+            "footwear": "SHOES",
+            "equipment": [],
+            "accessories": [
+              "TIE"
+            ],
+            "insignia": [],
+            "condition": "WORN",
+            "palette": {
+              "primary": "#333333",
+              "secondary": "#ffffff",
+              "accent": "#555555",
+              "trim": "#111111"
+            }
+          },
+          "historical_confidence": "CONFIRMED"
+        }
+      ],
+      "variants": [
+        {
+          "variant_id": "VAR_HITLER_WOUNDED",
+          "year_from": 1918,
+          "year_to": 1918,
+          "age": 29,
+          "hair": null,
+          "face": null,
+          "body": null,
+          "conditions": [
+            "HEAD_BANDAGE",
+            "EXHAUSTED"
+          ],
+          "default_costume_id": "COS_HITLER_SOLDIER"
+        }
+      ],
+      "performance": {
+        "gesture_scale": 1.2,
+        "posture_bias": 0.1,
+        "movement_energy": 1.1,
+        "personal_space": 1.0,
+        "reaction_scale": 1.2,
+        "dominant_hand": "RIGHT",
+        "confidence_bias": 0.2
+      },
+      "voice_id": "",
+      "continuity_rules": [
+        "Must maintain distinctive mustache and swept-back dark hair across WWI scenes."
+      ],
+      "historical_confidence": "CONFIRMED",
+      "proposal_source": "UNKNOWN"
+    },
+    {
+      "character_id": "C_SOLDIER1",
+      "name": "Người Lính",
+      "role": "MINOR",
+      "detail_level": "SUPPORT",
+      "on_screen": true,
+      "is_narrator": false,
+      "historical_person": false,
+      "birth_year": null,
+      "visual_identity": "Standard German infantry uniform, messy hair, field cap.",
+      "hair": {
+        "shape": "MESSY",
+        "hairline": "MEDIUM",
+        "part": "NONE",
+        "length": "SHORT",
+        "fringe": "WISPY",
+        "volume": 0.5,
+        "roughness": 0.7,
+        "strand_clusters": 4,
+        "color": "#3b2f2f"
+      },
+      "face": {
+        "head_width": 1.0,
+        "head_height": 1.0,
+        "jaw_shape": "ROUND",
+        "eye_spacing": 1.0,
+        "eye_shape": "ROUND",
+        "brow_shape": "FLAT",
+        "nose_style": "BUTTON",
+        "mouth_style": "LINE",
+        "ear_style": "NORMAL",
+        "facial_hair": "STUBBLE",
+        "facial_hair_color": "#3b2f2f",
+        "skin_tone": "#eac086",
+        "distinctive_anchors": []
+      },
+      "body": {
+        "height": 1.0,
+        "build": "AVERAGE",
+        "shoulder_width": 1.0,
+        "posture": "SLOUCHED",
+        "head_scale": 1.0
+      },
+      "costumes": [
+        {
+          "costume_id": "COS_SOLDIER",
+          "label": "German Infantry Uniform",
+          "year_from": 1914,
+          "year_to": 1918,
+          "location_ids": [
+            "LOC_MUNICH",
+            "LOC_WESTERN_FRONT",
+            "LOC_YPRES"
+          ],
+          "contexts": [
+            "MILITARY"
+          ],
+          "costume": {
+            "headwear": "FIELD_CAP",
+            "upper_garment": "MILITARY_TUNIC",
+            "outerwear": "NONE",
+            "lower_garment": "BREECHES",
+            "footwear": "BOOTS",
+            "equipment": [
+              "CANTEEN",
+              "BACKPACK"
+            ],
+            "accessories": [
+              "BELT"
+            ],
+            "insignia": [],
+            "condition": "MUDDY",
+            "palette": {
+              "primary": "#4a5d4e",
+              "secondary": "#708090",
+              "accent": "#a0522d",
+              "trim": "#000000"
+            }
+          },
+          "historical_confidence": "CONFIRMED"
+        }
+      ],
+      "variants": [],
+      "performance": {
+        "gesture_scale": 1.0,
+        "posture_bias": -0.1,
+        "movement_energy": 0.9,
+        "personal_space": 1.0,
+        "reaction_scale": 1.0,
+        "dominant_hand": "RIGHT",
+        "confidence_bias": 0.0
+      },
+      "voice_id": "",
+      "continuity_rules": [
+        "Typical frontline soldier appearance."
+      ],
+      "historical_confidence": "CONFIRMED",
+      "proposal_source": "UNKNOWN"
+    },
+    {
+      "character_id": "C_OFFICER",
+      "name": "Sĩ Quan",
+      "role": "SUPPORTING",
+      "detail_level": "SUPPORT",
+      "on_screen": true,
+      "is_narrator": false,
+      "historical_person": false,
+      "birth_year": null,
+      "visual_identity": "Stiff posture, peaked cap, neat mustache, officer tunic.",
+      "hair": {
+        "shape": "CROPPED",
+        "hairline": "LOW",
+        "part": "LEFT",
+        "length": "SHORT",
+        "fringe": "NONE",
+        "volume": 0.4,
+        "roughness": 0.1,
+        "strand_clusters": 3,
+        "color": "#2c221e"
+      },
+      "face": {
+        "head_width": 1.0,
+        "head_height": 1.0,
+        "jaw_shape": "POINTED",
+        "eye_spacing": 1.0,
+        "eye_shape": "NARROW",
+        "brow_shape": "ARCHED",
+        "nose_style": "POINTED",
+        "mouth_style": "THIN",
+        "ear_style": "NORMAL",
+        "facial_hair": "MUSTACHE_SMALL",
+        "facial_hair_color": "#2c221e",
+        "skin_tone": "#f4cbaf",
+        "distinctive_anchors": []
+      },
+      "body": {
+        "height": 1.05,
+        "build": "AVERAGE",
+        "shoulder_width": 1.05,
+        "posture": "STIFF",
+        "head_scale": 1.0
+      },
+      "costumes": [
+        {
+          "costume_id": "COS_OFFICER",
+          "label": "German Officer Uniform",
+          "year_from": 1914,
+          "year_to": 1918,
+          "location_ids": [
+            "LOC_WESTERN_FRONT"
+          ],
+          "contexts": [
+            "MILITARY"
+          ],
+          "costume": {
+            "headwear": "PEAKED_CAP",
+            "upper_garment": "MILITARY_TUNIC",
+            "outerwear": "GREATCOAT",
+            "lower_garment": "BREECHES",
+            "footwear": "TALL_BOOTS",
+            "equipment": [
+              "DOCUMENT"
+            ],
+            "accessories": [
+              "BELT",
+              "SHOULDER_BOARDS"
+            ],
+            "insignia": [
+              "Officer rank insignia"
+            ],
+            "condition": "CLEAN",
+            "palette": {
+              "primary": "#3b3c36",
+              "secondary": "#556b2f",
+              "accent": "#ffd700",
+              "trim": "#000000"
+            }
+          },
+          "historical_confidence": "CONFIRMED"
+        }
+      ],
+      "variants": [],
+      "performance": {
+        "gesture_scale": 0.8,
+        "posture_bias": 0.3,
+        "movement_energy": 0.7,
+        "personal_space": 1.0,
+        "reaction_scale": 0.8,
+        "dominant_hand": "RIGHT",
+        "confidence_bias": 0.4
+      },
+      "voice_id": "",
+      "continuity_rules": [
+        "Always maintains rigid, authoritative posture."
+      ],
+      "historical_confidence": "CONFIRMED",
+      "proposal_source": "UNKNOWN"
+    },
+    {
+      "character_id": "C_DAP_MEMBER",
+      "name": "Thành viên DAP",
+      "role": "MINOR",
+      "detail_level": "SUPPORT",
+      "on_screen": true,
+      "is_narrator": false,
+      "historical_person": false,
+      "birth_year": null,
+      "visual_identity": "1919 civilian attire, fedora or flat cap, stern look.",
+      "hair": {
+        "shape": "CROPPED",
+        "hairline": "MEDIUM",
+        "part": "CENTER",
+        "length": "SHORT",
+        "fringe": "NONE",
+        "volume": 0.5,
+        "roughness": 0.2,
+        "strand_clusters": 4,
+        "color": "#111111"
+      },
+      "face": {
+        "head_width": 1.0,
+        "head_height": 1.0,
+        "jaw_shape": "SQUARE",
+        "eye_spacing": 1.0,
+        "eye_shape": "NARROW",
+        "brow_shape": "HEAVY",
+        "nose_style": "HOOKED",
+        "mouth_style": "LINE",
+        "ear_style": "NORMAL",
+        "facial_hair": "MUSTACHE_THICK",
+        "facial_hair_color": "#111111",
+        "skin_tone": "#edd0bc",
+        "distinctive_anchors": []
+      },
+      "body": {
+        "height": 1.0,
+        "build": "STOCKY",
+        "shoulder_width": 1.1,
+        "posture": "UPRIGHT",
+        "head_scale": 1.0
+      },
+      "costumes": [
+        {
+          "costume_id": "COS_DAP",
+          "label": "1919 Political Activist Suit",
+          "year_from": 1919,
+          "year_to": 1919,
+          "location_ids": [
+            "LOC_BEER_HALL"
+          ],
+          "contexts": [
+            "CIVILIAN",
+            "WORK"
+          ],
+          "costume": {
+            "headwear": "FLAT_CAP",
+            "upper_garment": "VEST",
+            "outerwear": "NONE",
+            "lower_garment": "TROUSERS",
+            "footwear": "SHOES",
+            "equipment": [],
+            "accessories": [
+              "TIE"
+            ],
+            "insignia": [],
+            "condition": "WORN",
+            "palette": {
+              "primary": "#2f4f4f",
+              "secondary": "#2f2f2f",
+              "accent": "#8b0000",
+              "trim": "#000000"
+            }
+          },
+          "historical_confidence": "CONFIRMED"
+        }
+      ],
+      "variants": [],
+      "performance": {
+        "gesture_scale": 1.0,
+        "posture_bias": 0.0,
+        "movement_energy": 1.0,
+        "personal_space": 1.0,
+        "reaction_scale": 1.0,
+        "dominant_hand": "RIGHT",
+        "confidence_bias": 0.1
+      },
+      "voice_id": "",
+      "continuity_rules": [
+        "Typical political extremist attire of post-WWI Germany."
+      ],
+      "historical_confidence": "CONFIRMED",
+      "proposal_source": "UNKNOWN"
+    }
+  ]
+}

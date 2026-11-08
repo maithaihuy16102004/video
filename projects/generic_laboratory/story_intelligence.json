@@ -1,0 +1,353 @@
+{
+  "title": "The Electrical Spark of 1892",
+  "language": "en",
+  "genre": "Historical Drama",
+  "period": {
+    "start_year": 1892,
+    "end_year": 1892
+  },
+  "timeline": [
+    {
+      "event_id": "E01",
+      "year": 1892,
+      "month": 11,
+      "description": "Dr. Julian conducts high-voltage induction experiments in his laboratory.",
+      "location_id": "LOC_LAB",
+      "confidence": "CONFIRMED"
+    }
+  ],
+  "characters": [
+    {
+      "character_id": "NARRATOR",
+      "name": "Narrator",
+      "role": "NARRATOR",
+      "aliases": [
+        "NARRATOR"
+      ],
+      "is_narrator": true,
+      "on_screen": false,
+      "speaking": true,
+      "historical_person": false,
+      "birth_year": null,
+      "description": "Omniscient narrative voice."
+    },
+    {
+      "character_id": "DR_JULIAN",
+      "name": "Dr. Julian Aris",
+      "role": "PROTAGONIST",
+      "aliases": [
+        "DR. JULIAN"
+      ],
+      "is_narrator": false,
+      "on_screen": true,
+      "speaking": true,
+      "historical_person": false,
+      "birth_year": 1855,
+      "description": "Pioneering electrical researcher in Victorian-era attire."
+    }
+  ],
+  "locations": [
+    {
+      "location_id": "LOC_LAB",
+      "name": "Secluded Laboratory",
+      "year": 1892,
+      "region": "London, England",
+      "description": "A dimly lit Victorian workshop filled with electrical apparatus and copper wiring.",
+      "enclosure": "INTERIOR"
+    }
+  ],
+  "story_beats": [
+    {
+      "beat_id": "B001",
+      "index": 0,
+      "text": "In late autumn 1892, Dr. Julian Aris entered his secluded electrical research laboratory.",
+      "speaker_id": "NARRATOR",
+      "is_dialogue": false,
+      "location_id": "LOC_LAB",
+      "year": 1892,
+      "characters": [
+        "DR_JULIAN"
+      ],
+      "actions": [
+        {
+          "actor_id": "DR_JULIAN",
+          "verb": "WALK",
+          "target": null,
+          "emotion": "DETERMINED"
+        }
+      ],
+      "beat_type": "SETUP",
+      "suggested_purpose": "LOCATION",
+      "emotional_intensity": 0.2,
+      "tension": 0.1,
+      "new_information": true,
+      "comedy": "NONE",
+      "opens_loops": [
+        "L1"
+      ],
+      "closes_loops": [],
+      "objects": [
+        "APPARATUS",
+        "TABLE"
+      ],
+      "visual_opportunities": [
+        "Victorian laboratory interior",
+        "Copper coils and glass tubes"
+      ],
+      "weather": "Cold autumn wind",
+      "est_duration_sec": 4.5
+    },
+    {
+      "beat_id": "B002",
+      "index": 1,
+      "text": "The induction coils are finally aligned. Let us see if the current holds.",
+      "speaker_id": "DR_JULIAN",
+      "is_dialogue": true,
+      "location_id": "LOC_LAB",
+      "year": 1892,
+      "characters": [
+        "DR_JULIAN"
+      ],
+      "actions": [
+        {
+          "actor_id": "DR_JULIAN",
+          "verb": "OBSERVE",
+          "target": "APPARATUS",
+          "emotion": "CONFIDENT"
+        }
+      ],
+      "beat_type": "EXPOSITION",
+      "suggested_purpose": "INFORMATION",
+      "emotional_intensity": 0.4,
+      "tension": 0.2,
+      "new_information": true,
+      "comedy": "NONE",
+      "opens_loops": [],
+      "closes_loops": [],
+      "objects": [
+        "APPARATUS"
+      ],
+      "visual_opportunities": [
+        "Close-up on induction coils"
+      ],
+      "weather": null,
+      "est_duration_sec": 5.0
+    },
+    {
+      "beat_id": "B003",
+      "index": 2,
+      "text": "Julian adjusted the rheostat and carefully recorded the voltage readings in his leather journal.",
+      "speaker_id": "NARRATOR",
+      "is_dialogue": false,
+      "location_id": "LOC_LAB",
+      "year": 1892,
+      "characters": [
+        "DR_JULIAN"
+      ],
+      "actions": [
+        {
+          "actor_id": "DR_JULIAN",
+          "verb": "OPERATE",
+          "target": "APPARATUS",
+          "emotion": "ATTENTIVE"
+        },
+        {
+          "actor_id": "DR_JULIAN",
+          "verb": "WRITE",
+          "target": "DOCUMENTS",
+          "emotion": "CALM"
+        }
+      ],
+      "beat_type": "TRANSITION",
+      "suggested_purpose": "ACTION",
+      "emotional_intensity": 0.3,
+      "tension": 0.3,
+      "new_information": false,
+      "comedy": "NONE",
+      "opens_loops": [],
+      "closes_loops": [],
+      "objects": [
+        "DESK",
+        "DOCUMENTS",
+        "APPARATUS"
+      ],
+      "visual_opportunities": [
+        "Ink pen scratching on paper",
+        "Turning a brass dial"
+      ],
+      "weather": null,
+      "est_duration_sec": 5.5
+    },
+    {
+      "beat_id": "B004",
+      "index": 3,
+      "text": "Steady at four hundred volts. The secondary circuit is energized.",
+      "speaker_id": "DR_JULIAN",
+      "is_dialogue": true,
+      "location_id": "LOC_LAB",
+      "year": 1892,
+      "characters": [
+        "DR_JULIAN"
+      ],
+      "actions": [
+        {
+          "actor_id": "DR_JULIAN",
+          "verb": "SPEAK",
+          "target": null,
+          "emotion": "CONFIDENT"
+        }
+      ],
+      "beat_type": "ESCALATION",
+      "suggested_purpose": "TENSION",
+      "emotional_intensity": 0.5,
+      "tension": 0.5,
+      "new_information": true,
+      "comedy": "NONE",
+      "opens_loops": [],
+      "closes_loops": [],
+      "objects": [
+        "DOCUMENTS"
+      ],
+      "visual_opportunities": [
+        "Voltmeter needle ticking upward"
+      ],
+      "weather": null,
+      "est_duration_sec": 4.0
+    },
+    {
+      "beat_id": "B005",
+      "index": 4,
+      "text": "Suddenly, a violent electrical spark bridged the brass electrodes, casting harsh shadows across the workshop.",
+      "speaker_id": "NARRATOR",
+      "is_dialogue": false,
+      "location_id": "LOC_LAB",
+      "year": 1892,
+      "characters": [
+        "DR_JULIAN"
+      ],
+      "actions": [
+        {
+          "actor_id": "DR_JULIAN",
+          "verb": "REACT",
+          "target": null,
+          "emotion": "SURPRISED"
+        }
+      ],
+      "beat_type": "REVEAL",
+      "suggested_purpose": "REVEAL",
+      "emotional_intensity": 0.8,
+      "tension": 0.8,
+      "new_information": true,
+      "comedy": "NONE",
+      "opens_loops": [],
+      "closes_loops": [
+        "L1"
+      ],
+      "objects": [
+        "APPARATUS",
+        "LAMP"
+      ],
+      "visual_opportunities": [
+        "Bright blue electric arc jumping between brass terminals",
+        "Shadows dancing on laboratory walls"
+      ],
+      "weather": null,
+      "est_duration_sec": 6.0
+    },
+    {
+      "beat_id": "B006",
+      "index": 5,
+      "text": "Fascinating! The ionization threshold is far lower than Maxwell predicted.",
+      "speaker_id": "DR_JULIAN",
+      "is_dialogue": true,
+      "location_id": "LOC_LAB",
+      "year": 1892,
+      "characters": [
+        "DR_JULIAN"
+      ],
+      "actions": [
+        {
+          "actor_id": "DR_JULIAN",
+          "verb": "OBSERVE",
+          "target": "APPARATUS",
+          "emotion": "AMUSED"
+        }
+      ],
+      "beat_type": "PAYOFF",
+      "suggested_purpose": "PAYOFF",
+      "emotional_intensity": 0.7,
+      "tension": 0.4,
+      "new_information": true,
+      "comedy": "SETUP",
+      "opens_loops": [],
+      "closes_loops": [],
+      "objects": [
+        "APPARATUS"
+      ],
+      "visual_opportunities": [
+        "Julian smiling with ozone in the air"
+      ],
+      "weather": null,
+      "est_duration_sec": 5.0
+    }
+  ],
+  "relationships": [],
+  "objects": [
+    {
+      "object_id": "OBJ_COILS",
+      "semantic": "induction coils and brass electrodes, 1890s",
+      "category": "APPARATUS",
+      "materials": [
+        "COPPER",
+        "BRASS",
+        "WOOD"
+      ],
+      "period_year": 1892
+    },
+    {
+      "object_id": "OBJ_JOURNAL",
+      "semantic": "leather-bound scientific journal",
+      "category": "DOCUMENTS",
+      "materials": [
+        "LEATHER",
+        "PAPER"
+      ],
+      "period_year": 1892
+    }
+  ],
+  "historical_entities": [
+    {
+      "entity": "James Clerk Maxwell",
+      "category": "HISTORICAL_CONTEXT",
+      "year": 1879,
+      "claim": "Maxwell formulated classical electromagnetic theory.",
+      "confidence": "CONFIRMED",
+      "needs_verification": false
+    }
+  ],
+  "emotional_curve": [
+    0.2,
+    0.4,
+    0.3,
+    0.5,
+    0.8,
+    0.7
+  ],
+  "open_loops": [],
+  "comedy_opportunities": [
+    "Julian's hair standing completely on end from the static discharge."
+  ],
+  "tension_points": [
+    "The buildup to the unexpected electrical arc."
+  ],
+  "cliffhanger": "The realization that Maxwell's predictions were wrong opens up dangerous new possibilities.",
+  "research_requirements": [
+    {
+      "item": "1890s electrical laboratory equipment",
+      "category": "TECHNOLOGY",
+      "question": "What did a typical high-voltage induction apparatus look like in 1892?",
+      "confidence": "WELL_SUPPORTED"
+    }
+  ],
+  "reasoning_source": "UNKNOWN"
+}

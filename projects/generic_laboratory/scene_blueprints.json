@@ -1,0 +1,833 @@
+[
+  {
+    "scene_id": "SCENE_001",
+    "shot_id": "SH_001",
+    "shot_index": 0,
+    "beat_ids": [
+      "B001"
+    ],
+    "year": 1892,
+    "location_id": "LOC_LAB",
+    "shot_purpose": "LOCATION",
+    "purpose_reason": "Beat SETUP requires LOCATION visual emphasis.",
+    "camera": {
+      "shot": "ENVIRONMENT_ESTABLISHING",
+      "height": "EYE",
+      "height_m": 1.6,
+      "yaw_deg": 0.0,
+      "pitch_deg": 0.0,
+      "lens": "WIDE",
+      "perspective": "ONE_POINT",
+      "horizon_y": 0.45,
+      "vanishing_point": [
+        0.65,
+        0.45
+      ],
+      "vanishing_point_secondary": null,
+      "depth_layout": "LAYERED",
+      "subject_height_px": 420.0,
+      "subject_position": [
+        0.35,
+        0.8
+      ],
+      "motion": "STATIC"
+    },
+    "actors": [
+      {
+        "character_id": "DR_JULIAN",
+        "variant_id": "V_JULIAN_1892",
+        "costume_id": "C_JULIAN_LAB",
+        "detail_level": "HERO",
+        "action": "WALK",
+        "emotion": "DETERMINED",
+        "intensity": "NORMAL",
+        "body_weight": "CENTERED",
+        "orientation": "THREE_QUARTER_RIGHT",
+        "eyeline_target": null,
+        "contact_target": null,
+        "screen_x": 0.35,
+        "depth": 0.35,
+        "depth_plane": "MG",
+        "height_px": 420.0,
+        "silhouette": false
+      }
+    ],
+    "props": [
+      {
+        "instance_id": "PROP_01",
+        "semantic": "High-voltage induction coils and brass terminals",
+        "asset_id": "generic_apparatus_01",
+        "resolution_status": "MATCH",
+        "category": "APPARATUS",
+        "role": "HERO",
+        "depth_plane": "MG",
+        "screen_x": 0.25,
+        "depth": 0.5,
+        "state": "STATIC",
+        "mount": "FLOOR"
+      },
+      {
+        "instance_id": "PROP_02",
+        "semantic": "Heavy oak workbench with scratches",
+        "asset_id": "tavern_table_oak_01",
+        "resolution_status": "MATCH",
+        "category": "DESK",
+        "role": "DRESSING",
+        "depth_plane": "FG",
+        "screen_x": 0.75,
+        "depth": 0.25,
+        "state": "STATIC",
+        "mount": "FLOOR"
+      },
+      {
+        "instance_id": "PROP_03",
+        "semantic": "Leather-bound scientific journal and papers",
+        "asset_id": "generic_table_wood_01",
+        "resolution_status": "GENERIC_CATEGORY",
+        "category": "DOCUMENTS",
+        "role": "FOREGROUND",
+        "depth_plane": "FG",
+        "screen_x": 0.25,
+        "depth": 0.25,
+        "state": "STATIC",
+        "mount": "FLOOR"
+      }
+    ],
+    "object_states": {},
+    "depth_planes": {
+      "NEAR_FG": 0.05,
+      "FG": 0.18,
+      "MG": 0.35,
+      "BG": 0.65,
+      "FAR_BG": 0.9
+    },
+    "lighting_story": {
+      "direction": "KEY_LEFT",
+      "mood": "WINDOW_SHAFTS"
+    },
+    "vitality": {
+      "density": "BALANCED"
+    },
+    "visual_eye_path": {
+      "steps": [
+        "ACTOR:DR_JULIAN",
+        "OBJECT:generic_apparatus_01"
+      ]
+    },
+    "historical_metadata": [
+      {
+        "item": "Year 1892",
+        "confidence": "PLAUSIBLE_RECONSTRUCTION",
+        "note": ""
+      }
+    ],
+    "continuity": {},
+    "dialogue": [],
+    "narration": "In late autumn 1892, Dr. Julian Aris entered his secluded electrical research laboratory.",
+    "motion_intent": {
+      "motion": "STATIC"
+    },
+    "duration_sec": 4.5,
+    "seed": 1234,
+    "validation": {
+      "delta_passed": true,
+      "stage_view_checked": true
+    }
+  },
+  {
+    "scene_id": "SCENE_002",
+    "shot_id": "SH_002",
+    "shot_index": 1,
+    "beat_ids": [
+      "B002"
+    ],
+    "year": 1892,
+    "location_id": "LOC_LAB",
+    "shot_purpose": "INFORMATION",
+    "purpose_reason": "Beat EXPOSITION requires INFORMATION visual emphasis.",
+    "camera": {
+      "shot": "TWO_SHOT",
+      "height": "EYE",
+      "height_m": 1.6,
+      "yaw_deg": 0.0,
+      "pitch_deg": 0.0,
+      "lens": "NORMAL",
+      "perspective": "ONE_POINT",
+      "horizon_y": 0.5,
+      "vanishing_point": [
+        0.42,
+        0.5
+      ],
+      "vanishing_point_secondary": null,
+      "depth_layout": "LAYERED",
+      "subject_height_px": 420.0,
+      "subject_position": [
+        0.62,
+        0.8
+      ],
+      "motion": "STATIC"
+    },
+    "actors": [
+      {
+        "character_id": "DR_JULIAN",
+        "variant_id": "V_JULIAN_1892",
+        "costume_id": "C_JULIAN_LAB",
+        "detail_level": "HERO",
+        "action": "OBSERVE",
+        "emotion": "CONFIDENT",
+        "intensity": "NORMAL",
+        "body_weight": "CENTERED",
+        "orientation": "THREE_QUARTER_LEFT",
+        "eyeline_target": null,
+        "contact_target": null,
+        "screen_x": 0.62,
+        "depth": 0.35,
+        "depth_plane": "MG",
+        "height_px": 420.0,
+        "silhouette": false
+      }
+    ],
+    "props": [
+      {
+        "instance_id": "PROP_01",
+        "semantic": "High-voltage induction coils and brass terminals",
+        "asset_id": "generic_apparatus_01",
+        "resolution_status": "MATCH",
+        "category": "APPARATUS",
+        "role": "HERO",
+        "depth_plane": "MG",
+        "screen_x": 0.25,
+        "depth": 0.5,
+        "state": "STATIC",
+        "mount": "FLOOR"
+      },
+      {
+        "instance_id": "PROP_02",
+        "semantic": "Heavy oak workbench with scratches",
+        "asset_id": "tavern_table_oak_01",
+        "resolution_status": "MATCH",
+        "category": "DESK",
+        "role": "DRESSING",
+        "depth_plane": "FG",
+        "screen_x": 0.75,
+        "depth": 0.25,
+        "state": "STATIC",
+        "mount": "FLOOR"
+      },
+      {
+        "instance_id": "PROP_03",
+        "semantic": "Leather-bound scientific journal and papers",
+        "asset_id": "generic_table_wood_01",
+        "resolution_status": "GENERIC_CATEGORY",
+        "category": "DOCUMENTS",
+        "role": "FOREGROUND",
+        "depth_plane": "FG",
+        "screen_x": 0.25,
+        "depth": 0.25,
+        "state": "STATIC",
+        "mount": "FLOOR"
+      }
+    ],
+    "object_states": {},
+    "depth_planes": {
+      "NEAR_FG": 0.05,
+      "FG": 0.18,
+      "MG": 0.35,
+      "BG": 0.65,
+      "FAR_BG": 0.9
+    },
+    "lighting_story": {
+      "direction": "KEY_LEFT",
+      "mood": "WINDOW_SHAFTS"
+    },
+    "vitality": {
+      "density": "BALANCED"
+    },
+    "visual_eye_path": {
+      "steps": [
+        "ACTOR:DR_JULIAN",
+        "OBJECT:generic_apparatus_01"
+      ]
+    },
+    "historical_metadata": [
+      {
+        "item": "Year 1892",
+        "confidence": "PLAUSIBLE_RECONSTRUCTION",
+        "note": ""
+      }
+    ],
+    "continuity": {},
+    "dialogue": [
+      {
+        "speaker_id": "DR_JULIAN",
+        "voice_id": "voice_dr_julian",
+        "text": "The induction coils are finally aligned. Let us see if the current holds.",
+        "delivery": "NEUTRAL"
+      }
+    ],
+    "narration": "",
+    "motion_intent": {
+      "motion": "STATIC"
+    },
+    "duration_sec": 5.0,
+    "seed": 1251,
+    "validation": {
+      "delta_passed": true,
+      "stage_view_checked": true
+    }
+  },
+  {
+    "scene_id": "SCENE_003",
+    "shot_id": "SH_003",
+    "shot_index": 2,
+    "beat_ids": [
+      "B003"
+    ],
+    "year": 1892,
+    "location_id": "LOC_LAB",
+    "shot_purpose": "ACTION",
+    "purpose_reason": "Beat TRANSITION requires ACTION visual emphasis.",
+    "camera": {
+      "shot": "LOW_ANGLE",
+      "height": "LOW",
+      "height_m": 0.8,
+      "yaw_deg": 0.0,
+      "pitch_deg": 18.0,
+      "lens": "WIDE",
+      "perspective": "ONE_POINT",
+      "horizon_y": 0.32,
+      "vanishing_point": [
+        0.42,
+        0.32
+      ],
+      "vanishing_point_secondary": null,
+      "depth_layout": "LAYERED",
+      "subject_height_px": 420.0,
+      "subject_position": [
+        0.48,
+        0.8
+      ],
+      "motion": "STATIC"
+    },
+    "actors": [
+      {
+        "character_id": "DR_JULIAN",
+        "variant_id": "V_JULIAN_1892",
+        "costume_id": "C_JULIAN_LAB",
+        "detail_level": "HERO",
+        "action": "OPERATE",
+        "emotion": "ATTENTIVE",
+        "intensity": "NORMAL",
+        "body_weight": "CENTERED",
+        "orientation": "THREE_QUARTER_RIGHT",
+        "eyeline_target": null,
+        "contact_target": null,
+        "screen_x": 0.48,
+        "depth": 0.35,
+        "depth_plane": "MG",
+        "height_px": 420.0,
+        "silhouette": false
+      }
+    ],
+    "props": [
+      {
+        "instance_id": "PROP_01",
+        "semantic": "High-voltage induction coils and brass terminals",
+        "asset_id": "generic_apparatus_01",
+        "resolution_status": "MATCH",
+        "category": "APPARATUS",
+        "role": "HERO",
+        "depth_plane": "MG",
+        "screen_x": 0.25,
+        "depth": 0.5,
+        "state": "STATIC",
+        "mount": "FLOOR"
+      },
+      {
+        "instance_id": "PROP_02",
+        "semantic": "Heavy oak workbench with scratches",
+        "asset_id": "tavern_table_oak_01",
+        "resolution_status": "MATCH",
+        "category": "DESK",
+        "role": "DRESSING",
+        "depth_plane": "FG",
+        "screen_x": 0.75,
+        "depth": 0.25,
+        "state": "STATIC",
+        "mount": "FLOOR"
+      },
+      {
+        "instance_id": "PROP_03",
+        "semantic": "Leather-bound scientific journal and papers",
+        "asset_id": "generic_table_wood_01",
+        "resolution_status": "GENERIC_CATEGORY",
+        "category": "DOCUMENTS",
+        "role": "FOREGROUND",
+        "depth_plane": "FG",
+        "screen_x": 0.25,
+        "depth": 0.25,
+        "state": "STATIC",
+        "mount": "FLOOR"
+      }
+    ],
+    "object_states": {},
+    "depth_planes": {
+      "NEAR_FG": 0.05,
+      "FG": 0.18,
+      "MG": 0.35,
+      "BG": 0.65,
+      "FAR_BG": 0.9
+    },
+    "lighting_story": {
+      "direction": "KEY_LEFT",
+      "mood": "WINDOW_SHAFTS"
+    },
+    "vitality": {
+      "density": "BALANCED"
+    },
+    "visual_eye_path": {
+      "steps": [
+        "ACTOR:DR_JULIAN",
+        "OBJECT:generic_apparatus_01"
+      ]
+    },
+    "historical_metadata": [
+      {
+        "item": "Year 1892",
+        "confidence": "PLAUSIBLE_RECONSTRUCTION",
+        "note": ""
+      }
+    ],
+    "continuity": {},
+    "dialogue": [],
+    "narration": "Julian adjusted the rheostat and carefully recorded the voltage readings in his leather journal.",
+    "motion_intent": {
+      "motion": "STATIC"
+    },
+    "duration_sec": 5.5,
+    "seed": 1268,
+    "validation": {
+      "delta_passed": true,
+      "stage_view_checked": true
+    }
+  },
+  {
+    "scene_id": "SCENE_004",
+    "shot_id": "SH_004",
+    "shot_index": 3,
+    "beat_ids": [
+      "B004"
+    ],
+    "year": 1892,
+    "location_id": "LOC_LAB",
+    "shot_purpose": "TENSION",
+    "purpose_reason": "Beat ESCALATION requires TENSION visual emphasis.",
+    "camera": {
+      "shot": "DEEP_PERSPECTIVE",
+      "height": "HIGH",
+      "height_m": 2.4,
+      "yaw_deg": 0.0,
+      "pitch_deg": -16.0,
+      "lens": "WIDE",
+      "perspective": "ONE_POINT",
+      "horizon_y": 0.62,
+      "vanishing_point": [
+        0.55,
+        0.62
+      ],
+      "vanishing_point_secondary": null,
+      "depth_layout": "LAYERED",
+      "subject_height_px": 420.0,
+      "subject_position": [
+        0.52,
+        0.8
+      ],
+      "motion": "STATIC"
+    },
+    "actors": [
+      {
+        "character_id": "DR_JULIAN",
+        "variant_id": "V_JULIAN_1892",
+        "costume_id": "C_JULIAN_LAB",
+        "detail_level": "HERO",
+        "action": "SPEAK",
+        "emotion": "CONFIDENT",
+        "intensity": "NORMAL",
+        "body_weight": "CENTERED",
+        "orientation": "THREE_QUARTER_LEFT",
+        "eyeline_target": null,
+        "contact_target": null,
+        "screen_x": 0.52,
+        "depth": 0.35,
+        "depth_plane": "MG",
+        "height_px": 420.0,
+        "silhouette": false
+      }
+    ],
+    "props": [
+      {
+        "instance_id": "PROP_01",
+        "semantic": "High-voltage induction coils and brass terminals",
+        "asset_id": "generic_apparatus_01",
+        "resolution_status": "MATCH",
+        "category": "APPARATUS",
+        "role": "HERO",
+        "depth_plane": "MG",
+        "screen_x": 0.25,
+        "depth": 0.5,
+        "state": "STATIC",
+        "mount": "FLOOR"
+      },
+      {
+        "instance_id": "PROP_02",
+        "semantic": "Heavy oak workbench with scratches",
+        "asset_id": "tavern_table_oak_01",
+        "resolution_status": "MATCH",
+        "category": "DESK",
+        "role": "DRESSING",
+        "depth_plane": "FG",
+        "screen_x": 0.75,
+        "depth": 0.25,
+        "state": "STATIC",
+        "mount": "FLOOR"
+      },
+      {
+        "instance_id": "PROP_03",
+        "semantic": "Leather-bound scientific journal and papers",
+        "asset_id": "generic_table_wood_01",
+        "resolution_status": "GENERIC_CATEGORY",
+        "category": "DOCUMENTS",
+        "role": "FOREGROUND",
+        "depth_plane": "FG",
+        "screen_x": 0.25,
+        "depth": 0.25,
+        "state": "STATIC",
+        "mount": "FLOOR"
+      }
+    ],
+    "object_states": {},
+    "depth_planes": {
+      "NEAR_FG": 0.05,
+      "FG": 0.18,
+      "MG": 0.35,
+      "BG": 0.65,
+      "FAR_BG": 0.9
+    },
+    "lighting_story": {
+      "direction": "KEY_LEFT",
+      "mood": "WINDOW_SHAFTS"
+    },
+    "vitality": {
+      "density": "BALANCED"
+    },
+    "visual_eye_path": {
+      "steps": [
+        "ACTOR:DR_JULIAN",
+        "OBJECT:generic_apparatus_01"
+      ]
+    },
+    "historical_metadata": [
+      {
+        "item": "Year 1892",
+        "confidence": "PLAUSIBLE_RECONSTRUCTION",
+        "note": ""
+      }
+    ],
+    "continuity": {},
+    "dialogue": [
+      {
+        "speaker_id": "DR_JULIAN",
+        "voice_id": "voice_dr_julian",
+        "text": "Steady at four hundred volts. The secondary circuit is energized.",
+        "delivery": "NEUTRAL"
+      }
+    ],
+    "narration": "",
+    "motion_intent": {
+      "motion": "STATIC"
+    },
+    "duration_sec": 4.0,
+    "seed": 1285,
+    "validation": {
+      "delta_passed": true,
+      "stage_view_checked": true
+    }
+  },
+  {
+    "scene_id": "SCENE_005",
+    "shot_id": "SH_005",
+    "shot_index": 4,
+    "beat_ids": [
+      "B005"
+    ],
+    "year": 1892,
+    "location_id": "LOC_LAB",
+    "shot_purpose": "REVEAL",
+    "purpose_reason": "Beat REVEAL requires REVEAL visual emphasis.",
+    "camera": {
+      "shot": "MEDIUM_WIDE",
+      "height": "EYE",
+      "height_m": 1.6,
+      "yaw_deg": 0.0,
+      "pitch_deg": 0.0,
+      "lens": "NORMAL",
+      "perspective": "ONE_POINT",
+      "horizon_y": 0.5,
+      "vanishing_point": [
+        0.58,
+        0.5
+      ],
+      "vanishing_point_secondary": null,
+      "depth_layout": "LAYERED",
+      "subject_height_px": 420.0,
+      "subject_position": [
+        0.38,
+        0.8
+      ],
+      "motion": "STATIC"
+    },
+    "actors": [
+      {
+        "character_id": "DR_JULIAN",
+        "variant_id": "V_JULIAN_1892",
+        "costume_id": "C_JULIAN_LAB",
+        "detail_level": "HERO",
+        "action": "REACT",
+        "emotion": "SURPRISED",
+        "intensity": "NORMAL",
+        "body_weight": "CENTERED",
+        "orientation": "THREE_QUARTER_RIGHT",
+        "eyeline_target": null,
+        "contact_target": null,
+        "screen_x": 0.38,
+        "depth": 0.35,
+        "depth_plane": "MG",
+        "height_px": 420.0,
+        "silhouette": false
+      }
+    ],
+    "props": [
+      {
+        "instance_id": "PROP_01",
+        "semantic": "High-voltage induction coils and brass terminals",
+        "asset_id": "generic_apparatus_01",
+        "resolution_status": "MATCH",
+        "category": "APPARATUS",
+        "role": "HERO",
+        "depth_plane": "MG",
+        "screen_x": 0.25,
+        "depth": 0.5,
+        "state": "STATIC",
+        "mount": "FLOOR"
+      },
+      {
+        "instance_id": "PROP_02",
+        "semantic": "Heavy oak workbench with scratches",
+        "asset_id": "tavern_table_oak_01",
+        "resolution_status": "MATCH",
+        "category": "DESK",
+        "role": "DRESSING",
+        "depth_plane": "FG",
+        "screen_x": 0.75,
+        "depth": 0.25,
+        "state": "STATIC",
+        "mount": "FLOOR"
+      },
+      {
+        "instance_id": "PROP_03",
+        "semantic": "Leather-bound scientific journal and papers",
+        "asset_id": "generic_table_wood_01",
+        "resolution_status": "GENERIC_CATEGORY",
+        "category": "DOCUMENTS",
+        "role": "FOREGROUND",
+        "depth_plane": "FG",
+        "screen_x": 0.25,
+        "depth": 0.25,
+        "state": "STATIC",
+        "mount": "FLOOR"
+      }
+    ],
+    "object_states": {},
+    "depth_planes": {
+      "NEAR_FG": 0.05,
+      "FG": 0.18,
+      "MG": 0.35,
+      "BG": 0.65,
+      "FAR_BG": 0.9
+    },
+    "lighting_story": {
+      "direction": "KEY_LEFT",
+      "mood": "WINDOW_SHAFTS"
+    },
+    "vitality": {
+      "density": "BALANCED"
+    },
+    "visual_eye_path": {
+      "steps": [
+        "ACTOR:DR_JULIAN",
+        "OBJECT:generic_apparatus_01"
+      ]
+    },
+    "historical_metadata": [
+      {
+        "item": "Year 1892",
+        "confidence": "PLAUSIBLE_RECONSTRUCTION",
+        "note": ""
+      }
+    ],
+    "continuity": {},
+    "dialogue": [],
+    "narration": "Suddenly, a violent electrical spark bridged the brass electrodes, casting harsh shadows across the workshop.",
+    "motion_intent": {
+      "motion": "STATIC"
+    },
+    "duration_sec": 6.0,
+    "seed": 1302,
+    "validation": {
+      "delta_passed": true,
+      "stage_view_checked": true
+    }
+  },
+  {
+    "scene_id": "SCENE_006",
+    "shot_id": "SH_006",
+    "shot_index": 5,
+    "beat_ids": [
+      "B006"
+    ],
+    "year": 1892,
+    "location_id": "LOC_LAB",
+    "shot_purpose": "PAYOFF",
+    "purpose_reason": "Beat PAYOFF requires PAYOFF visual emphasis.",
+    "camera": {
+      "shot": "TWO_SHOT",
+      "height": "EYE",
+      "height_m": 1.6,
+      "yaw_deg": 0.0,
+      "pitch_deg": 0.0,
+      "lens": "NORMAL",
+      "perspective": "ONE_POINT",
+      "horizon_y": 0.5,
+      "vanishing_point": [
+        0.42,
+        0.5
+      ],
+      "vanishing_point_secondary": null,
+      "depth_layout": "LAYERED",
+      "subject_height_px": 420.0,
+      "subject_position": [
+        0.62,
+        0.8
+      ],
+      "motion": "STATIC"
+    },
+    "actors": [
+      {
+        "character_id": "DR_JULIAN",
+        "variant_id": "V_JULIAN_1892",
+        "costume_id": "C_JULIAN_LAB",
+        "detail_level": "HERO",
+        "action": "OBSERVE",
+        "emotion": "AMUSED",
+        "intensity": "NORMAL",
+        "body_weight": "CENTERED",
+        "orientation": "THREE_QUARTER_LEFT",
+        "eyeline_target": null,
+        "contact_target": null,
+        "screen_x": 0.62,
+        "depth": 0.35,
+        "depth_plane": "MG",
+        "height_px": 420.0,
+        "silhouette": false
+      }
+    ],
+    "props": [
+      {
+        "instance_id": "PROP_01",
+        "semantic": "High-voltage induction coils and brass terminals",
+        "asset_id": "generic_apparatus_01",
+        "resolution_status": "MATCH",
+        "category": "APPARATUS",
+        "role": "HERO",
+        "depth_plane": "MG",
+        "screen_x": 0.25,
+        "depth": 0.5,
+        "state": "STATIC",
+        "mount": "FLOOR"
+      },
+      {
+        "instance_id": "PROP_02",
+        "semantic": "Heavy oak workbench with scratches",
+        "asset_id": "tavern_table_oak_01",
+        "resolution_status": "MATCH",
+        "category": "DESK",
+        "role": "DRESSING",
+        "depth_plane": "FG",
+        "screen_x": 0.75,
+        "depth": 0.25,
+        "state": "STATIC",
+        "mount": "FLOOR"
+      },
+      {
+        "instance_id": "PROP_03",
+        "semantic": "Leather-bound scientific journal and papers",
+        "asset_id": "generic_table_wood_01",
+        "resolution_status": "GENERIC_CATEGORY",
+        "category": "DOCUMENTS",
+        "role": "FOREGROUND",
+        "depth_plane": "FG",
+        "screen_x": 0.25,
+        "depth": 0.25,
+        "state": "STATIC",
+        "mount": "FLOOR"
+      }
+    ],
+    "object_states": {},
+    "depth_planes": {
+      "NEAR_FG": 0.05,
+      "FG": 0.18,
+      "MG": 0.35,
+      "BG": 0.65,
+      "FAR_BG": 0.9
+    },
+    "lighting_story": {
+      "direction": "KEY_LEFT",
+      "mood": "WINDOW_SHAFTS"
+    },
+    "vitality": {
+      "density": "BALANCED"
+    },
+    "visual_eye_path": {
+      "steps": [
+        "ACTOR:DR_JULIAN",
+        "OBJECT:generic_apparatus_01"
+      ]
+    },
+    "historical_metadata": [
+      {
+        "item": "Year 1892",
+        "confidence": "PLAUSIBLE_RECONSTRUCTION",
+        "note": ""
+      }
+    ],
+    "continuity": {},
+    "dialogue": [
+      {
+        "speaker_id": "DR_JULIAN",
+        "voice_id": "voice_dr_julian",
+        "text": "Fascinating! The ionization threshold is far lower than Maxwell predicted.",
+        "delivery": "EMPHATIC"
+      }
+    ],
+    "narration": "",
+    "motion_intent": {
+      "motion": "STATIC"
+    },
+    "duration_sec": 5.0,
+    "seed": 1319,
+    "validation": {
+      "delta_passed": true,
+      "stage_view_checked": true
+    }
+  }
+]

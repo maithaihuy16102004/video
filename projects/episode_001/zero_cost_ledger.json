@@ -1,0 +1,28 @@
+{
+  "reasoning_calls_free_text": 0,
+  "reasoning_call_failures": 0,
+  "reasoning_cache_hits": 2,
+  "offline_reasoning_runs": 0,
+  "paid_api_calls": 0,
+  "paid_image_calls": 0,
+  "paid_cost_usd": 0.0,
+  "local_renders": 10,
+  "render_seconds": 1.524,
+  "planning_seconds": 1.536,
+  "events": [
+    {
+      "t": 1794111613.289,
+      "kind": "REASONING_CACHE_HIT",
+      "stage": "story_intelligence",
+      "provider": "gemini"
+    },
+    {
+      "t": 1794111613.297,
+      "kind": "REASONING_CACHE_HIT",
+      "stage": "bibles",
+      "provider": "gemini"
+    }
+  ],
+  "billing_note": "Gemini text calls use the user's existing GEMINI_API_KEY within its free quota. Billing tier cannot be verified via the API; no image-generation or paid endpoints are called.",
+  "zero_cost_guarantee_met": true
+}

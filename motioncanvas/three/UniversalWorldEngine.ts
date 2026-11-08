@@ -77,6 +77,9 @@ export class UniversalWorldEngine {
   private waterMesh?: THREE.Mesh;
   private auroraMeshes: THREE.Mesh[] = [];
   private animatedLights: Array<{ light: THREE.PointLight; baseIntensity: number; freq: number; phase: number }> = [];
+  private brokenPlank?: THREE.Mesh;
+  private brokenPlankBaseX = -0.2;
+  private brokenPlankBaseY = 2.65;
 
   constructor(dna: LocationDNA, width = 1920, height = 1080) {
     this.dna = dna;
@@ -413,38 +416,45 @@ export class UniversalWorldEngine {
     espressoMachine.position.set(-6.5, 2.4, -3.8);
     this.scene.add(espressoMachine);
 
-    // 4. Hero Café Tables & Chairs
+    // 4. Hero Café Tables & Chairs (Accurate Human Scale: Table 0.72m, Chair 0.45m)
     const tableTopMat = new THREE.MeshStandardMaterial({ color: 0x5D4037, roughness: 0.4, metalness: 0.2 });
     const castIronMat = new THREE.MeshStandardMaterial({ color: 0x1A1A1A, roughness: 0.7, metalness: 0.8 });
 
-    // Center Meeting Table
-    const centerTable = new THREE.Mesh(new THREE.CylinderGeometry(1.6, 1.6, 0.12, 24), tableTopMat);
-    centerTable.position.set(0, 1.1, 0.2);
+    // Center Meeting Table (Ergonomic Café Proportions: Diameter 0.84m, Height 0.72m)
+    const centerTable = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.42, 0.05, 24), tableTopMat);
+    centerTable.position.set(0, 0.72, 0.2);
     this.scene.add(centerTable);
 
-    const tablePedestal = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.28, 1.05, 16), castIronMat);
-    tablePedestal.position.set(0, 0.55, 0.2);
+    const tablePedestal = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.20, 0.69, 16), castIronMat);
+    tablePedestal.position.set(0, 0.35, 0.2);
     this.scene.add(tablePedestal);
 
-    // Curved Modern Café Chairs
-    for (const [cx, cz, rot] of [[-1.8, 0.2, Math.PI / 2], [1.8, 0.2, -Math.PI / 2]]) {
-      const chairSeat = new THREE.Mesh(new THREE.BoxGeometry(0.85, 0.08, 0.85), tableTopMat);
-      chairSeat.position.set(cx, 0.65, cz);
+    // Ergonomic Café Chairs (Seat height 0.45m, Width 0.46m)
+    for (const [cx, cz, rot] of [[-0.75, 0.2, Math.PI / 2], [0.75, 0.2, -Math.PI / 2]]) {
+      const chairSeat = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.05, 0.46), tableTopMat);
+      chairSeat.position.set(cx, 0.45, cz);
       this.scene.add(chairSeat);
 
-      const chairBack = new THREE.Mesh(new THREE.BoxGeometry(0.85, 0.8, 0.06), tableTopMat);
-      chairBack.position.set(cx + (cx < 0 ? -0.4 : 0.4), 1.05, cz);
+      const chairBack = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.45, 0.04), tableTopMat);
+      chairBack.position.set(cx + (cx < 0 ? -0.22 : 0.22), 0.70, cz);
       this.scene.add(chairBack);
+
+      // Chair Legs
+      for (const [lx, lz] of [[-0.18, -0.18], [-0.18, 0.18], [0.18, -0.18], [0.18, 0.18]]) {
+        const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.43, 8), castIronMat);
+        leg.position.set(cx + lx, 0.22, cz + lz);
+        this.scene.add(leg);
+      }
     }
 
-    // Ceramic Coffee Mugs on Table
+    // Ceramic Coffee Mugs on Table (Accurate 10cm height)
     const ceramicMat = new THREE.MeshStandardMaterial({ color: 0xFAF0E6, roughness: 0.25, metalness: 0.1 });
-    const mug1 = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.12, 0.22, 16), ceramicMat);
-    mug1.position.set(-0.4, 1.25, 0.1);
+    const mug1 = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.05, 0.10, 16), ceramicMat);
+    mug1.position.set(-0.20, 0.79, 0.15);
     this.scene.add(mug1);
 
-    const mug2 = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.12, 0.22, 16), ceramicMat);
-    mug2.position.set(0.4, 1.25, 0.3);
+    const mug2 = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.05, 0.10, 16), ceramicMat);
+    mug2.position.set(0.20, 0.79, 0.25);
     this.scene.add(mug2);
 
     // 5. Indoor Lush Potted Plants (Monstera / Ficus)
@@ -684,12 +694,21 @@ export class UniversalWorldEngine {
       }
     }
 
-    // Bridge Deck Planks
+    // Bridge Deck Planks (With Dynamic Broken Plank at x = -0.2)
     for (let x = -11.0; x <= 11.0; x += 0.45) {
-      const plank = new THREE.Mesh(new THREE.BoxGeometry(0.40, 0.22, 4.1), timberPlankMat);
       const yArch = 2.65 - (x * x) * 0.007;
-      plank.position.set(x, yArch, 0);
-      this.scene.add(plank);
+      if (Math.abs(x - (-0.2)) < 0.25) {
+        // Dynamic broken plank where Haru slips at t=4.5s
+        this.brokenPlank = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.20, 4.1), timberPlankMat);
+        this.brokenPlank.position.set(x, yArch, 0);
+        this.brokenPlankBaseX = x;
+        this.brokenPlankBaseY = yArch;
+        this.scene.add(this.brokenPlank);
+      } else {
+        const plank = new THREE.Mesh(new THREE.BoxGeometry(0.40, 0.22, 4.1), timberPlankMat);
+        plank.position.set(x, yArch, 0);
+        this.scene.add(plank);
+      }
     }
 
     // Handrails, Balusters & Bronze Giboshi Finials
@@ -714,31 +733,151 @@ export class UniversalWorldEngine {
   }
 
   // ----------------------------------------------------------------------------
-  // 5. EDO HOUSE ENVIRONMENT (Veranda, Shoji Screens, Lanterns)
+  // 5. EDO HOUSE ENVIRONMENT (Period-Authentic Japanese Interior & Engawa)
   // ----------------------------------------------------------------------------
   private buildEdoHouseEnvironment() {
-    const floorMat = new THREE.MeshStandardMaterial({ color: 0x4A3828, roughness: 0.45, metalness: 0.2 });
-    const floor = new THREE.Mesh(new THREE.PlaneGeometry(35, 25), floorMat);
-    floor.rotation.x = -Math.PI / 2;
-    floor.position.set(0, 0, 0);
-    this.scene.add(floor);
+    // 1. Garden Ground & Cobblestones (Y = 0.0)
+    const gardenMat = new THREE.MeshStandardMaterial({ color: 0x363028, roughness: 0.85 });
+    const gardenFloor = new THREE.Mesh(new THREE.PlaneGeometry(35, 12), gardenMat);
+    gardenFloor.rotation.x = -Math.PI / 2;
+    gardenFloor.position.set(0, 0, 4.0);
+    this.scene.add(gardenFloor);
 
-    // Shoji Screens
+    // Stepping stones (Kutsunugi-ishi)
+    const stoneMat = new THREE.MeshStandardMaterial({ color: 0x5A544C, roughness: 0.9 });
+    for (const sx of [-1.2, 0.0, 1.2]) {
+      const stepStone = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.52, 0.22, 12), stoneMat);
+      stepStone.position.set(sx, 0.11, 1.4);
+      this.scene.add(stepStone);
+    }
+
+    // 2. Raised Wooden Veranda (Engawa) at Y = 0.45
+    const cedarMat = new THREE.MeshStandardMaterial({ color: 0x8D6E50, roughness: 0.35, metalness: 0.1 });
+    const engawa = new THREE.Mesh(new THREE.BoxGeometry(26, 0.18, 2.2), cedarMat);
+    engawa.position.set(0, 0.36, 0.3);
+    this.scene.add(engawa);
+
+    // Veranda support posts
+    const postDarkMat = new THREE.MeshStandardMaterial({ color: 0x4E3629, roughness: 0.65 });
+    for (let px = -11; px <= 11; px += 3.5) {
+      const post = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.45, 0.16), postDarkMat);
+      post.position.set(px, 0.22, 1.2);
+      this.scene.add(post);
+    }
+
+    // 3. Authentic 8-Mat Tatami Room (Y = 0.45, z < -0.6)
+    const tatamiMatMat = new THREE.MeshStandardMaterial({ color: 0xC6B88E, roughness: 0.65 }); // Rush straw
+    const heriBorderMat = new THREE.MeshStandardMaterial({ color: 0x243324, roughness: 0.5 }); // Dark green/black cloth border
+
+    // Traditional 8-mat layout (Mats are 1.8m x 0.9m x 0.06m)
+    const matPositions = [
+      [-0.9, -1.5, 0], [0.9, -1.5, 0],
+      [-1.8, -2.4, Math.PI / 2], [1.8, -2.4, Math.PI / 2],
+      [-0.9, -3.3, 0], [0.9, -3.3, 0],
+      [-1.8, -4.2, Math.PI / 2], [1.8, -4.2, Math.PI / 2]
+    ];
+    for (const [tx, tz, trot] of matPositions) {
+      const mat = new THREE.Mesh(new THREE.BoxGeometry(0.88, 0.05, 1.78), tatamiMatMat);
+      mat.position.set(tx, 0.46, tz);
+      mat.rotation.y = trot;
+      this.scene.add(mat);
+
+      // Long-edge cloth borders (Heri)
+      for (const edgeOffset of [-0.43, 0.43]) {
+        const border = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.055, 1.78), heriBorderMat);
+        border.position.set(tx + edgeOffset, 0.465, tz);
+        border.rotation.y = trot;
+        this.scene.add(border);
+      }
+    }
+
+    // 4. Hinoki Timber Pillars & Upper Beam Lintel (Kamoi)
+    for (const colX of [-6.2, -2.2, 2.2, 6.2]) {
+      const pillar = new THREE.Mesh(new THREE.BoxGeometry(0.22, 3.4, 0.22), postDarkMat);
+      pillar.position.set(colX, 2.15, -0.7);
+      this.scene.add(pillar);
+    }
+    const lintelBeam = new THREE.Mesh(new THREE.BoxGeometry(16, 0.22, 0.24), postDarkMat);
+    lintelBeam.position.set(0, 3.75, -0.7);
+    this.scene.add(lintelBeam);
+
+    // 5. Authentic Shoji Sliding Screens with Kumiko Latticework Grid
     const shojiPaperMat = new THREE.MeshStandardMaterial({
       color: 0xFCF8EE,
-      roughness: 0.6,
-      emissive: 0x553311,
-      emissiveIntensity: 0.35,
+      roughness: 0.55,
+      emissive: 0x664422,
+      emissiveIntensity: 0.42,
     });
-    const shojiBack = new THREE.Mesh(new THREE.BoxGeometry(26, 5.0, 0.15), shojiPaperMat);
-    shojiBack.position.set(0, 2.5, -4.5);
-    this.scene.add(shojiBack);
+    const shojiFrameMat = new THREE.MeshStandardMaterial({ color: 0x3E2723, roughness: 0.6 });
 
-    // Warm Andon Lantern
-    const andonLight = new THREE.PointLight(0xFFA544, 2.6, 9.0);
-    andonLight.position.set(-3.2, 2.0, -2.5);
-    this.scene.add(andonLight);
-    this.animatedLights.push({ light: andonLight, baseIntensity: 2.6, freq: 2.8, phase: 0.5 });
+    // Shoji panels in background
+    for (let sx = -5.0; sx <= 5.0; sx += 2.5) {
+      const paperPanel = new THREE.Mesh(new THREE.BoxGeometry(2.4, 3.2, 0.04), shojiPaperMat);
+      paperPanel.position.set(sx, 2.05, -5.2);
+      this.scene.add(paperPanel);
+
+      // Outer timber frame
+      const frameL = new THREE.Mesh(new THREE.BoxGeometry(0.08, 3.2, 0.06), shojiFrameMat);
+      frameL.position.set(sx - 1.16, 2.05, -5.18);
+      this.scene.add(frameL);
+      const frameR = new THREE.Mesh(new THREE.BoxGeometry(0.08, 3.2, 0.06), shojiFrameMat);
+      frameR.position.set(sx + 1.16, 2.05, -5.18);
+      this.scene.add(frameR);
+
+      // Fine Kumiko horizontal & vertical wooden grid
+      for (let gy = 0.8; gy <= 3.3; gy += 0.35) {
+        const hSlat = new THREE.Mesh(new THREE.BoxGeometry(2.35, 0.025, 0.05), shojiFrameMat);
+        hSlat.position.set(sx, gy, -5.18);
+        this.scene.add(hSlat);
+      }
+      for (let gx = sx - 0.9; gx <= sx + 0.9; gx += 0.45) {
+        const vSlat = new THREE.Mesh(new THREE.BoxGeometry(0.025, 3.15, 0.05), shojiFrameMat);
+        vSlat.position.set(gx, 2.05, -5.18);
+        this.scene.add(vSlat);
+      }
+    }
+
+    // 6. Traditional Low Wooden Chabudai Tea Table & Ceramic Set
+    const lacquerMat = new THREE.MeshStandardMaterial({ color: 0x2A1810, roughness: 0.25, metalness: 0.4 });
+    const chabudai = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.55, 0.04, 20), lacquerMat);
+    chabudai.position.set(0, 0.68, -2.4);
+    this.scene.add(chabudai);
+    for (const [lx, lz] of [[-0.3, -0.3], [-0.3, 0.3], [0.3, -0.3], [0.3, 0.3]]) {
+      const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.02, 0.18, 8), lacquerMat);
+      leg.position.set(lx, 0.57, -2.4 + lz);
+      this.scene.add(leg);
+    }
+
+    // Ceramic Kyusu teapot & cups on table
+    const celadonMat = new THREE.MeshStandardMaterial({ color: 0xA4C3B2, roughness: 0.3, metalness: 0.2 });
+    const teapot = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.09, 0.12, 12), celadonMat);
+    teapot.position.set(-0.12, 0.76, -2.4);
+    this.scene.add(teapot);
+    const teacup = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.03, 0.06, 12), celadonMat);
+    teacup.position.set(0.12, 0.73, -2.35);
+    this.scene.add(teacup);
+
+    // 7. Hanging Red/Warm Chochin & Andon Paper Lanterns with Warm Candlelight
+    const lanternPaperMat = new THREE.MeshStandardMaterial({
+      color: 0xCC2B2B, // Festive vermillion red washi
+      roughness: 0.4,
+      emissive: 0xFF5522,
+      emissiveIntensity: 0.75,
+    });
+    for (const lx of [-2.8, 2.8]) {
+      const lantern = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.24, 0.65, 16), lanternPaperMat);
+      lantern.position.set(lx, 2.85, -0.4);
+      this.scene.add(lantern);
+
+      const lanternCap = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.28, 0.05, 16), lacquerMat);
+      lanternCap.position.set(lx, 3.20, -0.4);
+      this.scene.add(lanternCap);
+
+      const lanternLight = new THREE.PointLight(0xFFA544, 2.8, 8.5);
+      lanternLight.position.set(lx, 2.85, -0.4);
+      this.scene.add(lanternLight);
+      this.animatedLights.push({ light: lanternLight, baseIntensity: 2.8, freq: 3.2, phase: Math.abs(lx) });
+    }
   }
 
   // ----------------------------------------------------------------------------
@@ -1099,7 +1238,21 @@ export class UniversalWorldEngine {
       item.light.intensity = Math.max(0.2, item.baseIntensity + flicker);
     }
 
-    // 5. Camera Keyframe Interpolation
+    // 5. Dynamic Bridge Plank Snap Simulation (Haru slips at t = 4.5s)
+    if (this.brokenPlank) {
+      if (timeSeconds < 4.5) {
+        this.brokenPlank.position.set(this.brokenPlankBaseX, this.brokenPlankBaseY, 0);
+        this.brokenPlank.rotation.set(0, 0, 0);
+      } else {
+        // Plank violently snaps, pivots down 45 degrees, revealing a dark gap in the bridge deck
+        const dt = Math.min(3.0, timeSeconds - 4.5);
+        this.brokenPlank.rotation.z = -0.78 * Math.min(1.0, dt * 4.0);
+        this.brokenPlank.position.y = this.brokenPlankBaseY - 0.55 * Math.min(1.0, dt * 3.0);
+        this.brokenPlank.position.x = this.brokenPlankBaseX + 0.18 * Math.min(1.0, dt * 3.0);
+      }
+    }
+
+    // 6. Camera Keyframe Interpolation
     this.updateCamera(timeSeconds);
   }
 
@@ -1151,12 +1304,80 @@ export class UniversalWorldEngine {
   }
 
   // ============================================================================
-  // COORDINATE PROJECTION: 3D WORLD -> 2D SCREEN PIXELS
+  // ENVIRONMENT GROUND HEIGHT QUERY (Eliminates Disconnected / Sinking Feet)
   // ============================================================================
-  public projectToScreen(pos3D: [number, number, number]): { x: number; y: number; z: number; scale: number; inSafeFrame: boolean } {
-    const v = new THREE.Vector3(...pos3D);
-    v.project(this.camera);
+  public getGroundHeight(x: number, z: number): number {
+    const intent = this.getSemanticIntent();
+    switch (intent) {
+      case 'RAIL_STATION':
+        // Platform floor is at Y = 0.45 for z > -4.0, Track ballast at Y = 0.08 for z <= -4.0
+        return z > -4.0 ? 0.45 : 0.08;
 
+      case 'DESERT_STATION': {
+        // High-tech observation deck at center / station
+        if (Math.hypot(x, z) < 4.0) return 0.65;
+        // Undulating sand dunes
+        return Math.sin(x * 0.15) * 1.8 + Math.cos(z * 0.2) * 1.2;
+      }
+
+      case 'HOSPITAL_ER':
+      case 'CAFE':
+      case 'ROBOTICS_LAB':
+        return 0.0; // Flat polished floor
+
+      case 'EDO_BRIDGE':
+        // Bridge deck is at Y = 2.65 for canal crossing
+        return 2.65;
+
+      case 'EDO_HOUSE':
+        // Wooden engawa porch at Y = 0.45, garden path at Y = 0.0
+        return z < 1.0 ? 0.45 : 0.0;
+
+      case 'ANTARCTIC':
+        // Raised modular station platform at Y = 0.85, ice sheet at Y = 0.0
+        return Math.hypot(x, z) < 5.0 ? 0.85 : 0.0;
+
+      case 'VICTORIAN_THAMES':
+        // Embankment stone quay at Y = 1.10
+        return 1.10;
+
+      case 'NEOCLASSICAL':
+        // Colonnade loggia at Y = 0.65
+        return 0.65;
+
+      default:
+        return 0.0;
+    }
+  }
+
+  // ============================================================================
+  // COORDINATE PROJECTION: 3D WORLD -> 2D SCREEN PIXELS (Optically Accurate)
+  // ============================================================================
+  public projectToScreen(pos3D: [number, number, number]): {
+    x: number;
+    y: number;
+    z: number;
+    distance: number;
+    scale: number;
+    inSafeFrame: boolean;
+  } {
+    const worldPos = new THREE.Vector3(...pos3D);
+
+    // 1. Camera View Space Distance
+    const camPos = this.camera.position;
+    const viewDistance = Math.max(0.5, worldPos.distanceTo(camPos));
+
+    // 2. Exact Perspective Scale: screen px per meter
+    const halfFovRad = ((this.camera.fov || 44) * Math.PI) / 360;
+    const pxPerMeter = (this.height * 0.5) / (Math.tan(halfFovRad) * viewDistance);
+
+    // Standard adult character height ~1.72m mapped from canonical 300px rig
+    const canonicalRigHeightPx = 300;
+    const adultHeightMeters = 1.72;
+    const perspectiveScale = (adultHeightMeters * pxPerMeter) / canonicalRigHeightPx;
+
+    // 3. Screen NDC Projection
+    const v = worldPos.clone().project(this.camera);
     const screenX = (v.x * 0.5 + 0.5) * this.width;
     const screenY = (-v.y * 0.5 + 0.5) * this.height;
 
@@ -1171,8 +1392,9 @@ export class UniversalWorldEngine {
       x: screenX,
       y: screenY,
       z: v.z,
-      scale: Math.max(0.40, Math.min(2.2, 5.0 / Math.max(0.1, v.z + 1.2))),
-      inSafeFrame
+      distance: viewDistance,
+      scale: Math.max(0.45, Math.min(2.20, perspectiveScale)),
+      inSafeFrame,
     };
   }
 

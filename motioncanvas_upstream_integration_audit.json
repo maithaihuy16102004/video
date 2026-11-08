@@ -1,0 +1,67 @@
+{
+  "audit_title": "Universal Motion Canvas Scene Builder V4 - Upstream Integration Audit",
+  "timestamp": "2026-11-08 15:29:23",
+  "codebases": {
+    "A_main_project": "D:/Agent",
+    "B_upstream_cloned": "D:/Agent/.integration/stickman-video-director-upstream"
+  },
+  "subsystem_classification": {
+    "b4-runtime.mjs": {
+      "classification": "ADAPT",
+      "reason": "Adapt audio track timing, voice lead/tail margins, and audio ducking into Motion Canvas timeline audio synchronization."
+    },
+    "b3-graphics.mjs": {
+      "classification": "MERGE",
+      "reason": "Merge vector shape primitives (path, rect, ellipse, strokes) into Motion Canvas 2D Node components (@motion-canvas/2d)."
+    },
+    "autopilot-render.mjs": {
+      "classification": "ADAPT",
+      "reason": "Adapt keyframing logic and layer rendering into Motion Canvas signals, tweens, and reactive properties; replace raw canvas loop with Motion Canvas generator flow."
+    },
+    "autopilot-core.mjs": {
+      "classification": "ADAPT",
+      "reason": "Extract strict project validation, shot continuity constraints (3s shot pacing), and font loading conventions into ProductionScenePackage validator."
+    },
+    "b4-production-check.mjs": {
+      "classification": "REUSE_DIRECTLY",
+      "reason": "Reuse automated QA checks (caption bounds, no silent opening, first-frame sound, no abrupt volume spikes) as post-render verification."
+    },
+    "a6_finish.py / a6_reference_check.py": {
+      "classification": "REFERENCE_ONLY",
+      "reason": "Reference for Gemini finishing and prompt styling; D:/Agent already has more comprehensive research-grounded fact modeling and Gemini multimodal analysis."
+    },
+    "@napi-rs/canvas renderer": {
+      "classification": "REPLACE_LEGACY",
+      "reason": "Replace 2D raster canvas rendering with Motion Canvas + Three.js hybrid runtime (3D architectural depth + 2D expressive vector stickman)."
+    },
+    "director_omni_flash_prompts": {
+      "classification": "DO_NOT_USE",
+      "reason": "Project storytelling is first-person roleplay driven by local deterministic scene engine; external prompt-only video generation is not used."
+    },
+    "existing_universal_pipeline_python": {
+      "classification": "RETAIN_SOURCE_OF_TRUTH",
+      "reason": "Python remains the single brain for script intelligence, archival visual facts, character DNA, location DNA, and voice truth."
+    },
+    "pycairo_renderer_v3": {
+      "classification": "RECLASSIFY_AS_SUPPORTING_ASSET_ENGINE",
+      "reason": "PyCairo produces paper textures, authentic archival map layers, documents, and reference sheets consumed by Motion Canvas."
+    },
+    "motion_canvas_core_and_2d": {
+      "classification": "PRIMARY_SCENE_RUNTIME",
+      "reason": "Motion Canvas v3.17.2 powers scene orchestration, reactive stickman animation, camera choreography, and multi-track audio sync."
+    },
+    "threejs_world_adapter": {
+      "classification": "3D_ENVIRONMENT_RUNTIME",
+      "reason": "Three.js provides 3D spatial architecture (Odeonsplatz Feldherrnhalle loggia, stone columns, perspective camera, volumetric lighting) without redrawing backgrounds per camera angle."
+    }
+  },
+  "technical_stack_comparison": {
+    "package_manager": "npm / node >= 20",
+    "motion_canvas_version": "3.17.2",
+    "threejs_version": "^0.170.0",
+    "typescript_version": "^5.6.0",
+    "vite_version": "^5.4.0",
+    "primary_runtime_bridge": "ProductionScenePackage JSON (Python -> TypeScript)"
+  },
+  "integration_gate_verdict": "APPROVED_FOR_UNIFIED_RUNTIME"
+}

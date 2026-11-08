@@ -30,9 +30,15 @@ import {
   PropAttachment,
   V5_CORE_ARCHETYPES,
 } from '../contract/CharacterDNA';
+import {
+  CanonicalStickmanRig,
+  CanonicalProportions,
+  CanonicalJointHierarchy,
+} from './CanonicalStickmanRig';
+import { PoseLibrary, PoseTargetFrame } from './PoseLibrary';
 
 export type { CharacterDNA_V5, HeadContour, EyeType, EyebrowStyle, HairStyle, CostumeArchetype, FootwearType, PropAttachment };
-export { V5_CORE_ARCHETYPES };
+export { V5_CORE_ARCHETYPES, CanonicalStickmanRig, PoseLibrary };
 
 export type CharacterActionV5 =
   // Locomotion
@@ -56,6 +62,8 @@ export type CharacterActionV5 =
   | 'read'
   | 'write'
   | 'point'
+  | 'sip_coffee'
+  | 'drink_coffee'
   // Performance
   | 'speak'
   | 'listen'
@@ -82,7 +90,10 @@ export type CharacterActionV5 =
   | 'present_two_handed'
   | 'laugh_heartily'
   | 'speak_gestural'
-  | 'inspect_down';
+  | 'inspect_down'
+  | 'look_down'
+  | 'open_letter'
+  | 'read_letter';
 
 export type CharacterEmotionV5 =
   | 'neutral'
@@ -140,6 +151,8 @@ export interface CharacterStateV5 {
   lostSandalRight?: boolean;
   soaked?: boolean;
   footLockGround?: boolean;
+  debugSkeleton?: boolean;
+  viewAngle?: 'front' | 'three_quarter' | 'side';
 }
 
 // Backward compatibility alias
@@ -154,260 +167,193 @@ export class UniversalCharacterEngine {
   }
 
   // ============================================================================
-  // ANALYTICAL 2-BONE INVERSE KINEMATICS (IK) SOLVER (Law of Cosines)
+  // CANONICAL RIG RESOLUTION (100% Normalized Anatomy & Strict Invariants)
   // ============================================================================
-  public solve2BoneIK(
-    root: Point2D,
-    target: Point2D,
-    len1: number,
-    len2: number,
-    bendDirection: 1 | -1 = 1
-  ): { joint: Point2D; end: Point2D } {
-    const dx = target.x - root.x;
-    const dy = target.y - root.y;
-    const dist = Math.hypot(dx, dy);
+  public resolveCanonicalProportions(dna: CharacterDNA_V5): CanonicalProportions {
+    const prop = dna.proportions;
+    const totalH = prop.standingHeightPx || 295;
+    const headRatio = prop.headRatio || 0.15;
+    const headHeight = totalH * headRatio;
+    const torsoH = prop.torsoLengthPx || (totalH * 0.32);
+    const legH = prop.legLengthPx || (totalH * 0.50);
 
-    const maxReach = (len1 + len2) * 0.999;
-    const minReach = Math.abs(len1 - len2) * 1.001;
-    const d = Math.max(minReach, Math.min(maxReach, dist));
-
-    const baseAngle = Math.atan2(dy, dx);
-    const cosAngle1 = (len1 * len1 + d * d - len2 * len2) / (2 * len1 * d);
-    const clampedCos1 = Math.max(-1, Math.min(1, cosAngle1));
-    const angle1 = baseAngle + bendDirection * Math.acos(clampedCos1);
-
-    const jointX = root.x + Math.cos(angle1) * len1;
-    const jointY = root.y + Math.sin(angle1) * len1;
-
-    const endX = root.x + (dx / (dist || 1)) * d;
-    const endY = root.y + (dy / (dist || 1)) * d;
-
-    return { joint: { x: jointX, y: jointY }, end: { x: endX, y: endY } };
+    return {
+      totalHeightPx: totalH,
+      headHeightPx: headHeight,
+      headWidthPx: headHeight * 0.78,
+      neckLengthPx: totalH * 0.035,
+      shoulderWidthPx: prop.shoulderWidthPx || (totalH * 0.185),
+      chestLengthPx: torsoH * 0.50,
+      lumbarLengthPx: torsoH * 0.50,
+      hipWidthPx: (prop.shoulderWidthPx || (totalH * 0.185)) * 0.70,
+      upperArmLengthPx: totalH * 0.170,
+      forearmLengthPx: totalH * 0.155,
+      handLengthPx: totalH * 0.082,
+      thighLengthPx: legH * 0.50,
+      shinLengthPx: legH * 0.50,
+      footHeightPx: 12,
+      footLengthPx: 30,
+      limbThicknessPx: prop.limbThicknessPx || 11,
+    };
   }
 
-  // ============================================================================
-  // SKELETAL RIG COMPUTATION (12 Joints + Foot-Locking)
-  // ============================================================================
   public evaluateSkeleton(
     dna: CharacterDNA_V5,
     state: CharacterStateV5,
     totalH: number,
     headR: number
-  ): SkeletalRigV5 {
-    const sw = dna.proportions.shoulderWidthPx || 54;
-    const armLen1 = totalH * 0.19;
-    const armLen2 = totalH * 0.18;
-    const legLen1 = totalH * 0.24;
-    const legLen2 = totalH * 0.25;
-
-    let hipY = -totalH * 0.48;
-    let shoulderY = -totalH * 0.78;
-    let torsoTilt = 0.0;
-    let headCenter: Point2D = { x: 0, y: shoulderY - headR * 1.15 };
-
-    let targetHandL: Point2D = { x: -sw * 0.55, y: -totalH * 0.42 };
-    let targetHandR: Point2D = { x: sw * 0.55, y: -totalH * 0.42 };
-    let targetFootL: Point2D = { x: -sw * 0.28, y: 0 };
-    let targetFootR: Point2D = { x: sw * 0.28, y: 0 };
-    let legBendL: 1 | -1 = 1;
-    let legBendR: 1 | -1 = 1;
-
-    const act = state.action;
+  ): CanonicalJointHierarchy & SkeletalRigV5 {
+    const canonProps = this.resolveCanonicalProportions(dna);
+    const facing = state.facing;
     const p = state.progress;
+    const act = state.action;
 
-    // --- LOCOMOTION ---
-    if (act === 'sprint' || act === 'run') {
-      const speed = act === 'sprint' ? 14.0 : 10.0;
-      const ph = p * speed;
-      torsoTilt = act === 'sprint' ? 0.30 : 0.18;
-      hipY = -totalH * 0.46 + Math.sin(ph * 2) * (act === 'sprint' ? 9 : 6);
-      shoulderY = hipY - totalH * 0.31;
-      headCenter = { x: act === 'sprint' ? 22 : 14, y: shoulderY - headR * 1.05 };
+    // 1. Resolve Pose Target from Canonical Pose Library
+    let targetPose: PoseTargetFrame;
 
-      const stride = act === 'sprint' ? 58 : 42;
-      const lift = act === 'sprint' ? 38 : 26;
-      targetFootL = { x: Math.sin(ph) * stride, y: Math.max(0, -Math.cos(ph) * lift) };
-      targetFootR = { x: -Math.sin(ph) * stride, y: Math.max(0, Math.cos(ph) * lift) };
-
-      targetHandL = { x: -Math.sin(ph) * stride * 0.8, y: shoulderY + 30 + Math.cos(ph) * 32 };
-      targetHandR = { x: Math.sin(ph) * stride * 0.8 + 20, y: shoulderY + 22 - Math.cos(ph) * 32 };
-    } else if (act === 'walk') {
-      const ph = p * 6.5;
-      torsoTilt = 0.08;
-      hipY = -totalH * 0.48 + Math.abs(Math.sin(ph)) * 4;
-      shoulderY = -totalH * 0.78 + Math.abs(Math.sin(ph)) * 3;
-      headCenter = { x: 5, y: shoulderY - headR * 1.15 };
-
-      targetFootL = { x: Math.sin(ph) * 32, y: Math.max(0, -Math.cos(ph) * 16) };
-      targetFootR = { x: -Math.sin(ph) * 32, y: Math.max(0, Math.cos(ph) * 16) };
-      targetHandL = { x: -sw * 0.45 - Math.sin(ph) * 22, y: shoulderY + totalH * 0.34 };
-      targetHandR = { x: sw * 0.45 + Math.sin(ph) * 22, y: shoulderY + totalH * 0.34 };
-    } else if (act === 'stop') {
-      torsoTilt = -0.15;
-      hipY = -totalH * 0.44;
-      shoulderY = -totalH * 0.75;
-      headCenter = { x: -6, y: shoulderY - headR * 1.1 };
-      targetFootL = { x: -sw * 0.2, y: 0 };
-      targetFootR = { x: sw * 0.5, y: 0 };
-      targetHandL = { x: -sw * 0.6, y: shoulderY + totalH * 0.25 };
-      targetHandR = { x: sw * 0.6, y: shoulderY + totalH * 0.25 };
-    } else if (act === 'jump') {
-      const ph = Math.sin(p * Math.PI);
-      torsoTilt = 0.12;
-      hipY = -totalH * (0.48 + ph * 0.25);
-      shoulderY = hipY - totalH * 0.30;
-      headCenter = { x: 8, y: shoulderY - headR * 1.1 };
-      targetFootL = { x: -sw * 0.25, y: -totalH * 0.15 * ph };
-      targetFootR = { x: sw * 0.25, y: -totalH * 0.18 * ph };
-      targetHandL = { x: -sw * 0.6, y: shoulderY - totalH * 0.2 * ph };
-      targetHandR = { x: sw * 0.6, y: shoulderY - totalH * 0.2 * ph };
-      legBendL = -1;
-      legBendR = -1;
-    }
-    // --- INTERACTION ---
-    else if (act === 'reach' || act === 'grab' || act === 'point') {
-      torsoTilt = 0.16;
-      shoulderY = -totalH * 0.76;
-      headCenter = { x: 12, y: shoulderY - headR * 1.1 };
-      targetHandL = { x: -sw * 0.35, y: shoulderY + totalH * 0.35 };
-      targetHandR = { x: sw * 0.85, y: shoulderY + totalH * 0.08 }; // Reaching outward
-      targetFootL = { x: -sw * 0.35, y: 0 };
-      targetFootR = { x: sw * 0.35, y: 0 };
-    } else if (act === 'read' || act === 'inspect_down') {
-      torsoTilt = 0.28;
-      shoulderY = -totalH * 0.72;
-      hipY = -totalH * 0.46;
-      headCenter = { x: 26, y: shoulderY - headR * 0.90 };
-      targetHandL = { x: -sw * 0.15, y: shoulderY + totalH * 0.25 };
-      targetHandR = { x: sw * 0.35, y: shoulderY + totalH * 0.22 };
-    } else if (act === 'give' || act === 'present_two_handed') {
-      torsoTilt = 0.10;
-      shoulderY = -totalH * 0.75;
-      headCenter = { x: 10, y: shoulderY - headR * 1.1 };
-      targetHandL = { x: sw * 0.35, y: shoulderY + totalH * 0.22 };
-      targetHandR = { x: sw * 0.58, y: shoulderY + totalH * 0.20 };
-    } else if (act === 'hold' || act === 'carry') {
-      torsoTilt = 0.04;
-      shoulderY = -totalH * 0.77;
-      headCenter = { x: 2, y: shoulderY - headR * 1.15 };
-      targetHandL = { x: -sw * 0.42, y: shoulderY + totalH * 0.28 };
-      targetHandR = { x: sw * 0.45, y: shoulderY + totalH * 0.24 };
-    }
-    // --- PERFORMANCE ---
-    else if (act === 'laugh' || act === 'laugh_heartily') {
-      const ph = p * 8.0;
-      torsoTilt = -0.16 + Math.sin(ph) * 0.08;
-      shoulderY = -totalH * 0.76 + Math.sin(ph) * 5;
-      headCenter = { x: -14, y: shoulderY - headR * 1.1 };
-      targetHandL = { x: -sw * 0.45, y: shoulderY + totalH * 0.26 };
-      targetHandR = { x: sw * 0.20, y: shoulderY + totalH * 0.12 }; // Hand at mouth
-    } else if (act === 'speak' || act === 'speak_gestural') {
-      const ph = p * 4.0;
-      torsoTilt = 0.04;
-      shoulderY = -totalH * 0.78;
-      headCenter = { x: 0, y: shoulderY - headR * 1.15 };
-      targetHandL = { x: -sw * 0.55, y: shoulderY + totalH * 0.34 };
-      targetHandR = { x: sw * 0.65 + Math.sin(ph) * 16, y: shoulderY + totalH * 0.16 + Math.cos(ph) * 12 };
-    } else if (act === 'relief') {
-      torsoTilt = 0.14;
-      shoulderY = -totalH * 0.73;
-      headCenter = { x: 10, y: shoulderY - headR * 0.95 };
-      targetHandL = { x: -sw * 0.35, y: shoulderY + totalH * 0.15 }; // Hand on chest
-      targetHandR = { x: sw * 0.50, y: shoulderY + totalH * 0.32 };
-    } else if (act === 'fear' || act === 'surprise') {
-      torsoTilt = -0.22;
-      shoulderY = -totalH * 0.81;
-      headCenter = { x: -16, y: shoulderY - headR * 1.2 };
-      targetHandL = { x: -sw * 0.65, y: shoulderY + totalH * 0.12 };
-      targetHandR = { x: sw * 0.65, y: shoulderY + totalH * 0.12 };
-      targetFootL = { x: -sw * 0.4, y: 0 };
-      targetFootR = { x: sw * 0.2, y: 0 };
-    }
-    // --- PHYSICAL EVENTS ---
-    else if (act === 'slip' || act === 'slip_fall' || act === 'trip' || act === 'fall') {
-      torsoTilt = -0.65;
-      hipY = -totalH * 0.28;
-      shoulderY = -totalH * 0.52;
-      headCenter = { x: -35, y: shoulderY - headR * 0.9 };
-      targetFootL = { x: 60, y: -totalH * 0.22 };
-      targetFootR = { x: 95, y: -totalH * 0.12 };
-      targetHandL = { x: -45, y: -totalH * 0.75 };
-      targetHandR = { x: 65, y: -totalH * 0.85 };
-    } else if (act === 'hang' || act === 'hang_from_ledge') {
-      torsoTilt = 0.12;
-      shoulderY = -totalH * 0.48;
-      hipY = -totalH * 0.18;
-      headCenter = { x: 8, y: shoulderY - headR * 1.1 };
-      targetHandL = { x: -18, y: -totalH * 0.82 };
-      targetHandR = { x: 45, y: -totalH * 0.88 }; // Holding prop high & dry
-      targetFootL = { x: -22, y: totalH * 0.18 };
-      targetFootR = { x: 12, y: totalH * 0.12 };
-      legBendL = -1;
-    } else if (act === 'catch_balance' || act === 'recover') {
-      torsoTilt = 0.24;
-      hipY = -totalH * 0.42;
-      shoulderY = -totalH * 0.72;
-      headCenter = { x: 18, y: shoulderY - headR * 1.05 };
-      targetFootL = { x: -sw * 0.6, y: 0 };
-      targetFootR = { x: sw * 0.6, y: 0 };
-      targetHandL = { x: -sw * 0.85, y: shoulderY + totalH * 0.05 }; // Arms windmilling
-      targetHandR = { x: sw * 0.85, y: shoulderY + totalH * 0.15 };
-    }
-    // --- IDLE DEFAULT ---
-    else {
-      const breath = Math.sin(p * 1.8) * 3;
-      shoulderY = -totalH * 0.78 + breath;
-      headCenter = { x: 0, y: shoulderY - headR * 1.15 };
-      targetHandL = { x: -sw * 0.52, y: shoulderY + totalH * 0.34 };
-      targetHandR = { x: sw * 0.52, y: shoulderY + totalH * 0.34 };
-      targetFootL = { x: -sw * 0.28, y: 0 };
-      targetFootR = { x: sw * 0.28, y: 0 };
+    switch (act) {
+      case 'walk':
+        targetPose = PoseLibrary.getWalkCycle(canonProps, p, 5.2, facing);
+        break;
+      case 'run':
+      case 'sprint':
+        targetPose = PoseLibrary.getRunCycle(canonProps, p, act === 'sprint' ? 12.0 : 8.5, facing);
+        break;
+      case 'hold':
+      case 'carry':
+        targetPose = PoseLibrary.getHoldingObject(canonProps, 'single_hand_right', facing);
+        break;
+      case 'give':
+      case 'present_two_handed':
+        targetPose = PoseLibrary.getHoldingObject(canonProps, 'two_handed_front', facing);
+        break;
+      case 'reach':
+      case 'grab':
+      case 'point':
+        targetPose = PoseLibrary.getReaching(canonProps, 58, -135, facing);
+        break;
+      case 'speak':
+      case 'speak_gestural':
+        targetPose = PoseLibrary.getSpeaking(canonProps, p, facing);
+        break;
+      case 'listen':
+        targetPose = PoseLibrary.getSitting(canonProps, 52, facing);
+        targetPose.headLookAngle = 0.15 * facing;
+        break;
+      case 'laugh':
+      case 'laugh_heartily': {
+        targetPose = PoseLibrary.getSpeaking(canonProps, p, facing);
+        const bob = Math.sin(p * 12.0) * 0.08;
+        targetPose.torsoTiltAngle = (-0.12 + bob) * facing;
+        targetPose.headLookAngle = -0.22 * facing;
+        break;
+      }
+      case 'sit':
+        targetPose = PoseLibrary.getSitting(canonProps, 52, facing);
+        break;
+      case 'sip_coffee':
+      case 'drink_coffee': {
+        const footH = canonProps.footHeightPx;
+        const shY = -(footH + (canonProps.thighLengthPx + canonProps.shinLengthPx) * 0.96 + canonProps.lumbarLengthPx + canonProps.chestLengthPx);
+        targetPose = PoseLibrary.getSitting(canonProps, 48, facing);
+        // Elevate right hand holding coffee cup to mouth/chin level
+        targetPose.targetHandR = { x: 18 * facing, y: shY + 28 };
+        // Relax left hand forward on table surface
+        targetPose.targetHandL = { x: 14 * facing, y: shY + 68 };
+        targetPose.headLookAngle = -0.15 * facing;
+        break;
+      }
+      case 'read':
+      case 'open_letter':
+      case 'read_letter': {
+        const footH = canonProps.footHeightPx;
+        const shY = -(footH + (canonProps.thighLengthPx + canonProps.shinLengthPx) * 0.96 + canonProps.lumbarLengthPx + canonProps.chestLengthPx);
+        targetPose = PoseLibrary.getNeutralStanding(canonProps, p, facing);
+        targetPose.torsoTiltAngle = 0.08 * facing;
+        // Two hands holding open scroll in front of chest
+        targetPose.targetHandL = { x: -14 * facing, y: shY + 45 };
+        targetPose.targetHandR = { x: 18 * facing, y: shY + 45 };
+        targetPose.headLookAngle = 0.42 * facing; // Looking down at open parchment
+        break;
+      }
+      case 'inspect_down':
+      case 'look_down': {
+        const footH = canonProps.footHeightPx;
+        const shY = -(footH + (canonProps.thighLengthPx + canonProps.shinLengthPx) * 0.96 + canonProps.lumbarLengthPx + canonProps.chestLengthPx);
+        targetPose = PoseLibrary.getNeutralStanding(canonProps, p, facing);
+        // Leaning forward, head tilted down looking at bare foot
+        targetPose.torsoTiltAngle = 0.28 * facing;
+        targetPose.headLookAngle = 0.72 * facing;
+        targetPose.targetHandL = { x: -14 * facing, y: shY + 65 };
+        targetPose.targetHandR = { x: 22 * facing, y: shY + 65 };
+        break;
+      }
+      case 'slip':
+      case 'slip_fall':
+      case 'fall':
+      case 'trip':
+        targetPose = PoseLibrary.getFalling(canonProps, p, facing);
+        break;
+      case 'catch_balance':
+      case 'recover':
+        targetPose = PoseLibrary.getRecovering(canonProps, p, facing);
+        break;
+      case 'hang':
+      case 'hang_from_ledge': {
+        const footH = canonProps.footHeightPx;
+        const shY = -(footH + (canonProps.thighLengthPx + canonProps.shinLengthPx) * 0.96 + canonProps.lumbarLengthPx + canonProps.chestLengthPx);
+        targetPose = {
+          torsoTiltAngle: 0.12 * facing,
+          spineCurve: 0.04,
+          hipYOffset: 35, // Dropped down
+          targetFootL: { x: -18 * facing, y: 15 },
+          targetFootR: { x: 12 * facing, y: 8 },
+          targetHandL: { x: -16 * facing, y: shY - 45 }, // Left hand gripping high
+          targetHandR: { x: 42 * facing, y: shY - 35 },  // Right hand holding scroll high
+          headLookAngle: p > 7.5 ? 0.35 : -0.25,
+          footLockGround: false,
+        };
+        break;
+      }
+      case 'idle':
+      default:
+        targetPose = PoseLibrary.getNeutralStanding(canonProps, p, facing);
+        break;
     }
 
-    if (state.handConstraintL) targetHandL = { x: state.handConstraintL[0], y: state.handConstraintL[1] };
-    if (state.handConstraintR) targetHandR = { x: state.handConstraintR[0], y: state.handConstraintR[1] };
-
-    if (state.footLockGround !== false && act !== 'slip' && act !== 'slip_fall' && act !== 'hang' && act !== 'jump') {
-      targetFootL.y = Math.min(0, targetFootL.y);
-      targetFootR.y = Math.min(0, targetFootR.y);
+    // 2. Apply dynamic constraints
+    if (state.handConstraintL) {
+      targetPose.targetHandL = { x: state.handConstraintL[0], y: state.handConstraintL[1] };
+    }
+    if (state.handConstraintR) {
+      targetPose.targetHandR = { x: state.handConstraintR[0], y: state.handConstraintR[1] };
+    }
+    if (state.footLockGround !== undefined) {
+      targetPose.footLockGround = state.footLockGround;
     }
 
-    const shoulderCenter = { x: Math.sin(torsoTilt) * 18, y: shoulderY };
-    const hipRoot = { x: 0, y: hipY };
-    const neck = { x: shoulderCenter.x, y: shoulderCenter.y - headR * 0.35 };
+    // 3. Solve Canonical Kinematics
+    const rig = CanonicalStickmanRig.evaluateRig(canonProps, facing, {
+      torsoTiltAngle: targetPose.torsoTiltAngle,
+      spineCurve: targetPose.spineCurve,
+      hipYOffset: targetPose.hipYOffset,
+      targetFootL: targetPose.targetFootL,
+      targetFootR: targetPose.targetFootR,
+      targetHandL: targetPose.targetHandL,
+      targetHandR: targetPose.targetHandR,
+      headLookAngle: targetPose.headLookAngle,
+      footLockGround: targetPose.footLockGround,
+    });
 
-    const shoulderL = { x: shoulderCenter.x - sw * 0.48, y: shoulderCenter.y };
-    const shoulderR = { x: shoulderCenter.x + sw * 0.48, y: shoulderCenter.y };
-    const hipL = { x: hipRoot.x - sw * 0.28, y: hipRoot.y };
-    const hipR = { x: hipRoot.x + sw * 0.28, y: hipRoot.y };
-
-    const leftArmIK = this.solve2BoneIK(shoulderL, targetHandL, armLen1, armLen2, -1);
-    const rightArmIK = this.solve2BoneIK(shoulderR, targetHandR, armLen1, armLen2, 1);
-    const leftLegIK = this.solve2BoneIK(hipL, targetFootL, legLen1, legLen2, legBendL);
-    const rightLegIK = this.solve2BoneIK(hipR, targetFootR, legLen1, legLen2, legBendR);
-
+    // 4. Return merged canonical & legacy-compatible structure
     return {
-      root: hipRoot,
-      torso: shoulderCenter,
-      neck,
-      head: headCenter,
-      shoulderL,
-      shoulderR,
-      elbowL: leftArmIK.joint,
-      elbowR: rightArmIK.joint,
-      wristL: leftArmIK.end,
-      wristR: rightArmIK.end,
-      handL: targetHandL,
-      handR: targetHandR,
-      hipL,
-      hipR,
-      kneeL: leftLegIK.joint,
-      kneeR: rightLegIK.joint,
-      ankleL: leftLegIK.end,
-      ankleR: rightLegIK.end,
-      footL: targetFootL,
-      footR: targetFootR,
-      torsoTilt,
+      ...rig,
+      torso: rig.chest,
+      neck: rig.neckBase,
+      head: rig.headCenter,
+      footL: rig.ankleL,
+      footR: rig.ankleR,
+      torsoTilt: rig.torsoAngle,
     };
   }
 
@@ -481,16 +427,16 @@ export class UniversalCharacterEngine {
     ctx.translate(state.screenX, state.screenY);
     ctx.scale(state.scale * state.facing, state.scale);
 
-    const prop = dna.proportions;
-    const totalH = prop.standingHeightPx || 260;
-    const headR = (totalH * (prop.headRatio || 0.28)) / 2;
+    const canonProps = this.resolveCanonicalProportions(dna);
+    const totalH = canonProps.totalHeightPx;
+    const headR = canonProps.headHeightPx * 0.5;
     const ink = '#141210';
     const skin = dna.face.skinTone || '#F5DEB3';
 
     // 1. Ground contact shadow
     this.drawContactShadow(state, totalH);
 
-    // 2. Complete 12-Joint Skeletal Hierarchy via IK
+    // 2. Complete Canonical 12-Joint Skeletal Hierarchy via Analytical IK
     const skel = this.evaluateSkeleton(dna, state, totalH, headR);
 
     // 3. Lower Costume (Legs / Pants / Skirt / Footwear)
@@ -502,11 +448,16 @@ export class UniversalCharacterEngine {
     // 5. Head, Neck & Face (5 Silhouettes, Eyes, Brows, Hair)
     this.drawHeadAndFace(ctx, dna, state, skel.head, headR, ink, skin);
 
-    // 6. Arms & Hands (Articulated 5-Finger Anatomy)
+    // 6. Arms & Hands (Articulated 5-Finger Anatomy aligned to forearm)
     this.drawArmsAndHands(ctx, dna, state, skel, ink, skin);
 
-    // 7. Held Props & Objects
+    // 7. Held Props & Objects (Anchored to palm grip sockets)
     this.drawProps(ctx, dna, state, skel);
+
+    // 8. Visual Regression & Skeleton Debugger
+    if (state.debugSkeleton) {
+      this.drawSkeletonDebug(ctx, skel, canonProps, dna);
+    }
 
     ctx.restore();
   }
@@ -1060,7 +1011,7 @@ export class UniversalCharacterEngine {
     ctx: CanvasRenderingContext2D,
     dna: CharacterDNA_V5,
     state: CharacterStateV5,
-    skel: SkeletalRigV5,
+    skel: SkeletalRigV5 & CanonicalJointHierarchy,
     ink: string,
     skin: string
   ) {
@@ -1069,13 +1020,21 @@ export class UniversalCharacterEngine {
 
     // Left Arm
     this.drawOrganicLimb(ctx, skel.shoulderL, skel.elbowL, skel.wristL, limbW * 1.15, limbW * 0.85, ink, sleeveCol);
-    this.drawArticulatedHand(ctx, skel.handL, state.action === 'hang' ? 'grip' : 'open', ink, skin);
+    this.drawArticulatedHand(
+      ctx,
+      skel.wristL,
+      skel.handAngleL ?? 0,
+      state.action === 'hang' ? 'grip' : 'open',
+      ink,
+      skin
+    );
 
     // Right Arm
     this.drawOrganicLimb(ctx, skel.shoulderR, skel.elbowR, skel.wristR, limbW * 1.15, limbW * 0.85, ink, sleeveCol);
     this.drawArticulatedHand(
       ctx,
-      skel.handR,
+      skel.wristR,
+      skel.handAngleR ?? 0,
       state.action === 'hang' ? 'pinch_high' : dna.heldProps?.rightHand ? 'grip' : 'open',
       ink,
       skin
@@ -1142,53 +1101,55 @@ export class UniversalCharacterEngine {
   private drawArticulatedHand(
     ctx: CanvasRenderingContext2D,
     pos: Point2D,
+    angle: number,
     gripType: 'open' | 'grip' | 'pinch_high',
     ink: string,
     skin: string
   ) {
     ctx.save();
     ctx.translate(pos.x, pos.y);
+    ctx.rotate(angle); // Seamlessly aligns with forearm vector!
     ctx.fillStyle = skin;
     ctx.strokeStyle = ink;
     ctx.lineWidth = 1.8;
 
     if (gripType === 'grip') {
       ctx.beginPath();
-      ctx.arc(0, 0, 7.5, 0, Math.PI * 2);
+      ctx.arc(6, 0, 7.5, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
 
-      for (const fx of [-4, 0, 4]) {
+      for (const fx of [2, 6, 10]) {
         ctx.beginPath();
         ctx.arc(fx, 3, 2.5, 0, Math.PI);
         ctx.stroke();
       }
     } else if (gripType === 'pinch_high') {
       ctx.beginPath();
-      ctx.ellipse(0, 0, 6, 8, 0.3, 0, Math.PI * 2);
+      ctx.ellipse(6, 0, 6, 8, 0.3, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
 
       ctx.beginPath();
-      ctx.arc(4, -6, 2.8, 0, Math.PI * 2);
+      ctx.arc(9, -5, 2.8, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
     } else {
       ctx.beginPath();
-      ctx.ellipse(0, 0, 6.5, 7.5, 0, 0, Math.PI * 2);
+      ctx.ellipse(5, 0, 6.5, 7.5, 0, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
 
       ctx.beginPath();
-      ctx.ellipse(-5.5, -2, 2.6, 4.5, -0.6, 0, Math.PI * 2);
+      ctx.ellipse(0, -3, 2.6, 4.5, -0.6, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
 
       const fingerOffsets = [
-        { x: -3.5, y: -7.5, h: 6.5 },
-        { x: -1.0, y: -9.0, h: 8.0 },
-        { x: 1.5, y: -8.5, h: 7.5 },
-        { x: 4.0, y: -6.5, h: 5.5 },
+        { x: 3.5, y: -7.0, h: 6.5 },
+        { x: 6.0, y: -8.5, h: 8.0 },
+        { x: 8.5, y: -8.0, h: 7.5 },
+        { x: 11.0, y: -6.0, h: 5.5 },
       ];
       for (const f of fingerOffsets) {
         ctx.beginPath();
@@ -1216,17 +1177,37 @@ export class UniversalCharacterEngine {
     ctx.translate(pos.x, pos.y);
 
     if (isBare) {
+      // Main foot pad
       ctx.fillStyle = skinTone;
       ctx.beginPath();
-      ctx.ellipse(6, 0, 13, 5.5, 0, 0, Math.PI * 2);
+      ctx.ellipse(8, 0, 14, 5.5, 0, 0, Math.PI * 2);
       ctx.fill();
       ctx.lineWidth = 2.0;
       ctx.strokeStyle = ink;
       ctx.stroke();
+
+      // Articulated individual toes
+      ctx.fillStyle = skinTone;
+      const toeSizes = [2.2, 2.0, 1.8, 1.6];
+      for (let t = 0; t < 4; t++) {
+        ctx.beginPath();
+        ctx.arc(17 + t * 2.2, -2 + t * 1.4, toeSizes[t], 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      }
+
+      // Mud stains and wet splashes from the bridge puddle
+      ctx.fillStyle = '#3E2A1C';
+      ctx.beginPath();
+      ctx.arc(4, 2, 2.5, 0, Math.PI * 2);
+      ctx.arc(11, 1, 2.0, 0, Math.PI * 2);
+      ctx.arc(17, 3, 1.8, 0, Math.PI * 2);
+      ctx.arc(-1, -1, 1.5, 0, Math.PI * 2);
+      ctx.fill();
     } else if (footwear === 'waraji_sandals') {
       ctx.fillStyle = '#C2A368';
       ctx.beginPath();
-      ctx.ellipse(6, 1, 14, 5, 0, 0, Math.PI * 2);
+      ctx.ellipse(8, 1, 15, 5, 0, 0, Math.PI * 2);
       ctx.fill();
       ctx.lineWidth = 2.0;
       ctx.strokeStyle = ink;
@@ -1236,14 +1217,14 @@ export class UniversalCharacterEngine {
       ctx.lineWidth = 1.8;
       ctx.beginPath();
       ctx.moveTo(-2, -3);
-      ctx.lineTo(8, 2);
-      ctx.moveTo(8, -3);
+      ctx.lineTo(10, 2);
+      ctx.moveTo(10, -3);
       ctx.lineTo(-2, 2);
       ctx.stroke();
     } else if (footwear === 'snow_boots') {
       ctx.fillStyle = '#212121';
       ctx.beginPath();
-      ctx.roundRect(-4, -4, 24, 11, 4);
+      ctx.roundRect(-2, -4, 26, 13, 4);
       ctx.fill();
       ctx.lineWidth = 2.4;
       ctx.strokeStyle = ink;
@@ -1251,7 +1232,7 @@ export class UniversalCharacterEngine {
     } else {
       ctx.fillStyle = footwear === 'sneakers' ? '#EAEAEA' : '#1A1816';
       ctx.beginPath();
-      ctx.ellipse(7, 0, 15, 6, 0, 0, Math.PI * 2);
+      ctx.ellipse(9, 0, 16, 6.5, 0, 0, Math.PI * 2);
       ctx.fill();
       ctx.lineWidth = 2.2;
       ctx.strokeStyle = ink;
@@ -1261,45 +1242,68 @@ export class UniversalCharacterEngine {
   }
 
   // ============================================================================
-  // PROPS & ARTIFACTS
+  // PROPS & ARTIFACTS (Strict Grip Anchor Alignment)
   // ============================================================================
-  private drawProps(ctx: CanvasRenderingContext2D, dna: CharacterDNA_V5, state: CharacterStateV5, skel: SkeletalRigV5) {
+  private drawProps(
+    ctx: CanvasRenderingContext2D,
+    dna: CharacterDNA_V5,
+    state: CharacterStateV5,
+    skel: SkeletalRigV5 & CanonicalJointHierarchy
+  ) {
     const rHand = skel.handR;
-    const propR = dna.heldProps?.rightHand;
+    const rAngle = skel.handAngleR ?? 0;
+    const propR = (dna.heldProps?.rightHand as string) || '';
 
-    if (propR === 'letter_scroll_sealed') {
-      ctx.save();
-      ctx.translate(rHand.x + 14, rHand.y - 16);
-      ctx.rotate(0.2);
-      ctx.fillStyle = '#F5E4B8';
-      ctx.fillRect(-15, -24, 30, 48);
-      ctx.strokeStyle = '#181614';
-      ctx.lineWidth = 2.2;
-      ctx.strokeRect(-15, -24, 30, 48);
+    const isReadingLetter = propR === 'letter_scroll_open' ||
+      ((state.action === 'read' || state.action === 'open_letter' || state.action === 'read_letter' || (state.action === 'laugh' && (((dna as any).canonicalName || (dna as any).name || '').toLowerCase().includes('aiko')))) &&
+       (propR.includes('letter') || propR.includes('parchment') || propR.includes('envelope')));
 
-      ctx.fillStyle = '#C8281E'; // Red wax seal
-      ctx.beginPath();
-      ctx.arc(0, 0, 5.5, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
-    } else if (propR === 'letter_scroll_open') {
+    const isCoffee = propR === 'steaming_coffee_cup' || propR === 'coffee_cup' || state.action === 'sip_coffee' || state.action === 'drink_coffee';
+
+    if (isReadingLetter) {
       ctx.save();
-      ctx.translate(rHand.x - 20, rHand.y - 30);
+      ctx.translate(rHand.x, rHand.y);
+      ctx.rotate(rAngle * 0.4);
       ctx.fillStyle = '#FFF9EC';
       ctx.fillRect(-45, -55, 90, 110);
       ctx.strokeStyle = '#181614';
       ctx.lineWidth = 2.4;
       ctx.strokeRect(-45, -55, 90, 110);
 
+      // Calligraphic header & body in Edo Washi style
       ctx.fillStyle = '#181614';
-      ctx.font = 'bold 9.5px "Be Vietnam Pro", Arial, sans-serif';
+      ctx.font = 'bold 10px "Be Vietnam Pro", Arial, sans-serif';
       ctx.fillText('Aiko thân mến,', -36, -34);
-      ctx.fillText('Nhớ mang theo ô.', -36, -14);
-      ctx.fillText('Chiều nay mưa to!', -36, 6);
+      ctx.font = '500 9px "Be Vietnam Pro", Arial, sans-serif';
+      ctx.fillText('Nhớ mang theo ô khi ra ngoài.', -38, -14);
+      ctx.fillText('Chiều nay trời mưa to!', -38, 6);
+
+      // Red stamp seal
+      ctx.fillStyle = '#C8281E';
+      ctx.fillRect(18, 25, 14, 14);
+      ctx.strokeStyle = '#8B0000';
+      ctx.lineWidth = 1.0;
+      ctx.strokeRect(18, 25, 14, 14);
+      ctx.restore();
+    } else if (propR === 'letter_scroll_sealed') {
+      ctx.save();
+      ctx.translate(rHand.x, rHand.y);
+      ctx.rotate(rAngle + 0.15);
+      ctx.fillStyle = '#F5E4B8';
+      ctx.fillRect(-12, -22, 24, 44);
+      ctx.strokeStyle = '#181614';
+      ctx.lineWidth = 2.2;
+      ctx.strokeRect(-12, -22, 24, 44);
+
+      ctx.fillStyle = '#C8281E'; // Red wax seal
+      ctx.beginPath();
+      ctx.arc(0, 0, 5.5, 0, Math.PI * 2);
+      ctx.fill();
       ctx.restore();
     } else if (propR === 'tablet_computer') {
       ctx.save();
-      ctx.translate(rHand.x + 12, rHand.y - 12);
+      ctx.translate(rHand.x, rHand.y);
+      ctx.rotate(rAngle + 0.1);
       ctx.fillStyle = '#111822';
       ctx.fillRect(-14, -24, 28, 48);
       ctx.strokeStyle = '#00D2FF';
@@ -1311,7 +1315,8 @@ export class UniversalCharacterEngine {
       ctx.restore();
     } else if (propR === 'scientific_scanner') {
       ctx.save();
-      ctx.translate(rHand.x + 14, rHand.y - 10);
+      ctx.translate(rHand.x, rHand.y);
+      ctx.rotate(rAngle);
       ctx.fillStyle = '#333333';
       ctx.fillRect(-10, -20, 20, 40);
       ctx.strokeStyle = '#F77F00';
@@ -1325,8 +1330,8 @@ export class UniversalCharacterEngine {
       ctx.restore();
     } else if (propR === 'letter_envelope' || propR === 'envelope') {
       ctx.save();
-      ctx.translate(rHand.x + 12, rHand.y - 12);
-      ctx.rotate(0.15);
+      ctx.translate(rHand.x, rHand.y);
+      ctx.rotate(rAngle + 0.1);
       ctx.fillStyle = '#E8DCC0';
       ctx.fillRect(-18, -14, 36, 28);
       ctx.strokeStyle = '#181614';
@@ -1338,9 +1343,9 @@ export class UniversalCharacterEngine {
       ctx.lineTo(18, -14);
       ctx.stroke();
       ctx.restore();
-    } else if (propR === 'steaming_coffee_cup' || propR === 'coffee_cup') {
+    } else if (isCoffee) {
       ctx.save();
-      ctx.translate(rHand.x + 10, rHand.y - 8);
+      ctx.translate(rHand.x, rHand.y);
       ctx.fillStyle = '#FAFAFA';
       ctx.fillRect(-10, -16, 20, 26);
       ctx.strokeStyle = '#181614';
@@ -1362,7 +1367,8 @@ export class UniversalCharacterEngine {
       ctx.restore();
     } else if (propR === 'stethascope_or_clipboard' || propR === 'clipboard') {
       ctx.save();
-      ctx.translate(rHand.x + 12, rHand.y - 12);
+      ctx.translate(rHand.x, rHand.y);
+      ctx.rotate(rAngle * 0.2);
       ctx.fillStyle = '#8D6E63';
       ctx.fillRect(-15, -24, 30, 48);
       ctx.strokeStyle = '#181614';
@@ -1374,9 +1380,9 @@ export class UniversalCharacterEngine {
       ctx.fillRect(-6, -26, 12, 6);
       ctx.restore();
     } else if (propR && propR !== 'none') {
-      // Generic contextual prop
       ctx.save();
-      ctx.translate(rHand.x + 10, rHand.y - 10);
+      ctx.translate(rHand.x, rHand.y);
+      ctx.rotate(rAngle);
       ctx.fillStyle = '#37474F';
       ctx.fillRect(-12, -16, 24, 32);
       ctx.strokeStyle = '#ECEFF1';
@@ -1384,6 +1390,115 @@ export class UniversalCharacterEngine {
       ctx.strokeRect(-12, -16, 24, 32);
       ctx.restore();
     }
+  }
+
+  // ============================================================================
+  // SKELETON DEBUG OVERLAY RENDERER (Phase 6 Harness)
+  // ============================================================================
+  public drawSkeletonDebug(
+    ctx: CanvasRenderingContext2D,
+    skel: CanonicalJointHierarchy & SkeletalRigV5,
+    canonProps: CanonicalProportions,
+    dna: CharacterDNA_V5
+  ) {
+    ctx.save();
+
+    // 1. Draw Bones with length labels
+    const drawBone = (p1: Point2D, p2: Point2D, label: string) => {
+      ctx.beginPath();
+      ctx.moveTo(p1.x, p1.y);
+      ctx.lineTo(p2.x, p2.y);
+      ctx.strokeStyle = 'rgba(0, 255, 128, 0.9)';
+      ctx.lineWidth = 2.8;
+      ctx.stroke();
+
+      const midX = (p1.x + p2.x) / 2;
+      const midY = (p1.y + p2.y) / 2;
+      const len = Math.hypot(p2.x - p1.x, p2.y - p1.y).toFixed(1);
+      ctx.fillStyle = '#FFFFFF';
+      ctx.font = 'bold 8.5px monospace';
+      ctx.fillText(`${len}px`, midX + 3, midY - 2);
+    };
+
+    // Spine & Neck
+    drawBone(skel.root, skel.spineMid, 'lumbar');
+    drawBone(skel.spineMid, skel.chest, 'chest');
+    drawBone(skel.chest, skel.neckHead, 'neck');
+    drawBone(skel.neckHead, skel.crown, 'head');
+
+    // Clavicles & Arms
+    drawBone(skel.chest, skel.shoulderL, 'clavL');
+    drawBone(skel.chest, skel.shoulderR, 'clavR');
+    drawBone(skel.shoulderL, skel.elbowL, 'humL');
+    drawBone(skel.elbowL, skel.wristL, 'radL');
+    drawBone(skel.shoulderR, skel.elbowR, 'humR');
+    drawBone(skel.elbowR, skel.wristR, 'radR');
+
+    // Pelvis & Legs
+    drawBone(skel.root, skel.hipL, 'pelvL');
+    drawBone(skel.root, skel.hipR, 'pelvR');
+    drawBone(skel.hipL, skel.kneeL, 'femL');
+    drawBone(skel.kneeL, skel.ankleL, 'tibL');
+    drawBone(skel.hipR, skel.kneeR, 'femR');
+    drawBone(skel.kneeR, skel.ankleR, 'tibR');
+
+    // Feet
+    drawBone(skel.ankleL, skel.toeL, 'footL');
+    drawBone(skel.ankleR, skel.toeR, 'footR');
+
+    // 2. Draw Joints with Color Coded Markers
+    const joints: Array<{ pt: Point2D; name: string; color: string }> = [
+      { pt: skel.root, name: 'Root', color: '#FF3366' },
+      { pt: skel.chest, name: 'Chest', color: '#FF3366' },
+      { pt: skel.neckHead, name: 'Neck', color: '#FF9900' },
+      { pt: skel.headCenter, name: 'Head', color: '#FF9900' },
+      { pt: skel.shoulderL, name: 'Sh_L', color: '#00CCFF' },
+      { pt: skel.shoulderR, name: 'Sh_R', color: '#00CCFF' },
+      { pt: skel.elbowL, name: 'Elb_L', color: '#00FFCC' },
+      { pt: skel.elbowR, name: 'Elb_R', color: '#00FFCC' },
+      { pt: skel.wristL, name: 'Wri_L', color: '#FFFF00' },
+      { pt: skel.wristR, name: 'Wri_R', color: '#FFFF00' },
+      { pt: skel.handL, name: 'Grip_L', color: '#FF00FF' },
+      { pt: skel.handR, name: 'Grip_R', color: '#FF00FF' },
+      { pt: skel.hipL, name: 'Hip_L', color: '#00CCFF' },
+      { pt: skel.hipR, name: 'Hip_R', color: '#00CCFF' },
+      { pt: skel.kneeL, name: 'Knee_L', color: '#00FFCC' },
+      { pt: skel.kneeR, name: 'Knee_R', color: '#00FFCC' },
+      { pt: skel.ankleL, name: 'Ank_L', color: '#FFFF00' },
+      { pt: skel.ankleR, name: 'Ank_R', color: '#FFFF00' },
+      { pt: skel.toeL, name: 'Toe_L', color: '#FF0055' },
+      { pt: skel.toeR, name: 'Toe_R', color: '#FF0055' },
+    ];
+
+    for (const j of joints) {
+      ctx.beginPath();
+      ctx.arc(j.pt.x, j.pt.y, 4.0, 0, Math.PI * 2);
+      ctx.fillStyle = j.color;
+      ctx.fill();
+      ctx.lineWidth = 1.2;
+      ctx.strokeStyle = '#000000';
+      ctx.stroke();
+
+      ctx.fillStyle = '#FFFFFF';
+      ctx.font = 'bold 8px monospace';
+      ctx.fillText(j.name, j.pt.x + 5, j.pt.y + 3);
+    }
+
+    // 3. Ground contact line
+    ctx.beginPath();
+    ctx.moveTo(-100, 0);
+    ctx.lineTo(100, 0);
+    ctx.strokeStyle = 'rgba(255, 60, 60, 0.85)';
+    ctx.lineWidth = 2.0;
+    ctx.setLineDash([4, 4]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    ctx.fillStyle = '#FF4444';
+    ctx.font = 'bold 9px monospace';
+    ctx.fillText('GROUND_PLANE (Y=0)', 40, -4);
+
+    ctx.restore();
   }
 }
 

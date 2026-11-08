@@ -1,0 +1,422 @@
+{
+  "locations": [
+    {
+      "location_id": "LOC_MUNICH",
+      "name": "Munich 1914",
+      "period_from": 1914,
+      "period_to": 1914,
+      "region": "Germany",
+      "architecture": "Neoclassical Bavarian European street",
+      "enclosure": "EXTERIOR",
+      "ceiling": "SKY",
+      "wall_treatment": "STONE_BLOCK",
+      "floor_feature": "COBBLES",
+      "openings": "ARCHES",
+      "horizon_feature": "CITY_SKYLINE",
+      "materials": [
+        "STONE",
+        "PLASTER",
+        "WOOD",
+        "BRICK"
+      ],
+      "palette": {
+        "sky_top": "#4a708b",
+        "sky_bottom": "#b0c4de",
+        "wall": "#d3d3d3",
+        "floor": "#8b8682",
+        "accent": "#8b4513",
+        "shadow": "#2f4f4f"
+      },
+      "lighting_behavior": "OVERCAST",
+      "weather": "CLEAR",
+      "atmosphere": [
+        "HAZE",
+        "SUN"
+      ],
+      "wear": 0.1,
+      "density": "BALANCED",
+      "props": [
+        {
+          "semantic": "wooden street bench",
+          "category": "BENCH",
+          "role": "DRESSING",
+          "materials": [
+            "WOOD",
+            "METAL"
+          ],
+          "count": 2,
+          "affordances": [
+            "SIT"
+          ]
+        },
+        {
+          "semantic": "wrought iron street lamp",
+          "category": "LAMP",
+          "role": "DRESSING",
+          "materials": [
+            "METAL",
+            "GLASS"
+          ],
+          "count": 3,
+          "affordances": [
+            "GRIP"
+          ]
+        }
+      ],
+      "foreground_vocabulary": [
+        {
+          "semantic": "cobblestone curb",
+          "category": "BARRIER",
+          "role": "FOREGROUND",
+          "materials": [
+            "STONE"
+          ],
+          "count": 1,
+          "affordances": []
+        }
+      ],
+      "background_activity": [
+        "CROWD_MURMUR",
+        "DISTANT_FIGURES"
+      ],
+      "historical_constraints": [
+        "Munich streets at the outbreak of WWI in August 1914."
+      ],
+      "reusable_masters": [],
+      "historical_confidence": "CONFIRMED",
+      "proposal_source": "UNKNOWN"
+    },
+    {
+      "location_id": "LOC_WESTERN_FRONT",
+      "name": "Mặt trận phía Tây",
+      "period_from": 1914,
+      "period_to": 1914,
+      "region": "France",
+      "architecture": "World War I trench system",
+      "enclosure": "EXTERIOR",
+      "ceiling": "SKY",
+      "wall_treatment": "TIMBER_REVETMENT",
+      "floor_feature": "DUCKBOARD_PATH",
+      "openings": "NONE",
+      "horizon_feature": "RUINED_RIDGE",
+      "materials": [
+        "EARTH",
+        "WOOD",
+        "MUD"
+      ],
+      "palette": {
+        "sky_top": "#696969",
+        "sky_bottom": "#a9a9a9",
+        "wall": "#5c4033",
+        "floor": "#3e2723",
+        "accent": "#8b0000",
+        "shadow": "#1c1c1c"
+      },
+      "lighting_behavior": "OVERCAST",
+      "weather": "RAIN",
+      "atmosphere": [
+        "SMOKE_PLUMES",
+        "RAIN",
+        "FOG"
+      ],
+      "wear": 0.8,
+      "density": "DENSE",
+      "props": [
+        {
+          "semantic": "sandbag wall fortification",
+          "category": "SANDBAGS",
+          "role": "WALL",
+          "materials": [
+            "FABRIC",
+            "EARTH"
+          ],
+          "count": 6,
+          "affordances": [
+            "LEAN",
+            "GRIP"
+          ]
+        },
+        {
+          "semantic": "tangled barbed wire entanglement",
+          "category": "WIRE",
+          "role": "BARRIER",
+          "materials": [
+            "METAL"
+          ],
+          "count": 4,
+          "affordances": [
+            "AVOID"
+          ]
+        }
+      ],
+      "foreground_vocabulary": [
+        {
+          "semantic": "muddy trench edge",
+          "category": "BARRIER",
+          "role": "FOREGROUND",
+          "materials": [
+            "MUD",
+            "EARTH"
+          ],
+          "count": 1,
+          "affordances": []
+        }
+      ],
+      "background_activity": [
+        "FLASHES",
+        "SMOKE_COLUMNS"
+      ],
+      "historical_constraints": [
+        "Typical muddy and fortified WWI trench system."
+      ],
+      "reusable_masters": [],
+      "historical_confidence": "CONFIRMED",
+      "proposal_source": "UNKNOWN"
+    },
+    {
+      "location_id": "LOC_SOMME",
+      "name": "Trận Somme",
+      "period_from": 1916,
+      "period_to": 1916,
+      "region": "France",
+      "architecture": "Blasted battlefield with craters",
+      "enclosure": "EXTERIOR",
+      "ceiling": "SKY",
+      "wall_treatment": "EARTH_BANK",
+      "floor_feature": "BARE",
+      "openings": "NONE",
+      "horizon_feature": "RUINED_RIDGE",
+      "materials": [
+        "EARTH",
+        "MUD",
+        "STONE"
+      ],
+      "palette": {
+        "sky_top": "#2f4f4f",
+        "sky_bottom": "#696969",
+        "wall": "#3b2f2f",
+        "floor": "#262626",
+        "accent": "#ff4500",
+        "shadow": "#000000"
+      },
+      "lighting_behavior": "HARSH_SUN",
+      "weather": "STORM",
+      "atmosphere": [
+        "SMOKE_PLUMES",
+        "SPARKS",
+        "EMBERS"
+      ],
+      "wear": 1.0,
+      "density": "DENSE",
+      "props": [
+        {
+          "semantic": "scattered artillery debris",
+          "category": "DEBRIS",
+          "role": "DRESSING",
+          "materials": [
+            "METAL",
+            "WOOD"
+          ],
+          "count": 5,
+          "affordances": [
+            "LIE",
+            "LEAN"
+          ]
+        }
+      ],
+      "foreground_vocabulary": [
+        {
+          "semantic": "crater lip",
+          "category": "BARRIER",
+          "role": "FOREGROUND",
+          "materials": [
+            "EARTH"
+          ],
+          "count": 1,
+          "affordances": []
+        }
+      ],
+      "background_activity": [
+        "FLASHES",
+        "SMOKE_COLUMNS"
+      ],
+      "historical_constraints": [
+        "1916 Somme battlefield conditions."
+      ],
+      "reusable_masters": [],
+      "historical_confidence": "CONFIRMED",
+      "proposal_source": "UNKNOWN"
+    },
+    {
+      "location_id": "LOC_YPRES",
+      "name": "Ypres và Bệnh viện Pasewalk",
+      "period_from": 1918,
+      "period_to": 1918,
+      "region": "Germany",
+      "architecture": "Military hospital ward",
+      "enclosure": "INTERIOR",
+      "ceiling": "FLAT",
+      "wall_treatment": "PLAIN",
+      "floor_feature": "PLANKS",
+      "openings": "WINDOWS_TALL",
+      "horizon_feature": "NONE",
+      "materials": [
+        "WOOD",
+        "PLASTER",
+        "FABRIC",
+        "METAL"
+      ],
+      "palette": {
+        "sky_top": "#dcdcdc",
+        "sky_bottom": "#f5f5f5",
+        "wall": "#f0fff0",
+        "floor": "#deb887",
+        "accent": "#b22222",
+        "shadow": "#708090"
+      },
+      "lighting_behavior": "WINDOW_SHAFTS",
+      "weather": "NONE_INTERIOR",
+      "atmosphere": [
+        "DUST_MOTES"
+      ],
+      "wear": 0.3,
+      "density": "SPARSE",
+      "props": [
+        {
+          "semantic": "metal framed hospital bed with white sheets",
+          "category": "BED",
+          "role": "HERO",
+          "materials": [
+            "METAL",
+            "FABRIC",
+            "WOOD"
+          ],
+          "count": 4,
+          "affordances": [
+            "LIE",
+            "SIT"
+          ]
+        },
+        {
+          "semantic": "wooden bedside table",
+          "category": "TABLE",
+          "role": "DRESSING",
+          "materials": [
+            "WOOD"
+          ],
+          "count": 2,
+          "affordances": [
+            "GRIP",
+            "PLACE"
+          ]
+        }
+      ],
+      "foreground_vocabulary": [
+        {
+          "semantic": "hospital window sill",
+          "category": "WALL_STRUCTURE",
+          "role": "FOREGROUND",
+          "materials": [
+            "WOOD"
+          ],
+          "count": 1,
+          "affordances": []
+        }
+      ],
+      "background_activity": [
+        "WORKERS"
+      ],
+      "historical_constraints": [
+        "Pasewalk military hospital interior in late 1918."
+      ],
+      "reusable_masters": [],
+      "historical_confidence": "CONFIRMED",
+      "proposal_source": "UNKNOWN"
+    },
+    {
+      "location_id": "LOC_BEER_HALL",
+      "name": "Quán bia Munich",
+      "period_from": 1919,
+      "period_to": 1919,
+      "region": "Germany",
+      "architecture": "Traditional Bavarian beer hall interior",
+      "enclosure": "INTERIOR",
+      "ceiling": "BEAMED",
+      "wall_treatment": "PANELED",
+      "floor_feature": "PLANKS",
+      "openings": "DOORWAY",
+      "horizon_feature": "NONE",
+      "materials": [
+        "WOOD",
+        "GLASS",
+        "METAL"
+      ],
+      "palette": {
+        "sky_top": "#2b1d0c",
+        "sky_bottom": "#4a3525",
+        "wall": "#8b5a2b",
+        "floor": "#5c4033",
+        "accent": "#cd853f",
+        "shadow": "#1a0f07"
+      },
+      "lighting_behavior": "CANDLELIGHT",
+      "weather": "NONE_INTERIOR",
+      "atmosphere": [
+        "TOBACCO_SMOKE",
+        "HAZE"
+      ],
+      "wear": 0.4,
+      "density": "DENSE",
+      "props": [
+        {
+          "semantic": "long wooden beer table with benches",
+          "category": "TABLE",
+          "role": "HERO",
+          "materials": [
+            "WOOD"
+          ],
+          "count": 6,
+          "affordances": [
+            "SIT",
+            "LEAN",
+            "GRIP"
+          ]
+        },
+        {
+          "semantic": "ceramic beer stein",
+          "category": "VESSEL",
+          "role": "DRESSING",
+          "materials": [
+            "GLASS"
+          ],
+          "count": 12,
+          "affordances": [
+            "GRIP",
+            "CARRY"
+          ]
+        }
+      ],
+      "foreground_vocabulary": [
+        {
+          "semantic": "wooden chair back",
+          "category": "CHAIR",
+          "role": "FOREGROUND",
+          "materials": [
+            "WOOD"
+          ],
+          "count": 1,
+          "affordances": []
+        }
+      ],
+      "background_activity": [
+        "CROWD_MURMUR"
+      ],
+      "historical_constraints": [
+        "Munich beer hall in 1919 filled with political discussions and smoke."
+      ],
+      "reusable_masters": [],
+      "historical_confidence": "CONFIRMED",
+      "proposal_source": "UNKNOWN"
+    }
+  ]
+}
