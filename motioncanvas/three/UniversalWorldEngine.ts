@@ -175,8 +175,16 @@ export class UniversalWorldEngine {
       skyColorHex = parseInt(this.dna.palette.sky_top.replace('#', '0x'), 16);
     }
 
-    this.scene.background = new THREE.Color(skyColorHex);
-    this.scene.fog = new THREE.FogExp2(skyColorHex, fogDensity);
+    const skyCol = new THREE.Color(skyColorHex);
+    const hsl = { h: 0, s: 0, l: 0 };
+    skyCol.getHSL(hsl);
+    if (hsl.l < 0.52) {
+      hsl.l = 0.55;
+      skyCol.setHSL(hsl.h, Math.min(0.35, hsl.s), hsl.l);
+    }
+
+    this.scene.background = skyCol;
+    this.scene.fog = new THREE.FogExp2(skyCol, fogDensity);
   }
 
   private isRainy(): boolean {
@@ -305,7 +313,7 @@ export class UniversalWorldEngine {
     // 1. Herringbone Wood Floor with Warm Specular Sheen
     const floorGeo = new THREE.PlaneGeometry(36, 26);
     const floorMat = new THREE.MeshStandardMaterial({
-      color: 0x4A3525,
+      color: 0x8D6E50,
       roughness: 0.35,
       metalness: 0.18,
     });
@@ -315,13 +323,13 @@ export class UniversalWorldEngine {
     this.scene.add(floor);
 
     // 2. Contemporary Acoustic Slatted Timber Back Wall
-    const wallMat = new THREE.MeshStandardMaterial({ color: 0x322822, roughness: 0.85 });
+    const wallMat = new THREE.MeshStandardMaterial({ color: 0x7D6858, roughness: 0.75 });
     const backWall = new THREE.Mesh(new THREE.BoxGeometry(32, 7.5, 0.2), wallMat);
     backWall.position.set(0, 3.75, -5.5);
     this.scene.add(backWall);
 
     // Vertical wooden decorative acoustic slats
-    const slatMat = new THREE.MeshStandardMaterial({ color: 0x8D6E63, roughness: 0.6 });
+    const slatMat = new THREE.MeshStandardMaterial({ color: 0xC4A482, roughness: 0.5 });
     for (let x = -14; x <= 14; x += 0.8) {
       const slat = new THREE.Mesh(new THREE.BoxGeometry(0.12, 7.2, 0.08), slatMat);
       slat.position.set(x, 3.7, -5.35);
@@ -512,7 +520,7 @@ export class UniversalWorldEngine {
     this.scene.add(this.waterMesh);
 
     // 2. Heavy Granite Quay Embankment Wall
-    const graniteMat = new THREE.MeshStandardMaterial({ color: 0x42464D, roughness: 0.78 });
+    const graniteMat = new THREE.MeshStandardMaterial({ color: 0x8E949E, roughness: 0.65 });
     const quayWall = new THREE.Mesh(new THREE.BoxGeometry(80, 4.5, 3.2), graniteMat);
     quayWall.position.set(0, 0.8, -4.5);
     this.scene.add(quayWall);
@@ -525,7 +533,7 @@ export class UniversalWorldEngine {
     // 3. Wet Cobblestone Quay Promenade
     const cobbleGeo = new THREE.PlaneGeometry(80, 30);
     const cobbleMat = new THREE.MeshStandardMaterial({
-      color: 0x2A2622,
+      color: 0x80858E,
       roughness: 0.38,
       metalness: 0.25,
     });
@@ -587,15 +595,15 @@ export class UniversalWorldEngine {
     this.scene.add(this.waterMesh);
 
     // Stone embankment walls
-    const stoneMat = new THREE.MeshStandardMaterial({ color: 0x484B4F, roughness: 0.85 });
+    const stoneMat = new THREE.MeshStandardMaterial({ color: 0x8A8E94, roughness: 0.75 });
     const wallBack = new THREE.Mesh(new THREE.BoxGeometry(70, 4.5, 3.5), stoneMat);
     wallBack.position.set(0, 0.4, -8.0);
     this.scene.add(wallBack);
 
     // 2. High-Detail Arched Wooden Bridge (Taiko-bashi)
-    const timberDarkMat = new THREE.MeshStandardMaterial({ color: 0x3E2D22, roughness: 0.85 });
-    const timberPlankMat = new THREE.MeshStandardMaterial({ color: 0x5C4634, roughness: 0.65, metalness: 0.15 });
-    const bronzeFittingMat = new THREE.MeshStandardMaterial({ color: 0x8A734A, roughness: 0.4, metalness: 0.75 });
+    const timberDarkMat = new THREE.MeshStandardMaterial({ color: 0x645042, roughness: 0.75 });
+    const timberPlankMat = new THREE.MeshStandardMaterial({ color: 0x9E846C, roughness: 0.55, metalness: 0.15 });
+    const bronzeFittingMat = new THREE.MeshStandardMaterial({ color: 0xB59D68, roughness: 0.35, metalness: 0.85 });
 
     // Main Longitudinal Curved Beams
     for (const z of [-1.8, 1.8]) {
@@ -717,13 +725,13 @@ export class UniversalWorldEngine {
   // ----------------------------------------------------------------------------
   private buildRoboticsLabEnvironment() {
     const floorGeo = new THREE.PlaneGeometry(40, 30);
-    const floorMat = new THREE.MeshStandardMaterial({ color: 0x161D26, roughness: 0.22, metalness: 0.65 });
+    const floorMat = new THREE.MeshStandardMaterial({ color: 0x788698, roughness: 0.22, metalness: 0.45 });
     const floor = new THREE.Mesh(floorGeo, floorMat);
     floor.rotation.x = -Math.PI / 2;
     floor.position.set(0, 0, 0);
     this.scene.add(floor);
 
-    const rackMat = new THREE.MeshStandardMaterial({ color: 0x1A222C, roughness: 0.55, metalness: 0.7 });
+    const rackMat = new THREE.MeshStandardMaterial({ color: 0x586678, roughness: 0.45, metalness: 0.6 });
     for (let x = -8.0; x <= -2.5; x += 1.5) {
       const rack = new THREE.Mesh(new THREE.BoxGeometry(1.2, 4.4, 1.0), rackMat);
       rack.position.set(x, 2.2, -4.5);
