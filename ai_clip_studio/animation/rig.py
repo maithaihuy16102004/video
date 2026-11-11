@@ -1,10 +1,20 @@
-"""12-joint stickman rig, V51 proportions, frame-by-frame animation.
+"""12-joint stickman rig, PREMIUM_STICKMAN v4 proportions, frame-by-frame
+animation.
 
-Proportions follow the V51 standard (see motioncanvas/contract/CharacterDNA.ts
-and components/CanonicalStickmanRig.ts in the upstream repo):
-  total height 300 px, headRatio 0.142-0.155, torso 96 px (lumbar 48 + chest 48),
-  limbThicknessPx 7-16. Here the rig is scaled to a screen height H (default
-  560 px at 1080p), so head = 0.146*H, torso = 0.32*H.
+Proportions are MEASURED from the reference stickman
+(~/workspace/user/media_library/image/image.png, 1024x1024) by
+~/workspace/acceptance_loop/stickman_v4/measure_reference.py -- not
+guessed, not the V51 standard. Measured (fractions of the DRAWN total
+height, head top -> foot bottom): head diameter 0.339, torso 0.231,
+legs 0.429, arms 0.283, limb thickness 0.026, head outline 0.028.
+See reference_measurements.json for the full table.
+
+Geometry (v4): the head sits DIRECTLY on the shoulders -- head centre
+1.0*head_r above the shoulder, head bottom exactly at shoulder level,
+no neck gap -- so the drawn total height equals H exactly:
+2*head_r + torso + legs = (0.34 + 0.231 + 0.429) * H = 1.0 * H.
+(v3 had the head centre 1.5r above the shoulder, which made the drawn
+height 1.085*H and capped the achievable head ratio at ~0.27.)
 
 The character is drawn in side view (profile), facing +1 (right) or -1 (left).
 Joints are computed every frame from a pose; nothing is a static image.
@@ -15,21 +25,24 @@ full joint map so motion can be measured (joint displacement per frame).
 """
 import math
 
-# --- V51 proportions (fractions of total height) ---
-HEAD_RATIO = 0.146
-HEAD_RATIO_MIN = 0.142  # V51 standard range; the schema allows 0.20-0.35
-HEAD_RATIO_MAX = 0.155  # but the rig locks to 0.142-0.155 (see STYLE_LOCK)
-TORSO_FRAC = 0.32
-UPPER_LEG_FRAC = 0.23
-LOWER_LEG_FRAC = 0.23
-UPPER_ARM_FRAC = 0.20
-LOWER_ARM_FRAC = 0.19
+# --- PREMIUM_STICKMAN v4 proportions (fractions of total height) ---
+# Measured from the reference image (see module docstring). HEAD_RATIO
+# is the head DIAMETER as a fraction of the drawn total height; the
+# schema allows 0.20-0.35 and the measured value 0.339 sits inside it.
+HEAD_RATIO = 0.34
+HEAD_RATIO_MIN = 0.33  # tight lock around the measured 0.339
+HEAD_RATIO_MAX = 0.35
+TORSO_FRAC = 0.231
+UPPER_LEG_FRAC = 0.2145
+LOWER_LEG_FRAC = 0.2145
+UPPER_ARM_FRAC = 0.13
+LOWER_ARM_FRAC = 0.153
 SHOULDER_HALF_FRAC = 0.09   # half shoulder width
 HIP_HALF_FRAC = 0.06
 
 # Body-variant width scale. ONE scale multiplies torso width AND limb
 # width together, so a sturdy character is uniformly thicker, never a
-# thin arm on a wide torso (PREMIUM_STICKMAN v3 line rule).
+# thin arm on a wide torso (PREMIUM_STICKMAN v4 line rule).
 BODY_WIDTH_SCALE = {"slim": 0.9, "standard": 1.0, "sturdy": 1.15}
 
 
@@ -99,7 +112,7 @@ class Stickman:
         self.hat = hat
         self.moustache = moustache
         self.name = name
-        # PREMIUM_STICKMAN v3 identity (see animation/character_art.py).
+        # PREMIUM_STICKMAN v4 identity (see animation/character_art.py).
         # template: male | female | child | elderly. body_variant scales
         # torso/limb widths TOGETHER (slim 0.9 / standard 1.0 / sturdy
         # 1.15) so line thickness stays uniform within one character.
@@ -153,8 +166,12 @@ class Stickman:
         sh_y = hip_y - math.cos(lean) * self.torso
         neck_x = sh_x + math.sin(lean) * self.head_r * 0.4
         neck_y = sh_y - math.cos(lean) * self.head_r * 0.4
-        head_x = neck_x + math.sin(lean + p["head_look"]) * self.head_r * 1.1
-        head_y = neck_y - math.cos(lean + p["head_look"]) * self.head_r * 1.1
+        # v4: head centre is only 0.6r above the neck (1.0r above the
+        # shoulder), so the head bottom sits exactly at shoulder level
+        # -- the reference stickman's head sits directly on its
+        # shoulders with no neck gap, and the drawn total height is H.
+        head_x = neck_x + math.sin(lean + p["head_look"]) * self.head_r * 0.6
+        head_y = neck_y - math.cos(lean + p["head_look"]) * self.head_r * 0.6
         J = {"hip": (hip_x, hip_y), "shoulder": (sh_x, sh_y),
              "neck": (neck_x, neck_y), "head": (head_x, head_y),
              "facing": f}
@@ -226,7 +243,7 @@ def walk_pose(phase, stride=0.55, amp=0.5):
 
 
 # ---------------------------------------------------------------------------
-# Rig validation helpers (PREMIUM_STICKMAN v3, §3).
+# Rig validation helpers (PREMIUM_STICKMAN v4, §3).
 #
 # These are pure checks on a joint map: they never move a joint, so a
 # test can assert them on every frame of a timeline. A violation is a
@@ -314,9 +331,24 @@ def plant_feet(char, ground_y, stance="both"):
     Call this after set_pose for any standing pose: it guarantees the
     feet touch the ground instead of floating a few px above it (the
     old failure mode when root_y was rounded or bob was applied).
+
+    The foot spread is clamped to what the legs can actually reach:
+    with the hip at ``ground_y - leg_length`` ANY horizontal spread
+    makes the target unreachable and the IK clamp floats the feet
+    (v3's ~10px float in front view). Standing callers must set
+    ``root_y = ground_y - 0.93 * (u_leg + l_leg)`` (as walk_to does)
+    so the legs are slightly bent and the full spread is reachable;
+    if they did not, the spread shrinks instead of the feet floating.
     """
     x = char.pose["root_x"]
+    hip_y = char.pose["root_y"]
+    reach = char.u_leg + char.l_leg
     spread = 0.06 * char.H
+    dv = ground_y - hip_y
+    # Max horizontal offset the legs can reach at this hip height
+    # (98% of reach, matching the IK clamp in joints()).
+    max_spread = math.sqrt(max(0.0, (0.98 * reach) ** 2 - dv * dv))
+    spread = min(spread, max_spread)
     if stance in ("both", "l"):
         char.foot_target_l = (x - spread, ground_y)
     if stance in ("both", "r"):

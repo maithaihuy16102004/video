@@ -18,7 +18,7 @@ from .character_art import (  # noqa: F401
     TEMPLATES, BODY_VARIANTS, CHARACTER_INSTANCES,
     make_character, make_character_instance,
     blend_expressions, expression_at,
-    draw_character_v3, draw_character,
+    draw_character_v4, draw_character_v3, draw_character,
     limb_width, outline_width,
 )
 
@@ -34,5 +34,5 @@ __all__ = ["Stickman", "walk_pose", "interp_keys", "smoothstep", "lerp",
            "TEMPLATES", "BODY_VARIANTS", "CHARACTER_INSTANCES",
            "make_character", "make_character_instance",
            "blend_expressions", "expression_at",
-           "draw_character_v3", "draw_character",
+           "draw_character_v4", "draw_character_v3", "draw_character",
            "limb_width", "outline_width"]

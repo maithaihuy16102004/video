@@ -27,7 +27,7 @@ def _pose(char, **kw):
 def _s(char, px):
     """Scale a pixel offset written for the reference height (560 px) to
     this character's height, so primitives work for a 400 px child as
-    well as a 560 px adult (PREMIUM_STICKMAN v3: one proportion system)."""
+    well as a 560 px adult (PREMIUM_STICKMAN v4: one proportion system)."""
     return px * float(char.H) / 560.0
 
 
@@ -85,13 +85,20 @@ def point_at(char, target, duration):
     return fn
 
 
-def wave(char, duration, freq=3.0):
-    """Wave the right hand side to side."""
+def wave(char, duration, freq=2.0):
+    """Wave the right hand side to side.
+
+    v4: softer than v3 -- the old target (hand 260*s above the hip,
+    swaying +/-25*s at freq 3.0) sat exactly at the arm's reach limit,
+    so the IK clamp made the hand snap at the top of the wave (Mai:
+    "tay vẫy của Lan hơi gắt"). The new target sits well inside the
+    reach (230*s up, +/-15*s sway, freq 2.0) so the wave reads smooth.
+    """
     def fn(t):
         hx, hy = char.pose["root_x"], char.pose["root_y"]
-        char.hand_target_r = (hx + _s(char, 90),
-                              hy - _s(char, 260)
-                              + _s(char, 25) * math.sin(t * 2 * math.pi * freq / duration * 2))
+        char.hand_target_r = (hx + _s(char, 80),
+                              hy - _s(char, 230)
+                              + _s(char, 15) * math.sin(t * 2 * math.pi * freq / duration * 2))
         return char
     return fn
 

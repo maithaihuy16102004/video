@@ -64,7 +64,9 @@ class TestStyleLock(unittest.TestCase):
     def test_style_is_locked_premium_stickman(self):
         self.assertEqual(CHARACTER_STYLE, "PREMIUM_STICKMAN")
         self.assertEqual(STYLE_LOCK["head_ratio"], HEAD_RATIO)
-        self.assertAlmostEqual(HEAD_RATIO, 0.146)
+        # v4: head ratio is MEASURED from the reference stickman
+        # (0.3388), not the V51 standard 0.146.
+        self.assertAlmostEqual(HEAD_RATIO, 0.34)
         self.assertGreaterEqual(HEAD_RATIO, STYLE_LOCK["head_ratio_min"])
         self.assertLessEqual(HEAD_RATIO, STYLE_LOCK["head_ratio_max"])
 
@@ -73,18 +75,20 @@ class TestStyleLock(unittest.TestCase):
         self.assertEqual(limb_width(ch), limb_width(ch))
         self.assertGreater(outline_width(ch), 0)
         # Same character, same H: arms and legs share ONE width value.
+        # v4 line system, measured from the reference: limbs 0.026*H,
+        # head outline 0.028*H.
         self.assertAlmostEqual(
-            STYLE_LOCK["limb_w_frac"], 0.015)
+            STYLE_LOCK["limb_w_frac"], 0.026)
         self.assertAlmostEqual(
-            STYLE_LOCK["outline_w_frac"], 0.018)
+            STYLE_LOCK["outline_w_frac"], 0.028)
 
 
 class TestTemplates(unittest.TestCase):
     def test_four_templates_share_one_proportion_system(self):
         for name in ("male", "female", "child", "elderly"):
             ch = make_character(name)
-            self.assertAlmostEqual(ch.head_r, 0.146 * ch.H / 2, places=3)
-            self.assertAlmostEqual(ch.torso, 0.32 * ch.H, places=3)
+            self.assertAlmostEqual(ch.head_r, 0.34 * ch.H / 2, places=3)
+            self.assertAlmostEqual(ch.torso, 0.231 * ch.H, places=3)
 
     def test_template_identity_markers(self):
         self.assertEqual(make_character("female").hair_style, "long")
@@ -111,7 +115,7 @@ class TestTemplates(unittest.TestCase):
         lan = make_character_instance("lan")
         lustig = make_character_instance("lustig")
         for ch in (minh, lan, lustig):
-            self.assertAlmostEqual(ch.head_r, 0.146 * ch.H / 2, places=3)
+            self.assertAlmostEqual(ch.head_r, 0.34 * ch.H / 2, places=3)
         self.assertEqual(lan.template, "female")
         self.assertEqual(lustig.hat, "bowler")
         self.assertTrue(lustig.moustache)
@@ -195,8 +199,11 @@ class TestCharacterArtV3(unittest.TestCase):
                         f"head edge not ink: {edge}")
         # Face centre (between the eyes and the mouth) is the cream fill.
         # (The short-hair fringe dips to hy-0.375r only at the exact
-        # centre top, so sample below the eyes instead.)
-        centre = arr[int(hy + 0.15 * r), int(hx), :3]
+        # centre top, so sample below the eyes instead.) In profile the
+        # face turns (face centre +0.18r, far eye near the head centre),
+        # so sample at +0.20r -- between the eyes in every view -- not
+        # at the head centre, which the far eye covers in profile.
+        centre = arr[int(hy + 0.15 * r), int(hx + 0.20 * r), :3]
         self.assertTrue(bool(np.all(
             np.abs(centre - np.array([0xF7, 0xF3, 0xE8])) < 12)),
             f"face fill wrong: {centre}")
@@ -241,19 +248,23 @@ class TestExpressions(unittest.TestCase):
 
     def test_blend_is_smooth_midpoint(self):
         mid = blend_expressions("neutral", "happy", 0.5)
-        self.assertAlmostEqual(mid["eye_h"], (1.00 + 0.50) / 2)
+        self.assertAlmostEqual(mid["eye_h"], (1.00 + 0.45) / 2)
         self.assertAlmostEqual(mid["mouth_curve"], 0.5)
-        self.assertAlmostEqual(mid["mouth_w"], (1.00 + 1.25) / 2)
+        self.assertAlmostEqual(mid["mouth_w"], (1.00 + 1.40) / 2)
         self.assertEqual(blend_expressions("neutral", "happy", 0.0),
                          EXPRESSIONS["neutral"])
-        self.assertEqual(blend_expressions("neutral", "happy", 1.0),
-                         EXPRESSIONS["happy"])
+        # u=1.0 must return happy, up to float noise (0.45 is not
+        # exactly representable, so assertEqual on the dict is too
+        # strict -- compare per key instead).
+        full = blend_expressions("neutral", "happy", 1.0)
+        for k, v in EXPRESSIONS["happy"].items():
+            self.assertAlmostEqual(full[k], v)
 
     def test_expression_at_keyframes(self):
         keys = [(0.0, "neutral"), (1.0, "surprised")]
         at_half = expression_at(keys, 0.5)
         self.assertAlmostEqual(at_half["mouth_open"], 0.5)
-        self.assertAlmostEqual(at_half["eye_h"], (1.0 + 1.5) / 2)
+        self.assertAlmostEqual(at_half["eye_h"], (1.0 + 1.6) / 2)
         self.assertEqual(expression_at(keys, 0.0)["mouth_open"], 0.0)
         self.assertEqual(expression_at(keys, 2.0)["mouth_open"], 1.0)
 
@@ -299,6 +310,10 @@ class TestRigV3(unittest.TestCase):
 
     def test_plant_feet_puts_both_feet_on_ground(self):
         ch = _standing_char()
+        # v4 legs are shorter (0.429*H): the hip must sit at
+        # ground - 0.93*leg_length (as walk_to does), otherwise even
+        # zero foot spread cannot reach the ground.
+        ch.set_pose(root_y=920 - 0.93 * (ch.u_leg + ch.l_leg))
         plant_feet(ch, 920)
         J = ch.joints()
         self.assertEqual(check_foot_contact(J, 920), [])
@@ -403,6 +418,84 @@ class TestCharacterArtGate(unittest.TestCase):
         # Omitting the gate preserves the old two-gate behaviour.
         out3 = combine(tech, crea)
         self.assertEqual(out3["verdict"], "DRAFT_PASSED_QA")
+
+
+class TestV4ReferenceProportions(unittest.TestCase):
+    """v4: the template is rebuilt from the reference measurements
+    (measure_reference.py). These tests pin the measured values so a
+    future edit cannot silently drift back to the V51 small head."""
+
+    def test_drawn_height_is_exactly_H(self):
+        # v4 stack identity: 2*head_r + torso + legs == H.
+        ch = make_character("male")
+        total = 2 * ch.head_r + ch.torso + ch.u_leg + ch.l_leg
+        self.assertAlmostEqual(total, ch.H, places=3)
+
+    def test_head_sits_on_shoulders_no_neck_gap(self):
+        ch = _standing_char()
+        J = ch.joints()
+        # Head bottom (head centre + r) is exactly at shoulder level.
+        self.assertAlmostEqual(J["head"][1] + ch.head_r,
+                               J["shoulder"][1], delta=2.0)
+
+    def test_torso_tapers_wider_at_hip_like_reference(self):
+        # Reference: narrow at shoulders (0.0685H), wider at hip
+        # (0.0866H). v3 had it backwards.
+        self.assertGreater(STYLE_LOCK["torso_bottom_half_frac"],
+                           STYLE_LOCK["torso_top_half_frac"])
+        self.assertAlmostEqual(STYLE_LOCK["torso_top_half_frac"], 0.034)
+        self.assertAlmostEqual(STYLE_LOCK["torso_bottom_half_frac"], 0.043)
+
+    def test_three_quarter_body_differs_from_profile(self):
+        """v3 drew the identical body for 3/4 and profile -- only the
+        face moved. v4 compresses the body sideways in 3/4, so the
+        BODY region (below the head) must differ clearly. Rendered on
+        WHITE: on the dark test background the ink limbs are nearly
+        the same colour as the background and the diff is invisible
+        numerically even when the shapes differ."""
+        def body_diff(view_a, view_b):
+            def _one(view):
+                img = Image.new("RGBA", (W, H), (255, 255, 255, 255))
+                d = ImageDraw.Draw(img, "RGBA")
+                J = draw_character_v3(d, _standing_char(), view=view)
+                return np.asarray(img, dtype=np.float32), J
+            img_a, J = _one(view_a)
+            img_b, _ = _one(view_b)
+            hy = int(J["shoulder"][1])
+            return float(np.mean(np.abs(
+                img_a[hy:, :, :3] - img_b[hy:, :, :3])))
+        self.assertGreater(body_diff("three_quarter", "profile"), 0.3,
+                           "3/4 and profile bodies are identical")
+
+    def test_neutral_face_has_no_brows_like_reference(self):
+        """The reference face is two eyes + a mouth, no brows. In the
+        neutral render, the strip where brows would sit (just above
+        the eyes, below the hair chord) must contain no ink."""
+        img, joints = _render(_standing_char(), expression="neutral")
+        arr = np.asarray(img)
+        hx, hy = joints["head"]
+        r = _standing_char().head_r
+        # Brow line in v4 sits at hy-0.52r; hair chord at hy-0.55r.
+        # Sample the strip hy-0.50r .. hy-0.40r across the eye band.
+        y0, y1 = int(hy - 0.50 * r), int(hy - 0.40 * r)
+        x0, x1 = int(hx - 0.6 * r), int(hx + 0.6 * r)
+        strip = arr[y0:y1, x0:x1, :3].astype(int)
+        ink_px = np.sum(np.all(np.abs(strip - np.array(INK)) < 12, axis=2))
+        self.assertEqual(int(ink_px), 0,
+                         f"neutral face has brow ink: {ink_px}px")
+
+    def test_angry_brows_visible_above_eyes(self):
+        """The same strip DOES carry ink for angry (brows moved)."""
+        img, joints = _render(_standing_char(), expression="angry")
+        arr = np.asarray(img)
+        hx, hy = joints["head"]
+        r = _standing_char().head_r
+        y0, y1 = int(hy - 0.55 * r), int(hy - 0.30 * r)
+        x0, x1 = int(hx - 0.6 * r), int(hx + 0.6 * r)
+        strip = arr[y0:y1, x0:x1, :3].astype(int)
+        ink_px = np.sum(np.all(np.abs(strip - np.array(INK)) < 12, axis=2))
+        self.assertGreater(int(ink_px), 20,
+                           "angry brows are invisible (buried under hair?)")
 
 
 if __name__ == "__main__":

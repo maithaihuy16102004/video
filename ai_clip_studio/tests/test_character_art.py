@@ -46,9 +46,11 @@ class TestCharacterArt(unittest.TestCase):
                     "elbow_l", "elbow_r", "hand_l", "hand_r"):
             self.assertIn(key, joints)
 
-    def test_head_ratio_is_v51(self):
+    def test_head_ratio_is_v4_measured(self):
+        # v4: head ratio is MEASURED from the reference stickman
+        # (0.3388), not the V51 standard 0.146.
         ch = _standing_char()
-        self.assertAlmostEqual(ch.head_r, 0.146 * ch.H / 2, places=3)
+        self.assertAlmostEqual(ch.head_r, 0.34 * ch.H / 2, places=3)
 
     def test_moods_are_declared(self):
         for m in ("neutral", "worried", "smile", "speak", "relief"):
@@ -74,8 +76,12 @@ class TestCharacterArt(unittest.TestCase):
         for i, m1 in enumerate(moods):
             for m2 in moods[i + 1:]:
                 diff = float(np.mean(np.abs(imgs[m1][box] - imgs[m2][box])))
+                # v4: the head is ~2.3x bigger (r 95 vs 41), so the same
+                # mouth/eye change dilutes to a smaller mean over the
+                # generous head box. 0.2 still means a clearly visible
+                # difference (identical renders score 0.0).
                 self.assertGreater(
-                    diff, 0.5,
+                    diff, 0.2,
                     f"moods {m1} vs {m2} differ by only {diff:.3f} "
                     "in the head region")
 

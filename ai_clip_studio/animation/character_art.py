@@ -1,4 +1,4 @@
-"""Character art v3 for AI Clip Studio -- PREMIUM_STICKMAN.
+"""Character art v4 for AI Clip Studio -- PREMIUM_STICKMAN.
 
 Style lock (Mai, 2026-11-11): make a BEAUTIFUL STICKMAN before making a
 beautiful film. The v2 art was rejected: a hybrid of stickman, geometric
@@ -6,6 +6,30 @@ doll and 2D character -- jacket with lapels/collar/buttons/shirt-V,
 blush, sweat-drop symbols, white-dot hands, glued-on costume blocks
 that broke the silhouette. Adding details does not make it prettier;
 silhouette, proportion, line quality and acting matter most.
+
+v3 (2026-11-11) fixed the language (one proportion system, one line
+language, 3-finger hands, flat feet, 8 interpolated expressions) but
+Mai judged the v3 sheet + motion test NOT good enough vs the
+RicksClips stickman: the head was far too small (headRatio 0.146 vs
+the reference's measured 0.339), the limbs too thin, the torso
+tapered the wrong way, the expressions too subtle at small size, and
+the 3/4 view barely differed from profile.
+
+v4 (2026-11-11) rebuilds the template from MEASUREMENTS of the
+reference image (``~/workspace/user/media_library/image/image.png``,
+measured by code in
+``~/workspace/acceptance_loop/stickman_v4/measure_reference.py`` --
+full table in ``reference_measurements.json``):
+  head diameter 0.339*H (circle fit residual 0.6px), torso 0.231*H
+  (narrow at the shoulders, WIDER at the hip), legs 0.429*H, arms
+  0.283*H, limb thickness 0.026*H, head outline 0.028*H, eyes tall
+  ovals 0.20r wide x 0.47r tall sitting ON the head centre line,
+  mouth 0.25r wide at 0.36r below the centre, 3 long fingers fanning
+  from the wrist, flat feet 0.12*H wide x 0.05*H tall pointing
+  outward, ground = thin sketch strokes + a grass tuft (no blob
+  shadow). The reference face has NO brows -- v4 draws brows only
+  when the expression actually moves them, so the neutral face
+  matches the reference exactly.
 
 Reference (NOT copied as an asset -- style standard only):
 ``~/workspace/user/media_library/image/image.png`` -- a round-headed
@@ -15,28 +39,38 @@ lines of uniform thickness with rounded joints, minimal hands with
 clear fingers (never a white dot), flat structured feet on a sketched
 ground line with a soft shadow.
 
-v3 rules (``STYLE_LOCK`` -- every character goes through it):
+v4 rules (``STYLE_LOCK`` -- every character goes through it):
 
-  * ONE proportion system for every template: headRatio 0.146 (V51
-    standard 0.142-0.155, enforced by the rig), torso 0.32*H, legs
-    0.23+0.23, arms 0.20+0.19 (fractions of total height H).
-  * ONE line language: ink ``#172033`` for outlines/limbs/hands/feet,
+  * ONE proportion system for every template: headRatio 0.34
+    (measured 0.339, locked 0.33-0.35), torso 0.231*H, legs
+    0.2145+0.2145, arms 0.13+0.153 (fractions of total height H,
+    which is now the DRAWN total height -- see rig.py).
+  * ONE line language: ink ``#172033`` for outlines/limbs/hands/feet
+    (measured reference ink ``#14222B`` -- the same dark navy),
     face fill cream ``#F7F3E8``. Limb thickness is UNIFORM along a limb
     and between limbs (``limb_width``); joints are rounded caps, never
-    broken angles. The torso is ONE slim tapered solid shape, not a
-    jacket assembly. Costume only when it preserves the silhouette
+    broken angles. The torso is ONE slim tapered solid shape, narrow
+    at the shoulders and WIDER at the hip (the reference taper, the
+    opposite of v3). Costume only when it preserves the silhouette
     (``costume="dress"`` extends the torso into an A-line, it is never
     a glued block). No blush, no sweat drops, no nose, no pasted
-    symbols -- the face is eyes + brows + mouth in the same line.
-  * Hands: 3 short finger strokes fanning from the wrist, in ink.
-    Feet: flat structured ellipses pointing toward ``facing``, sitting
-    exactly on the ground line with a soft shadow + sketch strokes.
+    symbols -- the face is eyes + brows + mouth in the same line, and
+    the neutral face has no brows at all.
+  * Hands: 3 LONG finger strokes fanning from the wrist, in ink.
+    Feet: flat structured ellipses pointing OUTWARD, sitting exactly
+    on the ground line with sketch strokes + a grass tuft.
   * Expressions: 8 states as numeric parameter vectors
-    (``EXPRESSIONS``); transitions interpolate every parameter with
+    (``EXPRESSIONS``) with LARGER deltas than v3 so they still read
+    at small size; transitions interpolate every parameter with
     smoothstep (``blend_expressions`` / ``expression_at``) -- the eyes
     and mouth morph, they never swap suddenly.
+  * Views: front / three_quarter / profile / back are REALLY
+    different -- the 3/4 view compresses the body sideways (x * 0.80
+    around the hip) and shifts the face features less far than
+    profile, so the two angles can no longer be mistaken for each
+    other.
 
-``draw_character_v3(draw, char, expression, view, palette)`` takes a
+``draw_character_v4(draw, char, expression, view, palette)`` takes a
 PIL ImageDraw, a rig ``Stickman`` (pose already set via ``set_pose()`` /
 IK targets) and returns the joint map, like the old renderer.
 ``make_character(template, ...)`` builds reusable templates (male /
@@ -44,9 +78,11 @@ female / child / elderly + slim / standard / sturdy body variants);
 Minh / Lan / Lustig are only instances (suit colour, hair, hat,
 moustache) on the same template system.
 
-Legacy: ``draw_character_v2`` below is FROZEN (v4 / Chiec Vi renderers
-in ~/workspace/acceptance_loop still import it for reproducibility).
-New work must use v3. The old ``MOODS`` names map to v3 expressions
+Legacy: ``draw_character_v3`` is an alias of v4 (same signature, the
+v4 style lock) so existing callers keep working; ``draw_character_v2``
+below is FROZEN (v4 / Chiec Vi renderers in ~/workspace/acceptance_loop
+still import it for reproducibility).
+New work must use v4. The old ``MOODS`` names map to v4 expressions
 via ``LEGACY_MOOD_TO_EXPRESSION``.
 """
 from __future__ import annotations
@@ -59,11 +95,11 @@ from .rig import (  # noqa: F401  (re-exported for callers)
 )
 
 # ---------------------------------------------------------------------------
-# Style lock -- PREMIUM_STICKMAN v3
+# Style lock -- PREMIUM_STICKMAN v4
 # ---------------------------------------------------------------------------
 
 CHARACTER_STYLE = "PREMIUM_STICKMAN"
-STYLE_VERSION = "v3"
+STYLE_VERSION = "v4"
 
 # V51 palette -- Premium Stickman Cinematic B.
 PALETTE_V51 = {
@@ -80,36 +116,40 @@ PALETTE_V51 = {
 
 # Every measurement is a fraction of total height H (or of head radius r
 # where noted), so the style scales from a 400 px child to a 560 px adult
-# without changing the look. Measured from the reference image:
-# head outline ~0.018*H, limbs ~0.015*H, eyes 0.17r wide / 0.33r tall,
-# fingers ~0.038*H, foot 0.085*H wide.
+# without changing the look. Measured from the reference image (code,
+# not eyeballed -- see reference_measurements.json):
+# head diameter 0.339*H, outline 0.028*H, limbs 0.026*H, eyes 0.20r
+# wide / 0.47r tall on the head centre line, mouth 0.25r at +0.36r,
+# fingers ~0.07*H, feet 0.12*H wide x 0.05*H tall.
 STYLE_LOCK = {
     "character_style": CHARACTER_STYLE,
     "style_version": STYLE_VERSION,
     # Proportion system (ONE system for all templates).
-    "head_ratio": HEAD_RATIO,            # 0.146; allowed 0.142-0.155
+    "head_ratio": HEAD_RATIO,            # 0.34; measured 0.339, locked 0.33-0.35
     "head_ratio_min": HEAD_RATIO_MIN,
     "head_ratio_max": HEAD_RATIO_MAX,
-    "torso_frac": 0.32,
-    "upper_leg_frac": 0.23,
-    "lower_leg_frac": 0.23,
-    "upper_arm_frac": 0.20,
-    "lower_arm_frac": 0.19,
+    "torso_frac": 0.231,
+    "upper_leg_frac": 0.2145,
+    "lower_leg_frac": 0.2145,
+    "upper_arm_frac": 0.13,
+    "lower_arm_frac": 0.153,
     # Line system (ONE thickness per element class, uniform along a limb).
-    "outline_w_frac": 0.018,            # head outline
-    "limb_w_frac": 0.015,               # arms AND legs, same value
-    "torso_top_half_frac": 0.036,       # slim tapered torso, top
-    "torso_bottom_half_frac": 0.026,    # ... and bottom (half-widths)
+    "outline_w_frac": 0.028,            # head outline (measured 0.0284)
+    "limb_w_frac": 0.026,               # arms AND legs, same value (measured 0.0258)
+    "torso_top_half_frac": 0.034,       # slim tapered torso, top (measured 0.034)
+    "torso_bottom_half_frac": 0.043,    # ... WIDER at the hip (measured 0.043)
     # Face (fractions of head radius r).
-    "eye_half_w_frac_of_r": 0.085,      # eye 0.17r wide
-    "eye_half_h_frac_of_r": 0.165,      # eye 0.33r tall
-    "eye_dx_frac_of_r": 0.33,           # eye centre offset from head centre
-    "mouth_len_frac_of_r": 0.30,        # mouth line length
+    "eye_half_w_frac_of_r": 0.10,       # eye 0.20r wide (measured 0.20)
+    "eye_half_h_frac_of_r": 0.235,      # eye 0.47r tall (measured 0.47)
+    "eye_dx_frac_of_r": 0.315,          # eye centre offset from head centre (measured 0.315)
+    "eye_dy_frac_of_r": 0.0,            # eyes sit ON the head centre line (measured 0.014)
+    "mouth_len_frac_of_r": 0.25,        # mouth line length (measured 0.25)
+    "mouth_dy_frac_of_r": 0.36,         # mouth below head centre (measured 0.36)
     # Hands / feet (fractions of H).
-    "finger_len_frac": 0.038,
+    "finger_len_frac": 0.07,
     "finger_count": 3,
-    "foot_w_frac": 0.085,
-    "foot_h_frac": 0.024,
+    "foot_w_frac": 0.12,
+    "foot_h_frac": 0.05,
     # Colours.
     "ink": "#172033",
     "face_fill": "#F7F3E8",
@@ -135,37 +175,42 @@ EXPRESSION_PARAMS = (
 )
 
 EXPRESSIONS = {
+    # v4: deltas are LARGER than v3 on purpose -- v3's expressions
+    # were too subtle to tell apart at small size (Mai's verdict).
+    # Neutral stays exactly the reference face: two eyes + a line
+    # mouth, no brows (brows are only drawn when an expression moves
+    # them, see _draw_face).
     "neutral":   dict(eye_h=1.00, eye_w=1.00, eye_dx=0.00,
                       brow_in=0.00, brow_out=0.00, brow_asym=0.00,
                       mouth_curve=0.00, mouth_open=0.00,
                       mouth_w=1.00, mouth_dx=0.00),
-    "happy":     dict(eye_h=0.50, eye_w=1.00, eye_dx=0.00,
-                      brow_in=-0.10, brow_out=-0.08, brow_asym=0.00,
-                      mouth_curve=1.00, mouth_open=0.12,
-                      mouth_w=1.25, mouth_dx=0.00),
+    "happy":     dict(eye_h=0.45, eye_w=1.00, eye_dx=0.00,
+                      brow_in=-0.12, brow_out=-0.10, brow_asym=0.00,
+                      mouth_curve=1.00, mouth_open=0.15,
+                      mouth_w=1.40, mouth_dx=0.00),
     "sad":       dict(eye_h=1.05, eye_w=0.95, eye_dx=0.00,
-                      brow_in=-0.16, brow_out=0.06, brow_asym=0.00,
-                      mouth_curve=-0.85, mouth_open=0.00,
+                      brow_in=-0.20, brow_out=0.08, brow_asym=0.00,
+                      mouth_curve=-1.00, mouth_open=0.00,
                       mouth_w=0.90, mouth_dx=0.00),
-    "surprised": dict(eye_h=1.50, eye_w=1.25, eye_dx=0.00,
-                      brow_in=-0.22, brow_out=-0.18, brow_asym=0.00,
+    "surprised": dict(eye_h=1.60, eye_w=1.30, eye_dx=0.00,
+                      brow_in=-0.26, brow_out=-0.22, brow_asym=0.00,
                       mouth_curve=0.00, mouth_open=1.00,
+                      mouth_w=0.85, mouth_dx=0.00),
+    "worried":   dict(eye_h=1.15, eye_w=1.00, eye_dx=0.00,
+                      brow_in=-0.18, brow_out=0.06, brow_asym=0.00,
+                      mouth_curve=-0.55, mouth_open=0.15,
                       mouth_w=0.80, mouth_dx=0.00),
-    "worried":   dict(eye_h=1.10, eye_w=1.00, eye_dx=0.00,
-                      brow_in=-0.14, brow_out=0.05, brow_asym=0.00,
-                      mouth_curve=-0.45, mouth_open=0.10,
-                      mouth_w=0.80, mouth_dx=0.00),
-    "angry":     dict(eye_h=0.80, eye_w=1.00, eye_dx=0.00,
-                      brow_in=0.20, brow_out=-0.10, brow_asym=0.00,
-                      mouth_curve=-0.55, mouth_open=0.00,
+    "angry":     dict(eye_h=0.75, eye_w=1.00, eye_dx=0.00,
+                      brow_in=0.28, brow_out=-0.14, brow_asym=0.00,
+                      mouth_curve=-0.65, mouth_open=0.00,
                       mouth_w=1.00, mouth_dx=0.00),
-    "thinking":  dict(eye_h=0.95, eye_w=1.00, eye_dx=0.10,
-                      brow_in=-0.05, brow_out=0.00, brow_asym=-0.16,
+    "thinking":  dict(eye_h=0.95, eye_w=1.00, eye_dx=0.12,
+                      brow_in=-0.05, brow_out=0.00, brow_asym=-0.20,
                       mouth_curve=0.00, mouth_open=0.00,
-                      mouth_w=0.70, mouth_dx=0.08),
+                      mouth_w=0.70, mouth_dx=0.10),
     "doubtful":  dict(eye_h=0.85, eye_w=1.00, eye_dx=0.06,
-                      brow_in=0.06, brow_out=0.00, brow_asym=-0.14,
-                      mouth_curve=-0.25, mouth_open=0.00,
+                      brow_in=0.06, brow_out=0.00, brow_asym=-0.18,
+                      mouth_curve=-0.30, mouth_open=0.00,
                       mouth_w=0.85, mouth_dx=-0.05),
 }
 
@@ -338,7 +383,7 @@ def expression_at(keyframes, t):
 
 
 # ---------------------------------------------------------------------------
-# v3 renderer
+# v4 renderer
 # ---------------------------------------------------------------------------
 
 
@@ -352,7 +397,7 @@ def _draw_hand(draw, elbow, hand, char, ink):
         dx, dy = 0.0, 1.0
     base = math.atan2(dy, dx)
     flen = STYLE_LOCK["finger_len_frac"] * H
-    fw = max(3.0, limb_width(char) * 0.62)
+    fw = max(3.0, limb_width(char) * 0.75)
     for off in (-0.61, 0.0, 0.61):  # ~ -35deg, 0, +35deg
         a = base + off
         tip = (hand[0] + math.cos(a) * flen, hand[1] + math.sin(a) * flen)
@@ -362,19 +407,45 @@ def _draw_hand(draw, elbow, hand, char, ink):
                       tip[0] + r, tip[1] + r], fill=ink)
 
 
+def _face_eye_xs(hx, r, f, face_dx):
+    """Eye centre x positions for a face turned by ``face_dx``
+    (0 = front, 0.5 = 3/4, 1 = profile) toward ``facing`` f.
+
+    v4: the whole face TURNS -- the face centre shifts toward facing
+    and the far eye foreshortens toward the centre. v3 kept the eyes
+    symmetric in every view (near +0.33r, far -0.28r), so the 3/4 and
+    profile faces were identical and the two angles differed only in
+    the body. Reference (a 3/4-ish face): eyes symmetric around a face
+    centre +0.06r from the head centre -- the 3/4 values below land
+    close to that, profile turns further.
+    """
+    eye_dx = STYLE_LOCK["eye_dx_frac_of_r"]
+    fc = f * face_dx * 0.18 * r  # face centre shift toward facing
+    ex_near = hx + fc + eye_dx * r
+    ex_far = hx + fc - eye_dx * (1 - 0.35 * face_dx) * r
+    return ex_near, ex_far, fc
+
+
 def _draw_face(draw, char, hx, hy, view, face_dx, params, ink, pal):
     """Eyes + brows + mouth in the same line language. No nose, no
-    blush, no sweat drop. ``face_dx``: 1.0 = profile, 0.55 = 3/4,
+    blush, no sweat drop. ``face_dx``: 1.0 = profile, 0.5 = 3/4,
     0.0 = front. Back view has no face at all."""
     H = float(char.H)
     r = char.head_r
     f = char.joints()["facing"]
-    eye_y = hy - 0.05 * r
+    # v4: eyes sit ON the head centre line (measured 0.014r), not above it.
+    eye_y = hy + STYLE_LOCK["eye_dy_frac_of_r"] * r
+    eye_dx = STYLE_LOCK["eye_dx_frac_of_r"]
     # Near eye (facing side) and far eye; front view is symmetric.
-    ex_near = hx + (f * face_dx * 0.33 + (1 - face_dx) * 0.33) * r
-    ex_far = hx + (f * face_dx * -0.28 + (1 - face_dx) * -0.33) * r
+    # The face turns with face_dx (see _face_eye_xs).
+    ex_near, ex_far, _fc = _face_eye_xs(hx, r, f, face_dx)
     far_scale = 0.88 if face_dx > 0 else 1.0
     brow_w = max(3.0, 0.007 * H)
+    # v4: the reference face has NO brows. Brows are only drawn when the
+    # expression actually moves them, so the neutral face matches the
+    # reference exactly (two eyes + a small mouth, nothing else).
+    show_brows = (abs(params["brow_in"]) + abs(params["brow_out"])
+                  + abs(params["brow_asym"])) > 0.05
     for ex, scale, is_left in ((ex_near, 1.0, ex_near < hx),
                                (ex_far, far_scale, ex_far < hx)):
         ew = STYLE_LOCK["eye_half_w_frac_of_r"] * r * params["eye_w"] * scale
@@ -389,17 +460,21 @@ def _draw_face(draw, char, hx, hy, view, face_dx, params, ink, pal):
                          fill=ink)
         # Brow: short line above the eye; inner end carries the mood,
         # brow_asym raises exactly one brow (thinking / doubtful).
+        # Skipped entirely when the expression leaves the brows flat
+        # (neutral) -- the reference face has no brows.
         brow_y = eye_y - 0.52 * r
         sgn = 1.0 if ex >= hx else -1.0
         inner_dy = params["brow_in"] + (params["brow_asym"] if is_left else 0.0)
         inner = (ex - sgn * 0.11 * r, brow_y + inner_dy * r)
         outer = (ex + sgn * 0.11 * r, brow_y + params["brow_out"] * r)
-        draw.line([inner, outer], fill=ink, width=int(brow_w))
+        if show_brows:
+            draw.line([inner, outer], fill=ink, width=int(brow_w))
     # Mouth: line <-> arc <-> open "O" morphs continuously with the
     # expression parameters (open height lerps from a line to an oval).
     mw = STYLE_LOCK["mouth_len_frac_of_r"] * r * params["mouth_w"]
-    mx = hx + f * face_dx * 0.18 * r + params["mouth_dx"] * r
-    my = hy + 0.42 * r
+    # Mouth follows the face centre (turns with the face).
+    mx = hx + _fc + f * face_dx * 0.10 * r + params["mouth_dx"] * r
+    my = hy + STYLE_LOCK["mouth_dy_frac_of_r"] * r
     mouth_w = max(3.0, 0.009 * H)
     curve = params["mouth_curve"]
     if params["mouth_open"] > 0.05:
@@ -425,6 +500,26 @@ def _draw_face(draw, char, hx, hy, view, face_dx, params, ink, pal):
     return mx, my
 
 
+def _hair_cap(draw, hx, hy, r, ink, chord=0.55):
+    """Hair cap as a polygon that follows the head circle EXACTLY: the
+    top arc of the head circle down to a horizontal chord at
+    ``hy - chord*r``. The old pieslice of a flatter ellipse poked
+    ~0.2r outside the head outline at the sides and read as a beret.
+    The chord sits just above the brow line (hy-0.52r) so brows stay
+    visible on the face fill."""
+    a_lo = 180 + math.degrees(math.asin(chord))
+    a_hi = 360 - math.degrees(math.asin(chord))
+    pts = []
+    a = a_lo
+    while a <= a_hi:
+        rad = math.radians(a)
+        pts.append((hx + r * math.cos(rad), hy + r * math.sin(rad)))
+        a += 3.0
+    rad = math.radians(a_hi)
+    pts.append((hx + r * math.cos(rad), hy + r * math.sin(rad)))
+    draw.polygon(pts, fill=ink)
+
+
 def _draw_hair(draw, char, hx, hy, view, ink, part="cap"):
     """Hair in the same line language: a cap following the head circle
     (short), a shape behind the head (long), a tuft (child). Back view
@@ -442,11 +537,13 @@ def _draw_hair(draw, char, hx, hy, view, ink, part="cap"):
             # Long hair: two locks falling from the sides of the head to
             # just below the shoulders, drawn BEFORE the head circle so
             # the face stays clean (a full ellipse behind the head read
-            # as a black balloon, not hair).
-            lw = 0.30 * r
+            # as a black balloon, not hair). v4: locks end at hy+1.6r
+            # (shoulder level) -- the old hy+2.35r reached the knees
+            # and read as two black ropes, not hair.
+            lw = 0.26 * r
             for sgn in (+1, -1):
                 _thick(draw, (hx + sgn * 0.80 * r, hy - 0.55 * r),
-                       (hx + sgn * 0.95 * r, hy + 2.35 * r), lw, ink)
+                       (hx + sgn * 0.95 * r, hy + 1.6 * r), lw, ink)
         return
     if view == "back":
         if style == "long":
@@ -457,23 +554,24 @@ def _draw_hair(draw, char, hx, hy, view, ink, part="cap"):
                           180, 360, fill=ink)
         return
     if style == "short":
-        draw.pieslice([hx - r, hy - r, hx + r, hy + r * 0.25],
-                      180, 360, fill=ink)
+        # v4: the cap follows the head circle exactly (see _hair_cap)
+        # with its chord at hy-0.55r, just above the brow line -- the
+        # old deep pieslice buried the brows and bulged outside the
+        # head outline like a beret.
+        _hair_cap(draw, hx, hy, r, ink)
     elif style == "long":
-        draw.pieslice([hx - r, hy - r, hx + r, hy + r * 0.25],
-                      180, 360, fill=ink)
+        _hair_cap(draw, hx, hy, r, ink)
     elif style == "tuft":
-        draw.pieslice([hx - r, hy - r, hx + r, hy + r * 0.10],
-                      180, 360, fill=ink)
+        _hair_cap(draw, hx, hy, r, ink)
         for dx0, dx1 in ((-0.10, -0.22), (0.0, 0.0), (0.10, 0.22)):
             draw.line([(hx + dx0 * r, hy - r * 0.92),
                        (hx + dx1 * r, hy - r * 1.22)],
                       fill=ink, width=max(3, int(0.006 * float(char.H))))
 
 
-def draw_character_v3(draw, char, expression="neutral", view="profile",
+def draw_character_v4(draw, char, expression="neutral", view="profile",
                       palette=None, expression_blend=None):
-    """Draw a PREMIUM_STICKMAN v3 character from ``char.joints()``.
+    """Draw a PREMIUM_STICKMAN v4 character from ``char.joints()``.
 
     draw: PIL ImageDraw (ideally ``ImageDraw.Draw(img, "RGBA")``).
     char: ``Stickman`` with its pose already set.
@@ -481,7 +579,9 @@ def draw_character_v3(draw, char, expression="neutral", view="profile",
     view: 'front' | 'three_quarter' | 'profile' | 'back'.
     expression_blend: optional ``(other_expression, u)`` -- morphs from
       ``expression`` toward the other one by ``u`` (0..1).
-    Returns the joint map from ``char.joints()``.
+    Returns the joint map from ``char.joints()`` (the rig's own map --
+    the 3/4 view compresses the DRAWN x positions but does not rewrite
+    the joint map, so bone-length checks still pass on it).
     """
     if view not in VIEWS:
         view = "profile"
@@ -512,6 +612,19 @@ def draw_character_v3(draw, char, expression="neutral", view="profile",
     out_w = outline_width(char)
     ws = float(getattr(char, "width_scale", 1.0))
 
+    # --- 3/4 view: the body turns toward the viewer. Compress every
+    # drawn x position toward the hip by 0.80 (the head stays a circle
+    # -- it is a sphere -- only the face features shift, face_dx 0.5,
+    # and the face itself turns: see _face_eye_xs). Profile keeps 1.0,
+    # so the two angles can no longer be mistaken for each other
+    # (v3 drew the identical body for both).
+    def _squash(pt):
+        if view != "three_quarter":
+            return pt
+        return (hip[0] + (pt[0] - hip[0]) * 0.80, pt[1])
+
+    hip_d, shoulder_d, head_d = _squash(hip), _squash(shoulder), _squash(head)
+
     # --- limbs: front view is symmetric, other views use the rig -------
     if view == "front":
         ground_y = hip[1] + char.u_leg + char.l_leg
@@ -520,69 +633,87 @@ def draw_character_v3(draw, char, expression="neutral", view="profile",
             "foot_l": (hip[0] - 0.060 * H, ground_y),
             "knee_r": (hip[0] + 0.045 * H, hip[1] + char.u_leg),
             "foot_r": (hip[0] + 0.060 * H, ground_y),
-            "elbow_l": (shoulder[0] - 0.10 * H, shoulder[1] + char.u_arm),
-            "hand_l": (shoulder[0] - 0.13 * H, shoulder[1] + char.u_arm + char.l_arm),
-            "elbow_r": (shoulder[0] + 0.10 * H, shoulder[1] + char.u_arm),
-            "hand_r": (shoulder[0] + 0.13 * H, shoulder[1] + char.u_arm + char.l_arm),
+            "elbow_l": (shoulder[0] - 0.09 * H, shoulder[1] + char.u_arm),
+            "hand_l": (shoulder[0] - 0.11 * H, shoulder[1] + char.u_arm + char.l_arm),
+            "elbow_r": (shoulder[0] + 0.09 * H, shoulder[1] + char.u_arm),
+            "hand_r": (shoulder[0] + 0.11 * H, shoulder[1] + char.u_arm + char.l_arm),
         }
     else:
         ground_y = max(J["foot_l"][1], J["foot_r"][1])
-        limbs = {k: J[k] for k in ("knee_l", "foot_l", "knee_r", "foot_r",
-                                  "elbow_l", "hand_l", "elbow_r", "hand_r")}
+        limbs = {k: _squash(J[k]) for k in ("knee_l", "foot_l", "knee_r", "foot_r",
+                                           "elbow_l", "hand_l", "elbow_r", "hand_r")}
 
-    # --- ground shadow + sketch ground strokes (reference style) -------
+    # --- ground: sketch strokes + grass tuft ONLY (reference style).
+    # The reference has no blob shadow -- just thin horizontal strokes
+    # under the feet and a small tuft of grass at the left foot.
     feet_x = (limbs["foot_l"][0] + limbs["foot_r"][0]) / 2.0
-    shadow_w = H * 0.16
-    draw.ellipse([feet_x - shadow_w, ground_y - 4,
-                  feet_x + shadow_w, ground_y + 12],
-                 fill=pal["shadow"])
-    for k, (dx0, dx1, dy) in enumerate(((0.16, 0.14, 8), (0.11, 0.13, 12),
-                                        (0.07, 0.05, 16))):
+    for dx0, dx1, dy in ((0.30, 0.28, 8), (0.22, 0.24, 13),
+                         (0.15, 0.12, 18)):
         draw.line([(feet_x - dx0 * H, ground_y + dy),
                    (feet_x + dx1 * H, ground_y + dy)],
+                  fill=ink, width=2)
+    # Grass tuft at the left foot: 3 short strokes fanning up-left.
+    tuft_x = feet_x - 0.16 * H
+    tuft_y = ground_y + 2
+    for dx, dy in ((-0.012, -0.030), (-0.002, -0.036), (0.008, -0.028)):
+        draw.line([(tuft_x, tuft_y),
+                   (tuft_x + dx * H, tuft_y + dy * H)],
                   fill=ink, width=2)
 
     # --- legs: clean uniform lines + flat structured feet --------------
     ink_far = _shade(ink, 0.72)
     for side, col in (("l", ink_far), ("r", ink)):
-        _thick(draw, hip, limbs[f"knee_{side}"], limb_w, col)
+        _thick(draw, hip_d, limbs[f"knee_{side}"], limb_w, col)
         _thick(draw, limbs[f"knee_{side}"], limbs[f"foot_{side}"],
                limb_w * 0.96, col)
         fx, fy = limbs[f"foot_{side}"]
         fw = STYLE_LOCK["foot_w_frac"] * H * ws
         fh = STYLE_LOCK["foot_h_frac"] * H
-        cx, cy = fx + f * fw * 0.18, fy - fh * 0.45
+        # v4: feet point OUTWARD in front view (left foot left, right
+        # foot right -- the reference), toward facing in side views.
+        if view == "front":
+            foot_dir = -1.0 if side == "l" else 1.0
+        else:
+            foot_dir = float(f)
+        cx, cy = fx + foot_dir * fw * 0.18, fy - fh * 0.45
         draw.ellipse([cx - fw / 2, cy - fh / 2, cx + fw / 2, cy + fh / 2],
                      fill=ink)
 
     # --- torso: ONE slim tapered solid shape (no jacket assembly) ------
-    sx, sy = shoulder[0] - hip[0], shoulder[1] - hip[1]
+    # v4 taper follows the reference: NARROW at the shoulders, WIDER at
+    # the hip (v3 had it backwards).
+    sx, sy = shoulder_d[0] - hip_d[0], shoulder_d[1] - hip_d[1]
     slen = math.hypot(sx, sy) or 1.0
     ux, uy = sx / slen, sy / slen
     px, py = -uy, ux
     w_top = STYLE_LOCK["torso_top_half_frac"] * H * ws
     w_bot = STYLE_LOCK["torso_bottom_half_frac"] * H * ws
+    if view == "three_quarter":
+        # The 3/4 body turns toward the viewer: the torso reads
+        # narrower as well as the limbs sitting closer in.
+        w_top *= 0.80
+        w_bot *= 0.80
     draw.polygon([
-        (shoulder[0] + px * w_top, shoulder[1] + py * w_top),
-        (shoulder[0] - px * w_top, shoulder[1] - py * w_top),
-        (hip[0] - px * w_bot, hip[1] - py * w_bot),
-        (hip[0] + px * w_bot, hip[1] + py * w_bot),
+        (shoulder_d[0] + px * w_top, shoulder_d[1] + py * w_top),
+        (shoulder_d[0] - px * w_top, shoulder_d[1] - py * w_top),
+        (hip_d[0] - px * w_bot, hip_d[1] - py * w_bot),
+        (hip_d[0] + px * w_bot, hip_d[1] + py * w_bot),
     ], fill=suit)
     # Costume "dress": the torso EXTENDS into an A-line to mid-shin --
     # same colour, continuous with the torso, never a glued block.
     if getattr(char, "costume", "none") == "dress":
-        hem_y = hip[1] + 0.20 * H
+        hem_y = hip_d[1] + 0.20 * H
         hem_half = 0.085 * H * ws
         draw.polygon([
-            (hip[0] - px * w_bot, hip[1] - py * w_bot),
-            (hip[0] + px * w_bot, hip[1] + py * w_bot),
-            (hip[0] + hem_half, hem_y),
-            (hip[0] - hem_half, hem_y),
+            (hip_d[0] - px * w_bot, hip_d[1] - py * w_bot),
+            (hip_d[0] + px * w_bot, hip_d[1] + py * w_bot),
+            (hip_d[0] + hem_half, hem_y),
+            (hip_d[0] - hem_half, hem_y),
         ], fill=suit)
 
     # --- arms: same uniform line as the legs, minimal 3-finger hands ---
     for side, col in (("l", ink_far), ("r", ink)):
-        _thick(draw, shoulder, limbs[f"elbow_{side}"], limb_w, col)
+        _thick(draw, shoulder_d, limbs[f"elbow_{side}"], limb_w, col)
         _thick(draw, limbs[f"elbow_{side}"], limbs[f"hand_{side}"],
                limb_w * 0.96, col)
     # Cane (elderly): thin line from the right hand to the ground, hook
@@ -599,7 +730,7 @@ def draw_character_v3(draw, char, expression="neutral", view="profile",
                    char, ink)
 
     # --- head ------------------------------------------------------------
-    hx, hy = head
+    hx, hy = head_d
     if getattr(char, "hair_style", None) == "long" and view != "back":
         _draw_hair(draw, char, hx, hy, view, ink, part="back")
     draw.ellipse([hx - r, hy - r, hx + r, hy + r], fill=face_fill,
@@ -616,29 +747,31 @@ def draw_character_v3(draw, char, expression="neutral", view="profile",
                       180, 360, fill=ink)
     # Glasses (elderly): two thin circles + bridge, same ink.
     if getattr(char, "glasses", False) and view != "back":
-        face_dx = {"front": 0.0, "three_quarter": 0.55,
+        face_dx = {"front": 0.0, "three_quarter": 0.5,
                    "profile": 1.0}[view]
-        for ex in (hx + (f * face_dx * 0.33 + (1 - face_dx) * 0.33) * r,
-                   hx + (f * face_dx * -0.28 + (1 - face_dx) * -0.33) * r):
+        eye_dx = STYLE_LOCK["eye_dx_frac_of_r"]
+        _ex_n, _ex_f, _fc = _face_eye_xs(hx, r, f, face_dx)
+        for ex in (_ex_n, _ex_f):
             gr = 0.14 * r
             draw.ellipse([ex - gr, hy - 0.05 * r - gr,
                           ex + gr, hy - 0.05 * r + gr],
                          outline=ink, width=2)
     if view != "back":
-        face_dx = {"front": 0.0, "three_quarter": 0.55,
+        face_dx = {"front": 0.0, "three_quarter": 0.5,
                    "profile": 1.0}[view]
         _draw_face(draw, char, hx, hy, view, face_dx, params, ink, pal)
     return J
 
 
-# Backwards-compatible alias: the canonical renderer is v3.
-draw_character = draw_character_v3
+# Backwards-compatible alias: the canonical renderer is v4.
+draw_character_v3 = draw_character_v4
+draw_character = draw_character_v4
 
 
 # ---------------------------------------------------------------------------
 # LEGACY v2 -- FROZEN. Do not edit: the v4 / Chiec Vi renderers in
 # ~/workspace/acceptance_loop still import draw_character_v2 for
-# reproducibility of already-rendered evidence. New work uses v3 above.
+# reproducibility of already-rendered evidence. New work uses v4 above.
 # (Blush, sweat drop, jacket assembly and white-dot hands live ONLY
 # here, in the frozen function -- v3 removed them.)
 # ---------------------------------------------------------------------------
