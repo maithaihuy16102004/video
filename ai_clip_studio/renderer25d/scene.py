@@ -28,11 +28,19 @@ LAYERS = ("background", "midground", "foreground")
 
 @dataclass
 class Box3D:
-    """A solid axis-aligned box in the world (building, table, prop)."""
+    """A solid axis-aligned box in the world (building, table, prop).
+
+    ``label`` (v7): optional text drawn on the box's front face
+    (+z, facing the camera) -- e.g. a bus-stop sign reading
+    "TRẠM XE BUÝT". A sign with no text is a blank dark rectangle;
+    the v6 motion test's sign was exactly that, which is why the
+    location read as generic boxes. Empty label = no text.
+    """
     center: Vec3
     size: Vec3  # (width x, height y, depth z) in world units
     color: tuple[int, int, int] = (120, 110, 100)
     name: str = "box"
+    label: str = ""
 
     def corners(self) -> list[Vec3]:
         cx, cy, cz = self.center

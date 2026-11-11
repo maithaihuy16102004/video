@@ -27,7 +27,7 @@ so segment boundaries no longer teleport hands 100-240 px.
 import math
 
 from .rig import (Stickman, walk_pose, interp_keys, smoothstep, lerp,
-                  head_track, GAIT_DEFAULT, GAIT_RUN)
+                  head_track, GAIT_DEFAULT, GAIT_RUN, STAND_SPLIT_FRAC)
 
 
 def _pose(char, **kw):
@@ -82,9 +82,21 @@ def _foot_state(s, step, overlap, lift, ground_y, from_x, direction,
     s_next = s_strike + 2.0 * step
     x_plant = from_x + direction * (s_strike + step / 2.0)
     x_next = from_x + direction * (s_next + step / 2.0)
-    if s <= s_lift:
+    # The first swing must start at s = 0 (the travel start), not
+    # before it. For a run (negative overlap) the steady-state lift
+    # point s_lift is < 0 for the first cycle, so at s = 0 the foot
+    # was already 23% through its swing -- a 62 px jump from the
+    # anticipation's stand split and a 77 px knee pop in one frame
+    # (rubric C12, present in v6 too at 84.5 px). The foot was
+    # planted during the anticipation, so its first swing starts at
+    # s = 0; lift0 clamps the lift point for the POSITION only (the
+    # returned s_lift stays the steady-state value, so the flight
+    # detection in _locomote is unchanged). For a walk (positive
+    # overlap) s_lift is already > 0 and nothing changes.
+    lift0 = max(s_lift, 0.0)
+    if s <= lift0:
         return x_plant, ground_y, True, s_lift, s_next
-    q = (s - s_lift) / max(1e-9, s_next - s_lift)
+    q = (s - lift0) / max(1e-9, s_next - lift0)
     q = min(1.0, max(0.0, q))
     x = lerp(x_plant, x_next, smoothstep(q))
     y = ground_y - lift * math.sin(math.pi * q)
@@ -145,6 +157,15 @@ def _locomote(char, from_x, to_x, duration, ground_y, gait, *,
     # because the pose at closure-creation time is the pre-warm pose,
     # not the pose the walk actually starts from.
     _turn = {"start_facing": None, "needed": False}
+    # Anticipation foot start (v7): the feet the walk starts from,
+    # captured lazily like the turn (the pre-warm pose is not the real
+    # start pose). After a CUT the incoming feet may sit at a
+    # different split than this gait's stand split (walk +/-0.125H vs
+    # run +/-0.14H = 12 px); the anticipation STEPS them there on a
+    # lift arc instead of sliding them along the ground (the v6
+    # anticipation assumed they already matched and set the targets
+    # directly -- after the v7 walk->run cut that slid 12 px and
+    # failed the run-slip check).
     # anticipation + settle: the walk starts from a stand (feet
     # together, body at rest) and ends in a stand. Both are short
     # (0.2 s) so the middle of the walk runs at constant speed.
@@ -192,10 +213,57 @@ def _locomote(char, from_x, to_x, duration, ground_y, gait, *,
         if t < t_ant:
             # anticipation: crouch slightly, lean in, arms swing up
             # from their standing hang to the travel-start swing.
-            # The feet STAY where they stand (they already match the
-            # cycle's starting split within half a pixel) -- moving
-            # them here only made them slide along the ground.
+            # The feet STEP (lifted) from where they stand to the
+            # cycle's starting split (v7 -- see the _turn comment):
+            # they usually already match it within half a pixel and
+            # do not move at all; after a cut they step up to 12 px
+            # on a lift arc instead of sliding along the ground.
             a = smoothstep(t / max(t_ant, 0.01))
+            # Feet start: captured lazily, and RE-captured on the first
+            # real frame(s) (t < 0.05, LOCAL time -- not a < 0.05).
+            # Two bugs the v7 rubric caught (C12 234 px, cut jump
+            # 327 px):
+            #  (1) `a < 0.05` misses the first real frame when t_ant
+            #      is short: for the 1.1 s run t_ant = 0.165 s, so at
+            #      the first run frame (lt = 0.025) a = 0.062 and no
+            #      re-capture happened -- the run stepped from the
+            #      STALE pre-warm capture (feet at the walk's start x,
+            #      445 px away), the IK clamp dragged a foot to
+            #      (285, 747), a 327 px teleport across the cut.
+            #  (2) a re-capture can also capture the WRONG pose: the
+            #      render pre-warms every segment, so at the walk's
+            #      first real frame the rig still sits in the LAST
+            #      pre-warm pose (standing at the handover x) -- the
+            #      feet were ~1000 px from the walk's stand split and
+            #      the anticipation swung one 234 px in a frame.
+            # The guard below fixes (2): a captured foot is only a
+            # real start if it is ON the ground and within one step
+            # of this segment's stand split. A stale/unplaced foot
+            # (default pose, another segment's pose) is replaced by
+            # the stand split (no step); a real previous-segment foot
+            # -- e.g. the 12 px walk->run cut difference -- is
+            # stepped on the lift arc as intended.
+            if not _turn.get("feet_captured") or t < 0.05:
+                _ant = char.joints()
+                # A real start has the feet SPLIT (one ahead, one
+                # behind). An unposed character (fresh rig, or
+                # set_pose with no foot targets) has both feet
+                # together under the hip -- that is the FK default,
+                # not a stance: stepping from it would leave the feet
+                # together at t=0 instead of in the stand split (the
+                # v3 walk test: both feet at x=500, y=919.24, 0.76 px
+                # off the ground). Real segment-end spreads are
+                # 154-208 px; the unposed default is 0 px.
+                _spread = abs(_ant["foot_l"][0] - _ant["foot_r"][0])
+                _split_ok = _spread > 0.15 * step
+                for _side, _stand in (("l", stand_fl), ("r", stand_fr)):
+                    _cap = _ant["foot_" + _side]
+                    if (_split_ok and abs(_cap[1] - ground_y) <= 4.0 and
+                            abs(_cap[0] - _stand[0]) <= step):
+                        _turn["foot_" + _side] = _cap
+                    else:
+                        _turn["foot_" + _side] = _stand
+                _turn["feet_captured"] = True
             # Arms: CONTRALATERAL with the legs (v6 fix -- the v5
             # walk swung each arm with the SAME-side leg, 37/51 frames
             # ipsilateral, which reads as walking backwards). At the
@@ -218,19 +286,31 @@ def _locomote(char, from_x, to_x, duration, ground_y, gait, *,
                   elbow_l=lerp(0.15, 0.50, a),
                   elbow_r=lerp(0.15, 0.25, a),
                   head_look=0.0)
-            char.foot_target_l = stand_fl
-            char.foot_target_r = stand_fr
+            for side, stand_xy in (("l", stand_fl), ("r", stand_fr)):
+                sx, sy = _turn["foot_" + side]
+                gx = lerp(sx, stand_xy[0], a)
+                gy = lerp(sy, ground_y, a)
+                if abs(stand_xy[0] - sx) > 1.0:
+                    gy -= lift * math.sin(math.pi * a)
+                if side == "l":
+                    char.foot_target_l = (gx, gy)
+                else:
+                    char.foot_target_r = (gx, gy)
             char.hand_target_l = None
             char.hand_target_r = None
             return char
         if t > duration - t_set:
             # settle: the root decelerates, the body rises back to
             # standing, lean / bob / arms fade out FROM their travel
-            # values (no snap). The feet FREEZE in the split stance
-            # the cycle left them in -- a natural stopped mid-stride
-            # pose. Dragging them together along the ground was the
-            # second slide in the v5 first draft; the next segment
-            # blends from here (see apply_snapshot).
+            # values (no snap). v7 gather: the feet STEP (lifted, not
+            # slid) from wherever the cycle left them into the
+            # canonical standing split (+/-step/2 around to_x) during
+            # the settle, so the next segment starts from the same
+            # split the walk ends in. The v6 settle FROZE the feet
+            # mid-stride; the next segment's blend then dragged them
+            # along the ground (walk_hold -> handover slid ~50 px per
+            # foot). A foot already on its stand mark stays planted
+            # (no pointless lift arc).
             b = smoothstep((t - (duration - t_set)) / max(t_set, 0.01))
             _pose(char, root_x=to_x, root_y=lerp(walk_root_y, stand_root_y, b),
                   facing=direction, turn_u=0.0,
@@ -241,6 +321,38 @@ def _locomote(char, from_x, to_x, duration, ground_y, gait, *,
                   elbow_l=lerp(0.25 + 0.25 * max(0.0, cyc_end), 0.15, b),
                   elbow_r=lerp(0.25 + 0.25 * max(0.0, -cyc_end), 0.15, b),
                   head_look=0.0)
+            # (named gather_* -- assigning to stand_fl/stand_fr here
+            # would make them locals of fn() and shadow the closure
+            # variables the anticipation branch uses; the v7 settle
+            # test caught the resulting UnboundLocalError.)
+            # Gather each foot to its NEAREST canonical split
+            # position. The travel can end with the feet SWAPPED (an
+            # odd number of steps: the walk_hold covers ~1 step, so
+            # foot_l ends ahead and foot_r behind) -- gathering
+            # foot_l to the behind mark and foot_r to the ahead mark
+            # would make the feet CROSS (196 px in 4 frames, a 72 px
+            # per-frame pop, rubric C12). The feet are already in a
+            # valid standing split, just swapped; a standing split
+            # does not care which foot is ahead. The assignment that
+            # minimises total foot travel is the correct one.
+            split_a = (to_x - direction * step / 2.0, ground_y)
+            split_b = (to_x + direction * step / 2.0, ground_y)
+            if (abs(_fl[0] - split_a[0]) + abs(_fr[0] - split_b[0])
+                    <= abs(_fl[0] - split_b[0])
+                    + abs(_fr[0] - split_a[0])):
+                gather_fl, gather_fr = split_a, split_b
+            else:
+                gather_fl, gather_fr = split_b, split_a
+            for side, end_xy, gather_xy in (
+                    ("l", _fl[:2], gather_fl), ("r", _fr[:2], gather_fr)):
+                gx = lerp(end_xy[0], gather_xy[0], b)
+                gy = lerp(end_xy[1], ground_y, b)
+                if abs(gather_xy[0] - end_xy[0]) > 1.0:
+                    gy -= lift * math.sin(math.pi * b)
+                if side == "l":
+                    char.foot_target_l = (gx, gy)
+                else:
+                    char.foot_target_r = (gx, gy)
             char.hand_target_l = None
             char.hand_target_r = None
             return char
@@ -516,8 +628,10 @@ def idle(char, duration, ground_y):
                       arm_l=0.05 + 0.03 * breathe,
                       arm_r=-0.05 - 0.03 * breathe,
                       elbow_l=0.10, elbow_r=0.10)
-        char.foot_target_l = (bx - _s(char, 45), ground_y)
-        char.foot_target_r = (bx + _s(char, 45), ground_y)
+        char.foot_target_l = (bx - STAND_SPLIT_FRAC * float(char.H),
+                              ground_y)
+        char.foot_target_r = (bx + STAND_SPLIT_FRAC * float(char.H),
+                              ground_y)
         char.hand_target_l = None
         char.hand_target_r = None
         return char
@@ -588,17 +702,32 @@ def kneel_pick(char, target, duration, ground_y, hand="r"):
     reads as lying flat (the rig's arm is only 0.283*H, so a standing
     stoop must fold nearly horizontal to reach the ground).
 
+    v7 (animation audit 2026-11-11): the v6 kneel still read as a deep
+    bow -- lean 63 deg, head only 35% of standing height. The v7 kneel
+    keeps the hip HIGHER (0.55 * thigh-length above the ground instead
+    of 0.72) and leans less (0.92 rad ~ 53 deg instead of 1.10 rad),
+    and the head tracks the prop with a CAPPED look (max 0.25 rad
+    instead of the 0.6 default -- the v6 head_look clamped at +0.6
+    pointed the head down-forward and dropped it from ~263 px to
+    217 px). Result: head ~42% of standing height at full kneel.
+    That is the RIG-GEOMETRY CAP for this arm (0.283*H): raising the
+    hip further pushes the shoulder-to-prop distance past 98% of the
+    arm and the hand can no longer reach the prop (see the IK-clamp
+    test). A higher head needs a longer arm or a closer/higher prop,
+    not a different kneel. The feet travel on LIFT arcs during the
+    descend and the rise -- the v6 kneel lerped them along the ground,
+    a hidden slide the v6 audit never measured.
+
     A kneel is geometrically honest for this rig: the hip drops to a
-    deep lunge-kneel (0.72 * thigh-length above the ground), the BACK
-    knee lands ON the ground (back foot tucks just behind the hip,
-    shin flat on the ground), the FRONT foot plants ahead, and the
-    torso leans ~63 deg -- so the shoulder is low enough for the hand
-    to reach the prop without folding the body in half. (A textbook
-    kneel -- hip one thigh-length up, knee under the hip -- still
-    needs a ~83 deg lean to reach a ground prop with this rig's
-    0.283*H arm; the deep lunge-kneel is what actually reaches at
-    63 deg. The numbers are verified by the IK clamp in the tests,
-    not assumed.) The reaching hand is on the same side as the
+    deep lunge-kneel, the BACK knee lands ON the ground (back foot
+    tucks just behind the hip, shin flat on the ground), the FRONT
+    foot plants ahead, and the torso leans ~53 deg -- so the shoulder
+    is low enough for the hand to reach the prop without folding the
+    body in half. (A textbook kneel -- hip one thigh-length up, knee
+    under the hip -- still needs a ~83 deg lean to reach a ground prop
+    with this rig's 0.283*H arm; the deep lunge-kneel is what actually
+    reaches at 53 deg. The numbers are verified by the IK clamp in the
+    tests, not assumed.) The reaching hand is on the same side as the
     planted front foot (the stable side); the kneeling knee is the
     opposite leg.
 
@@ -637,10 +766,12 @@ def kneel_pick(char, target, duration, ground_y, hand="r"):
         else:
             d = 1.0 - smoothstep((u - 0.65) / 0.35)
         # hip: standing (leg * 0.93 above ground) -> deep lunge-kneel
-        # (0.72 * thigh-length above ground, so the back knee touches
-        # down without sinking below the ground plane).
-        root_y = ground_y - (leg * 0.93 - (leg * 0.93 - u_leg * 0.72) * d)
-        lean = 1.10 * d  # ~63 deg at full kneel (vs 77 deg stoop)
+        # (v7: 0.55 * thigh-length above ground, so the back knee
+        # touches down without sinking below the ground plane AND the
+        # head stays ~42% of standing height -- the rig-geometry cap
+        # for the 0.283*H arm; see the docstring).
+        root_y = ground_y - (leg * 0.93 - (leg * 0.93 - u_leg * 0.55) * d)
+        lean = 0.92 * d  # ~53 deg at full kneel (v6: 1.10 rad / 63 deg)
         # feet: front foot (same side as the reaching hand) plants
         # ahead; back foot (opposite side) tucks just behind the hip
         # so its knee lands on the ground forward of the hip (deep
@@ -651,20 +782,36 @@ def kneel_pick(char, target, duration, ground_y, hand="r"):
         front_side = "r" if hand == "r" else "l"
         back_side = "l" if hand == "r" else "r"
         front_tx = rx + f * 0.55 * leg
-        back_tx = rx - f * l_leg * 0.30
+        # v7: the back foot tucks only 0.16*l_leg behind the hip (v6:
+        # 0.30). The back knee's ground position is COUPLED to the hip
+        # height: at the v7 hip (0.55*u_leg) the 0.30 tuck put the knee
+        # 30 px BELOW the ground (it clips through the floor -- the
+        # v6 hip 0.72*u_leg needed the wider tuck). 0.16 lands the
+        # knee ~1 px above the ground; 0.165 is exactly on it. The
+        # value is verified by the IK-clamp test, not assumed.
+        back_tx = rx - f * l_leg * 0.16
         stand_tx = {front_side: rx + f * step / 2.0,
                     back_side: rx - f * step / 2.0}
+        # v7: feet travel on LIFT arcs (0.05H), never along the ground.
+        # The v6 kneel lerped the feet along the ground plane while
+        # the hip descended -- a hidden slide the v6 audit never
+        # measured (its slip metric only covered walk/run).
+        lift = _s(char, 28)
         for side, tx in ((front_side, front_tx), (back_side, back_tx)):
             sx, sy = _start["foot_" + side]
             if u < 0.65:
-                tgt = (lerp(sx, tx, d), lerp(sy, ground_y, d))
+                # descend: start -> kneel target, arc peaks mid-move
+                gx = lerp(sx, tx, d)
+                gy = lerp(sy, ground_y, d) - lift * math.sin(math.pi * d)
             else:
-                tgt = (lerp(tx, stand_tx[side], 1.0 - d),
-                       ground_y)
+                # rise: kneel target -> standing split, arc peaks mid-move
+                q = 1.0 - d
+                gx = lerp(tx, stand_tx[side], q)
+                gy = ground_y - lift * math.sin(math.pi * q)
             if side == "l":
-                char.foot_target_l = tgt
+                char.foot_target_l = (gx, gy)
             else:
-                char.foot_target_r = tgt
+                char.foot_target_r = (gx, gy)
         # hand: reach the target by the end of the descend, hold it,
         # then lift it ~60 px as the body rises.
         reach = smoothstep(min(1.0, u / 0.50))
@@ -674,8 +821,10 @@ def kneel_pick(char, target, duration, ground_y, hand="r"):
         hx = lerp(sx, tx, reach)
         hy = lerp(sy, ty, reach) - _s(char, 60) * rise
         char.set_pose(root_y=root_y, torso_lean=lean)
-        # head tracks the prop (clamped by head_track)
-        head_track(char, (tx, ty))
+        # head tracks the prop -- CAPPED at 0.25 rad (v7): the default
+        # 0.6 clamp let the head point down-forward and dropped it to
+        # 35% of standing height; 0.25 keeps the head ~42% up.
+        head_track(char, (tx, ty), max_angle=0.25)
         if hand == "r":
             char.hand_target_r = (hx, hy)
         else:

@@ -110,6 +110,53 @@ def _draw_contact_shadow(img: Image.Image, scene: Scene25D,
     img.alpha_composite(layer)
 
 
+def _draw_label(d, quad, text):
+    """Draw ``text`` centred on a projected box face ``quad``.
+
+    Yellow bold text (the RicksClips caption colour -- readable on a
+    dark sign face) with a thin dark outline so it also reads on a
+    light face. The font shrinks until the text fits the quad width.
+    Uses DejaVu Sans Bold (covers Vietnamese diacritics) when present.
+    """
+    from PIL import ImageFont
+    xs = [p[0] for p in quad]
+    ys = [p[1] for p in quad]
+    x0, x1, y0, y1 = min(xs), max(xs), min(ys), max(ys)
+    w, h = x1 - x0, y1 - y0
+    if w < 8 or h < 8:
+        return
+    size = max(10, int(h * 0.55))
+    font = None
+    for path in ("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+                 "/usr/share/fonts/TTF/DejaVuSans-Bold.ttf"):
+        try:
+            font = ImageFont.truetype(path, size)
+            break
+        except (OSError, IOError):
+            continue
+    if font is None:
+        font = ImageFont.load_default()
+    # shrink until the text fits the face (with 8% side margins)
+    while size > 10:
+        bbox = d.textbbox((0, 0), text, font=font)
+        if bbox[2] - bbox[0] <= w * 0.92:
+            break
+        size -= 2
+        try:
+            font = ImageFont.truetype(
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+                size)
+        except (OSError, IOError):
+            break
+    bbox = d.textbbox((0, 0), text, font=font)
+    tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+    tx, ty = (x0 + x1) / 2 - tw / 2 - bbox[0], (y0 + y1) / 2 - th / 2 - bbox[1]
+    # thin dark outline (readable on light faces), yellow fill
+    for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+        d.text((tx + dx, ty + dy), text, font=font, fill=(20, 20, 20))
+    d.text((tx, ty), text, font=font, fill=(255, 210, 0))
+
+
 def _draw_box(img: Image.Image, scene: Scene25D, cam: PerspectiveCamera,
               box: Box3D):
     """Projected cuboid: visible faces only, each face shaded by the
@@ -120,6 +167,7 @@ def _draw_box(img: Image.Image, scene: Scene25D, cam: PerspectiveCamera,
     corners = box.corners()
     proj = [cam.project(c, w, h) for c in corners]
     faces = []
+    front_pts = None  # the +z face, for the label (v7)
     for idxs, normal in BOX_FACES:
         if normal == (0.0, -1.0, 0.0):
             continue  # bottom face: never visible
@@ -145,10 +193,14 @@ def _draw_box(img: Image.Image, scene: Scene25D, cam: PerspectiveCamera,
                        for k in range(3))
         irr = scene.lights.irradiance(centre, normal)
         faces.append((depth, pts, shade(box.color, irr)))
+        if normal == (0.0, 0.0, 1.0):
+            front_pts = pts
     for _, pts, colour in sorted(faces, key=lambda f: -f[0]):
         # outline pre-blended darker (same PIL alpha caveat as the grid)
         outline = tuple(int(c * 0.6) for c in colour)
         d.polygon(pts, fill=colour, outline=outline)
+    if box.label and front_pts:
+        _draw_label(d, front_pts, box.label)
 
 
 def _draw_character_marker(img: Image.Image, scene: Scene25D,

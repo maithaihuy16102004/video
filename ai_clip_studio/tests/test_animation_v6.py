@@ -280,9 +280,13 @@ class TestKneelPick(unittest.TestCase):
             dx = J["shoulder"][0] - J["hip"][0]
             dy = J["hip"][1] - J["shoulder"][1]
             leans.append(math.degrees(math.atan2(dx, dy)))
-        self.assertLess(max(leans), 70.0,
-                        f"kneel leans {max(leans):.1f} deg (stoop was 77)")
-        self.assertGreater(max(leans), 55.0,
+        # v7 (animation audit 2026-11-11): the kneel leans 53 deg, not
+        # 63 -- the v6 63 deg read as a deep bow, and the head sat at
+        # 35% of standing height. Bounds updated: under 55 (the rubric
+        # C9 cap), over 45 (upright enough that it still reaches).
+        self.assertLess(max(leans), 55.0,
+                        f"kneel leans {max(leans):.1f} deg (v6 was 63)")
+        self.assertGreater(max(leans), 45.0,
                            "kneel too upright to reach the ground prop")
 
     def test_kneel_hand_reaches_and_holds(self):

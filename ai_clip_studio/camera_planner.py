@@ -224,6 +224,117 @@ def _shots_for_segment(segment):
     ]
 
 
+def _crop_rect(scale, focus_xy, frame_w, frame_h):
+    """Crop rect [left, top, right, bottom] for a scale + focus."""
+    cw, ch = frame_w / scale, frame_h / scale
+    cx, cy = focus_xy
+    left = min(max(cx - cw / 2.0, 0.0), frame_w - cw)
+    top = min(max(cy - ch / 2.0, 0.0), frame_h - ch)
+    return left, top, left + cw, top + ch
+
+
+def _other_status(other, rect):
+    """'in' / 'out' / 'partial' for a character vs a crop rect.
+
+    The body box is [cx-half_w, cx+half_w] x [head_y, foot_y]. 'in'
+    only when the whole box sits inside the crop with the same
+    margins validate_framing uses (2% sides, 5% head headroom, 2%
+    feet); 'out' when the whole box clears the crop; anything else is
+    'partial' -- the head-cut defect.
+    """
+    l, t, r, b = rect
+    cw, ch = r - l, b - t
+    sl = other["cx"] - other["half_w"]
+    sr = other["cx"] + other["half_w"]
+    st, sb = other["head_y"], other["foot_y"]
+    if (sl >= l + 0.02 * cw and sr <= r - 0.02 * cw
+            and st >= t + 0.05 * ch and sb <= b - 0.02 * ch):
+        return "in"
+    if sr <= l or sl >= r or sb <= t or st >= b:
+        return "out"
+    return "partial"
+
+
+def _track_best(best, n_issues, scale, focus, issues):
+    if best is None or n_issues < best[0]:
+        return (n_issues, scale, focus, list(issues))
+    return best
+
+
+def _fix_partial_others(shot, focus, subjects, others, frame_w, frame_h):
+    """Shift the crop so every 'other' is fully in or fully out.
+
+    Returns (focus, notes, remaining_issues). Per partial other, in
+    order: (a) pull it fully IN by re-centring the crop on the union
+    of subjects + other (when the union fits the crop); (b) push it
+    fully OUT by shifting the crop away from it while the subjects
+    still fit. Repeats until no partial other remains or no shift
+    helps (then the caller zooms out a step).
+    """
+    scale = float(shot["camera"]["scale"])
+    cw, ch = frame_w / scale, frame_h / scale
+    notes = []
+    for _round in range(4):
+        rect = _crop_rect(scale, focus, frame_w, frame_h)
+        partials = [o for o in others
+                    if _other_status(o, rect) == "partial"]
+        if not partials:
+            return focus, notes, []
+        other = partials[0]
+        # (a) pull fully IN: union of subjects + other must fit.
+        # The need window gets a 2 px slack beyond the required
+        # margins: without it the crop lands EXACTLY on the headroom
+        # boundary and float error flips the in/out test back to
+        # partial on the next round (the v7 shot test caught this --
+        # 4 identical shifts, still partial).
+        boxes = list(subjects) + [other]
+        need_l = min(s["cx"] - s["half_w"] for s in boxes) - 0.02 * cw - 2
+        need_r = max(s["cx"] + s["half_w"] for s in boxes) + 0.02 * cw + 2
+        need_t = min(s["head_y"] for s in boxes) - 0.05 * ch - 2
+        need_b = max(s["foot_y"] for s in boxes) + 0.02 * ch + 2
+        if need_r - need_l <= cw and need_b - need_t <= ch:
+            new_left = min(max(need_l, need_r - cw), frame_w - cw)
+            new_left = max(0.0, new_left)
+            new_top = min(max(need_t, need_b - ch), frame_h - ch)
+            new_top = max(0.0, new_top)
+            focus = (new_left + cw / 2.0, new_top + ch / 2.0)
+            notes.append("shifted crop to include a partially-overlapped "
+                         "character fully (head-safe)")
+            continue
+        # (b) push fully OUT: minimal shift in each of 4 directions
+        # (+2 px clear of the edge, for the same float-boundary
+        # reason as branch (a)); accept the first that keeps the
+        # subjects fitting and puts this other fully out.
+        l, t, r, b = rect
+        sl = other["cx"] - other["half_w"]
+        sr = other["cx"] + other["half_w"]
+        st, sb = other["head_y"], other["foot_y"]
+        fixed = False
+        for dx, dy in ((sr - l + 2.0, 0.0), (sl - r - 2.0, 0.0),
+                       (0.0, st - b - 2.0), (0.0, sb - t + 2.0)):
+            cand = (focus[0] + dx, focus[1] + dy)
+            crect = _crop_rect(scale, cand, frame_w, frame_h)
+            if _other_status(other, crect) != "out":
+                continue
+            iss, _ = CameraPlanner.validate_framing(
+                shot, cand, subjects, frame_w, frame_h)
+            if not iss:
+                focus = cand
+                notes.append("shifted crop to push a partially-overlapped "
+                             "character fully out of frame (head-safe)")
+                fixed = True
+                break
+        if not fixed:
+            return focus, notes, [
+                f"partial overlap cannot be fixed at scale {scale} "
+                f"(other at cx={other['cx']:.0f})"]
+    rect = _crop_rect(scale, focus, frame_w, frame_h)
+    remaining = [f"partial overlap remains after shifts "
+                 f"(other at cx={o['cx']:.0f})"
+                 for o in others if _other_status(o, rect) == "partial"]
+    return focus, notes, remaining
+
+
 class CameraPlanner:
     """Plan camera shots from generic per-segment action cues."""
 
@@ -342,6 +453,116 @@ class CameraPlanner:
         return issues, corrected
 
     @staticmethod
+    def safe_frame(shot, focus_xy, subjects, others=None, frame_w=1920,
+                   frame_h=1080):
+        """Return (safe_shot, safe_focus, notes): a shot + focus that
+        cannot repeat the v4/v5 framing defects.
+
+        Audit 2026-11-11 (Chiếc Ví v4: 8 defects, Eiffel v5: 5): the
+        systematic pattern was a 3.4x object_insert centred on the
+        wallet/photo that sliced the characters' heads -- the crop
+        only had to contain the OBJECT, so a head at the crop edge was
+        half-cut; and 2.6x reactions whose two subjects did not fit
+        the crop at all. ``validate_framing`` only shifts the crop and
+        cannot fix either case (it reports "do not fit" and leaves the
+        focus unchanged).
+
+        safe_frame fixes both, in order, never by faking the scale:
+        1. Try the planned scale. If the intended subjects do not fit
+           it, step DOWN the scale ladder (3.4 -> 2.6 -> 1.6 -> 1.0)
+           until they do. An insert that must show the whole pick-up
+           becomes a close-up; a reaction that cannot hold two people
+           becomes a medium. The shot TYPE is kept (so the plan still
+           reads as an insert / reaction) but the applied scale is
+           recorded on the returned shot dict.
+        2. For every OTHER character: it must end up FULLY inside the
+           crop or FULLY outside it -- never half-cut. A partial other
+           is fixed by shifting the crop so the other is fully IN
+           (re-centre on the union of subjects + other, when it fits)
+           or fully OUT (shift the crop away from the other while the
+           subjects still fit). If neither works at this scale, zoom
+           out one step and retry.
+        3. If no scale works (subjects wider than the full frame --
+           cannot happen for a single character, but a two-shot at
+           opposite edges comes close), return the widest scale with
+           the best focus and notes listing what still fails. The
+           caller must surface the notes, not silently ship the shot.
+
+        subjects / others: {"cx", "head_y", "foot_y", "half_w"} dicts
+        in full-frame coords. Returns (safe_shot, safe_focus, notes)
+        where safe_shot is a COPY of ``shot`` with camera.scale set to
+        the applied scale and a "safe_frame" note; the input shot is
+        untouched.
+        """
+        others = list(others or [])
+        planned_scale = float((shot or {}).get("camera", {}).get("scale")
+                              or SHOT_SCALE.get(
+                                  (shot or {}).get("shot_type", "medium"),
+                                  1.6))
+        planned_scale = max(1.0, planned_scale)
+        ladder = [s for s in (3.4, 2.6, 1.6, 1.0) if s <= planned_scale + 1e-9]
+        if not ladder:
+            ladder = [1.0]
+        notes = []
+        best = None  # (n_issues, scale, focus, issues)
+        for scale in ladder:
+            trial = dict(shot or {})
+            trial_cam = dict((shot or {}).get("camera") or {})
+            trial_cam["scale"] = scale
+            trial["camera"] = trial_cam
+            issues, focus = CameraPlanner.validate_framing(
+                trial, focus_xy, subjects, frame_w, frame_h)
+            if any("do not fit" in i for i in issues):
+                notes.append(f"scale {scale}: subjects do not fit "
+                             f"-- zoom out")
+                best = _track_best(best, len(issues), scale, focus, issues)
+                continue
+            # subjects fit at this scale: fix partial others by shifting.
+            focus, shift_notes, remaining = _fix_partial_others(
+                trial, focus, subjects, others, frame_w, frame_h)
+            notes.extend(shift_notes)
+            if not remaining:
+                safe = dict(trial)
+                safe["safe_frame"] = {
+                    "planned_scale": planned_scale,
+                    "applied_scale": scale,
+                    "focus": [round(focus[0], 1), round(focus[1], 1)],
+                    "notes": notes,
+                }
+                return safe, focus, notes
+            best = _track_best(best, len(remaining), scale, focus, remaining)
+            notes.append(f"scale {scale}: {len(remaining)} partial "
+                         f"other(s) remain -- zoom out")
+        # nothing worked: widest scale, best focus found, honest notes.
+        _, scale, focus, issues = best
+        trial = dict(shot or {})
+        trial_cam = dict((shot or {}).get("camera") or {})
+        trial_cam["scale"] = scale
+        trial["camera"] = trial_cam
+        notes.append("NO SCALE FIXES THE FRAMING: subjects/others "
+                     f"still conflict at scale {scale}: {issues}")
+        safe = dict(trial)
+        safe["safe_frame"] = {
+            "planned_scale": planned_scale,
+            "applied_scale": scale,
+            "focus": [round(focus[0], 1), round(focus[1], 1)],
+            "notes": notes,
+        }
+        return safe, focus, notes
+
+    @staticmethod
+    def apply_camera_safe(img, shot, focus_xy=None, subjects=None,
+                          others=None):
+        """apply_camera through safe_frame: the crop is re-framed so
+        subjects fit and no other character is half-cut. Returns
+        (image, safe_shot, safe_focus, notes)."""
+        safe_shot, safe_focus, notes = CameraPlanner.safe_frame(
+            shot, focus_xy, subjects or [], others or [],
+            frame_w=img.size[0], frame_h=img.size[1])
+        return (CameraPlanner.apply_camera(img, safe_shot, safe_focus),
+                safe_shot, safe_focus, notes)
+
+    @staticmethod
     def shot_diversity_report(shots):
         """Diversity summary of a planned shot list."""
         types = [s.get("shot_type") for s in (shots or [])]
@@ -370,6 +591,23 @@ def plan(segments):
 
 def apply_camera(img, shot, focus_xy=None):
     return CameraPlanner.apply_camera(img, shot, focus_xy)
+
+
+def safe_frame(shot, focus_xy, subjects, others=None, frame_w=1920,
+               frame_h=1080):
+    return CameraPlanner.safe_frame(shot, focus_xy, subjects, others,
+                                    frame_w, frame_h)
+
+
+def apply_camera_safe(img, shot, focus_xy=None, subjects=None,
+                      others=None):
+    return CameraPlanner.apply_camera_safe(img, shot, focus_xy, subjects,
+                                           others)
+
+
+def validate_framing(shot, focus_xy, subjects, frame_w=1920, frame_h=1080):
+    return CameraPlanner.validate_framing(shot, focus_xy, subjects,
+                                          frame_w, frame_h)
 
 
 def shot_diversity_report(shots):

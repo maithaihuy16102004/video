@@ -265,8 +265,15 @@ TEMPLATES = {
 BODY_VARIANTS = tuple(BODY_WIDTH_SCALE.keys())
 
 CHARACTER_INSTANCES = {
-    "minh": dict(template="male", name="minh", suit="#2E5FA3"),
-    "lan": dict(template="female", name="lan", suit="#47BD75"),
+    # v7 (animation audit 2026-11-11): identity is carried by COSTUME
+    # / body / hat / hair (the RicksClips way), not by gait. Minh is
+    # sturdy, Lan is slim with a dress -- the silhouette IoU was
+    # 0.796 (Minh-Lan) with both on the standard body, and Lan had no
+    # dress at all. Lustig keeps the bowler + moustache.
+    "minh": dict(template="male", name="minh", suit="#2E5FA3",
+                 body_variant="sturdy"),
+    "lan": dict(template="female", name="lan", suit="#47BD75",
+                body_variant="slim", costume="dress"),
     # Lustig keeps the male stride but leans forward a touch more --
     # a confident swagger, not a shuffle. His identifier is the
     # bowler + moustache, not his walk.

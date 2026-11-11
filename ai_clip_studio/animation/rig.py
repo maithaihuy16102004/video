@@ -45,6 +45,16 @@ HIP_HALF_FRAC = 0.06
 # thin arm on a wide torso (PREMIUM_STICKMAN v4 line rule).
 BODY_WIDTH_SCALE = {"slim": 0.9, "standard": 1.0, "sturdy": 1.15}
 
+# Canonical standing foot split (v7, animation audit 2026-11-11): the
+# feet stand +/-STAND_SPLIT_FRAC*H around the root in EVERY standing
+# pose -- plant_feet, idle, the walk's start/end split (+/-step/2 with
+# the v6 step 0.25*H) and kneel_pick's rise. Before v7 each caller
+# used a different spread (plant_feet 0.06H, idle +/-45 px, walk
+# +/-0.125H), so every segment blend slid the feet along the ground
+# (walk_hold -> handover: +/-98 px -> +/-47 px). One split everywhere
+# means a blend starts where the previous segment ended.
+STAND_SPLIT_FRAC = 0.125
+
 
 def ik_2bone(ax, ay, tx, ty, l1, l2, bend=+1):
     """Two-bone IK: anchor (ax,ay), target (tx,ty), lengths l1,l2.
@@ -427,7 +437,11 @@ def plant_feet(char, ground_y, stance="both"):
     x = char.pose["root_x"]
     hip_y = char.pose["root_y"]
     reach = char.u_leg + char.l_leg
-    spread = 0.06 * char.H
+    # v7: the canonical standing split (see STAND_SPLIT_FRAC) -- the
+    # same +/-0.125H the walk starts/ends in, so blends do not slide
+    # the feet. Reachable at the standard standing hip height
+    # (ground - 0.93*leg): max spread is ~0.132H at any H.
+    spread = STAND_SPLIT_FRAC * char.H
     dv = ground_y - hip_y
     # Max horizontal offset the legs can reach at this hip height
     # (98% of reach, matching the IK clamp in joints()).
