@@ -96,14 +96,23 @@ export type CharacterActionV5 =
   | 'read_letter';
 
 export type CharacterEmotionV5 =
+  // 10 Canonical Expressions (Master Visual Art Direction Prompt V2.0)
   | 'neutral'
+  | 'curious'
+  | 'happy'
+  | 'sad'
+  | 'angry'
+  | 'shocked'
+  | 'afraid'
+  | 'confused'
   | 'determined'
+  | 'exhausted'
+  // Supplementary / Production Aliases
   | 'panic'
   | 'relief'
   | 'laughing'
   | 'intense'
   | 'focused'
-  | 'curious'
   | 'surprised'
   | 'somber'
   | 'confident';
@@ -137,6 +146,17 @@ export interface SkeletalRigV5 {
   torsoTilt: number;
 }
 
+export interface PropAttachmentAudit {
+  characterId: string;
+  hand: 'right' | 'left';
+  propType: string;
+  prop_position: Point2D;
+  hand_bone_world_position: Point2D;
+  distance: number;
+  withinTolerance: boolean; // distance <= 2.0px (±2px)
+  rejected: boolean; // distance > 5.0px
+}
+
 export interface CharacterStateV5 {
   screenX: number;
   screenY: number;
@@ -153,6 +173,10 @@ export interface CharacterStateV5 {
   footLockGround?: boolean;
   debugSkeleton?: boolean;
   viewAngle?: 'front' | 'three_quarter' | 'side';
+  propOffsetR?: [number, number];
+  propOffsetL?: [number, number];
+  propWorldPosR?: Point2D;
+  propWorldPosL?: Point2D;
 }
 
 // Backward compatibility alias
@@ -161,6 +185,8 @@ export type CharacterState = CharacterStateV5;
 
 export class UniversalCharacterEngine {
   private ctx: CanvasRenderingContext2D;
+  public lastPropAudits: PropAttachmentAudit[] = [];
+  public static lastPropAudits: PropAttachmentAudit[] = [];
 
   constructor(ctx: CanvasRenderingContext2D) {
     this.ctx = ctx;
@@ -171,29 +197,35 @@ export class UniversalCharacterEngine {
   // ============================================================================
   public resolveCanonicalProportions(dna: CharacterDNA_V5): CanonicalProportions {
     const prop = dna.proportions;
+    const isBlobHead = Boolean(
+      (dna as any).visualStyle === 'documentary_blob_head' ||
+      (dna as any).style === 'documentary_blob_head' ||
+      (prop.headRatio && prop.headRatio >= 0.30)
+    );
     const totalH = prop.standingHeightPx || 295;
-    const headRatio = prop.headRatio || 0.15;
+    const headRatio = isBlobHead ? (prop.headRatio || 0.42) : (prop.headRatio || 0.15);
     const headHeight = totalH * headRatio;
-    const torsoH = prop.torsoLengthPx || (totalH * 0.32);
-    const legH = prop.legLengthPx || (totalH * 0.50);
+    const torsoH = isBlobHead ? (totalH * 0.28) : (prop.torsoLengthPx || (totalH * 0.32));
+    const legH = isBlobHead ? (totalH * 0.28) : (prop.legLengthPx || (totalH * 0.50));
+    const limbW = isBlobHead ? (prop.limbThicknessPx || 8.5) : (prop.limbThicknessPx || 11);
 
     return {
       totalHeightPx: totalH,
       headHeightPx: headHeight,
-      headWidthPx: headHeight * 0.78,
-      neckLengthPx: totalH * 0.035,
-      shoulderWidthPx: prop.shoulderWidthPx || (totalH * 0.185),
+      headWidthPx: isBlobHead ? headHeight * 0.95 : headHeight * 0.78,
+      neckLengthPx: isBlobHead ? totalH * 0.02 : totalH * 0.035,
+      shoulderWidthPx: isBlobHead ? (totalH * 0.14) : (prop.shoulderWidthPx || (totalH * 0.185)),
       chestLengthPx: torsoH * 0.50,
       lumbarLengthPx: torsoH * 0.50,
-      hipWidthPx: (prop.shoulderWidthPx || (totalH * 0.185)) * 0.70,
-      upperArmLengthPx: totalH * 0.170,
-      forearmLengthPx: totalH * 0.155,
-      handLengthPx: totalH * 0.082,
+      hipWidthPx: isBlobHead ? (totalH * 0.12) : ((prop.shoulderWidthPx || (totalH * 0.185)) * 0.70),
+      upperArmLengthPx: isBlobHead ? totalH * 0.13 : totalH * 0.170,
+      forearmLengthPx: isBlobHead ? totalH * 0.12 : totalH * 0.155,
+      handLengthPx: isBlobHead ? totalH * 0.055 : totalH * 0.082,
       thighLengthPx: legH * 0.50,
       shinLengthPx: legH * 0.50,
-      footHeightPx: 12,
-      footLengthPx: 30,
-      limbThicknessPx: prop.limbThicknessPx || 11,
+      footHeightPx: isBlobHead ? 8 : 12,
+      footLengthPx: isBlobHead ? 20 : 30,
+      limbThicknessPx: limbW,
     };
   }
 
@@ -439,6 +471,11 @@ export class UniversalCharacterEngine {
     // 2. Complete Canonical 12-Joint Skeletal Hierarchy via Analytical IK
     const skel = this.evaluateSkeleton(dna, state, totalH, headR);
 
+    // Invariant Audit: Handheld prop parenting with zero positional offset tolerance
+    const propAudits = this.validateHandheldProps(dna, state, skel);
+    this.lastPropAudits = propAudits;
+    UniversalCharacterEngine.lastPropAudits = propAudits;
+
     // 3. Lower Costume (Legs / Pants / Skirt / Footwear)
     this.drawLowerCostume(ctx, dna, state, skel, ink);
 
@@ -460,6 +497,7 @@ export class UniversalCharacterEngine {
     }
 
     ctx.restore();
+    return { skel, propAudits };
   }
 
   public draw(dna: CharacterDNA_V5, state: CharacterStateV5) {
@@ -503,60 +541,83 @@ export class UniversalCharacterEngine {
     ctx.save();
     ctx.translate(headPos.x, headPos.y);
 
+    const isBlobHead = Boolean(
+      (dna as any).visualStyle === 'documentary_blob_head' ||
+      (dna as any).style === 'documentary_blob_head' ||
+      (dna.proportions?.headRatio && dna.proportions.headRatio >= 0.30)
+    );
+
     // 1. Neck Trapezoid
     ctx.beginPath();
-    ctx.moveTo(-headR * 0.32, headR * 0.6);
-    ctx.lineTo(headR * 0.32, headR * 0.6);
-    ctx.lineTo(headR * 0.45, headR * 1.35);
-    ctx.lineTo(-headR * 0.45, headR * 1.35);
-    ctx.closePath();
-    ctx.fillStyle = skin;
-    ctx.fill();
-    ctx.lineWidth = 2.4;
-    ctx.strokeStyle = ink;
-    ctx.stroke();
+    if (isBlobHead) {
+      ctx.moveTo(-headR * 0.18, headR * 0.70);
+      ctx.lineTo(headR * 0.18, headR * 0.70);
+      ctx.lineTo(headR * 0.22, headR * 1.15);
+      ctx.lineTo(-headR * 0.22, headR * 1.15);
+      ctx.closePath();
+      ctx.fillStyle = skin;
+      ctx.fill();
+      ctx.lineWidth = 2.0;
+      ctx.strokeStyle = ink;
+      ctx.stroke();
+    } else {
+      ctx.moveTo(-headR * 0.32, headR * 0.6);
+      ctx.lineTo(headR * 0.32, headR * 0.6);
+      ctx.lineTo(headR * 0.45, headR * 1.35);
+      ctx.lineTo(-headR * 0.45, headR * 1.35);
+      ctx.closePath();
+      ctx.fillStyle = skin;
+      ctx.fill();
+      ctx.lineWidth = 2.4;
+      ctx.strokeStyle = ink;
+      ctx.stroke();
+    }
 
-    // 2. Distinct Head Contour Silhouettes (5 Archetypes)
+    // 2. Distinct Head Contour Silhouettes (5 Archetypes or Documentary Blob-Head)
     ctx.beginPath();
-    switch (dna.face.headContour) {
-      case 'oval_gaunt': // Lean, angular, high cheekbones (Arthur)
-        ctx.moveTo(0, -headR * 1.25);
-        ctx.bezierCurveTo(headR * 0.95, -headR * 1.25, headR * 0.85, 0.0, headR * 0.65, headR * 0.55);
-        ctx.bezierCurveTo(headR * 0.50, headR * 0.95, headR * 0.28, headR * 1.25, 0, headR * 1.30);
-        ctx.bezierCurveTo(-headR * 0.28, headR * 1.25, -headR * 0.50, headR * 0.95, -headR * 0.65, headR * 0.55);
-        ctx.bezierCurveTo(-headR * 0.85, 0.0, -headR * 0.95, -headR * 1.25, 0, -headR * 1.25);
-        break;
+    if (isBlobHead) {
+      ctx.ellipse(0, 0, headR * 1.05, headR * 1.02, 0, 0, Math.PI * 2);
+    } else {
+      switch (dna.face.headContour) {
+        case 'oval_gaunt': // Lean, angular, high cheekbones (Arthur)
+          ctx.moveTo(0, -headR * 1.25);
+          ctx.bezierCurveTo(headR * 0.95, -headR * 1.25, headR * 0.85, 0.0, headR * 0.65, headR * 0.55);
+          ctx.bezierCurveTo(headR * 0.50, headR * 0.95, headR * 0.28, headR * 1.25, 0, headR * 1.30);
+          ctx.bezierCurveTo(-headR * 0.28, headR * 1.25, -headR * 0.50, headR * 0.95, -headR * 0.65, headR * 0.55);
+          ctx.bezierCurveTo(-headR * 0.85, 0.0, -headR * 0.95, -headR * 1.25, 0, -headR * 1.25);
+          break;
 
-      case 'square_jaw': // Broad, strong jawline (Minh)
-        ctx.moveTo(-headR * 0.75, -headR * 1.15);
-        ctx.bezierCurveTo(-headR * 0.85, -headR * 0.4, -headR * 0.85, headR * 0.4, -headR * 0.75, headR * 0.75);
-        ctx.lineTo(-headR * 0.35, headR * 1.15);
-        ctx.lineTo(headR * 0.35, headR * 1.15);
-        ctx.lineTo(headR * 0.75, headR * 0.75);
-        ctx.bezierCurveTo(headR * 0.85, headR * 0.4, headR * 0.85, -headR * 0.4, headR * 0.75, -headR * 1.15);
-        ctx.closePath();
-        break;
+        case 'square_jaw': // Broad, strong jawline (Minh)
+          ctx.moveTo(-headR * 0.75, -headR * 1.15);
+          ctx.bezierCurveTo(-headR * 0.85, -headR * 0.4, -headR * 0.85, headR * 0.4, -headR * 0.75, headR * 0.75);
+          ctx.lineTo(-headR * 0.35, headR * 1.15);
+          ctx.lineTo(headR * 0.35, headR * 1.15);
+          ctx.lineTo(headR * 0.75, headR * 0.75);
+          ctx.bezierCurveTo(headR * 0.85, headR * 0.4, headR * 0.85, -headR * 0.4, headR * 0.75, -headR * 1.15);
+          ctx.closePath();
+          break;
 
-      case 'delicate_heart': // Delicate heart feminine chin (Aiko)
-        ctx.moveTo(0, -headR * 1.2);
-        ctx.bezierCurveTo(headR * 1.05, -headR * 1.15, headR * 0.95, -headR * 0.1, headR * 0.55, headR * 0.55);
-        ctx.bezierCurveTo(headR * 0.35, headR * 0.90, headR * 0.15, headR * 1.18, 0, headR * 1.22);
-        ctx.bezierCurveTo(-headR * 0.15, headR * 1.18, -headR * 0.35, headR * 0.90, -headR * 0.55, headR * 0.55);
-        ctx.bezierCurveTo(-headR * 0.95, -headR * 0.1, -headR * 1.05, -headR * 1.15, 0, -headR * 1.2);
-        break;
+        case 'delicate_heart': // Delicate heart feminine chin (Aiko)
+          ctx.moveTo(0, -headR * 1.2);
+          ctx.bezierCurveTo(headR * 1.05, -headR * 1.15, headR * 0.95, -headR * 0.1, headR * 0.55, headR * 0.55);
+          ctx.bezierCurveTo(headR * 0.35, headR * 0.90, headR * 0.15, headR * 1.18, 0, headR * 1.22);
+          ctx.bezierCurveTo(-headR * 0.15, headR * 1.18, -headR * 0.35, headR * 0.90, -headR * 0.55, headR * 0.55);
+          ctx.bezierCurveTo(-headR * 0.95, -headR * 0.1, -headR * 1.05, -headR * 1.15, 0, -headR * 1.2);
+          break;
 
-      case 'athletic_lean': // Streamlined athletic profile (Elena)
-        ctx.moveTo(0, -headR * 1.22);
-        ctx.bezierCurveTo(headR * 0.88, -headR * 1.18, headR * 0.82, -headR * 0.1, headR * 0.60, headR * 0.50);
-        ctx.bezierCurveTo(headR * 0.42, headR * 0.88, headR * 0.22, headR * 1.18, 0, headR * 1.20);
-        ctx.bezierCurveTo(-headR * 0.22, headR * 1.18, -headR * 0.42, headR * 0.88, -headR * 0.60, headR * 0.50);
-        ctx.bezierCurveTo(-headR * 0.82, -headR * 0.1, -headR * 0.88, -headR * 1.18, 0, -headR * 1.22);
-        break;
+        case 'athletic_lean': // Streamlined athletic profile (Elena)
+          ctx.moveTo(0, -headR * 1.22);
+          ctx.bezierCurveTo(headR * 0.88, -headR * 1.18, headR * 0.82, -headR * 0.1, headR * 0.60, headR * 0.50);
+          ctx.bezierCurveTo(headR * 0.42, headR * 0.88, headR * 0.22, headR * 1.18, 0, headR * 1.20);
+          ctx.bezierCurveTo(-headR * 0.22, headR * 1.18, -headR * 0.42, headR * 0.88, -headR * 0.60, headR * 0.50);
+          ctx.bezierCurveTo(-headR * 0.82, -headR * 0.1, -headR * 0.88, -headR * 1.18, 0, -headR * 1.22);
+          break;
 
-      case 'round_youth': // Soft, youthful face (Haru)
-      default:
-        ctx.arc(0, 0, headR * 1.05, 0, Math.PI * 2);
-        break;
+        case 'round_youth': // Soft, youthful face (Haru)
+        default:
+          ctx.arc(0, 0, headR * 1.05, 0, Math.PI * 2);
+          break;
+      }
     }
     ctx.fillStyle = skin;
     ctx.fill();
@@ -567,28 +628,61 @@ export class UniversalCharacterEngine {
     // 3. Hair Systems
     this.drawHair(ctx, dna.hair, headR, ink);
 
-    // 4. Eyebrows
-    this.drawEyebrows(ctx, dna.face.eyebrowStyle, state.emotion, headR, ink);
+    if (isBlobHead) {
+      // Documentary Blob-Head: Minimalist features (At most 1 thin brow line per eye)
+      this.drawBlobHeadEyebrows(ctx, state.emotion, headR, ink);
 
-    // 5. Expressive Eyes
-    const gaze = state.gazeTarget || [0.4, 0.0];
-    this.drawEye(ctx, -headR * 0.34, -headR * 0.08, gaze, state.emotion === 'laughing', dna.face.eyeColor || '#2C1D11', ink);
-    this.drawEye(ctx, headR * 0.34, -headR * 0.08, gaze, state.emotion === 'laughing', dna.face.eyeColor || '#2C1D11', ink);
+      // Two small dot eyes with specular catchlight
+      const gaze = state.gazeTarget || [0.3, 0.0];
+      const gazeX = gaze[0] * headR * 0.05;
+      const gazeY = gaze[1] * headR * 0.04;
+      const eyeR = headR * 0.085;
 
-    // 6. Sculpted Nose
-    ctx.strokeStyle = ink;
-    ctx.lineWidth = 2.4;
-    ctx.beginPath();
-    ctx.moveTo(0, -headR * 0.08);
-    ctx.lineTo(headR * 0.08, headR * 0.22);
-    ctx.lineTo(-headR * 0.06, headR * 0.25);
-    ctx.stroke();
+      ctx.fillStyle = ink;
+      ctx.beginPath();
+      ctx.arc(-headR * 0.24 + gazeX, -headR * 0.06 + gazeY, eyeR, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#FFFFFF';
+      ctx.beginPath();
+      ctx.arc(-headR * 0.24 + gazeX - eyeR * 0.3, -headR * 0.06 + gazeY - eyeR * 0.3, eyeR * 0.35, 0, Math.PI * 2);
+      ctx.fill();
 
-    // 7. Facial Hair
-    this.drawFacialHair(ctx, dna.face.facialHair, dna.face.facialHairColor || ink, headR);
+      ctx.fillStyle = ink;
+      ctx.beginPath();
+      ctx.arc(headR * 0.24 + gazeX, -headR * 0.06 + gazeY, eyeR, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#FFFFFF';
+      ctx.beginPath();
+      ctx.arc(headR * 0.24 + gazeX - eyeR * 0.3, -headR * 0.06 + gazeY - eyeR * 0.3, eyeR * 0.35, 0, Math.PI * 2);
+      ctx.fill();
 
-    // 8. Animated Mouth
-    this.drawMouth(ctx, state.emotion, headR, ink);
+      // NO NOSE! (Deliberately omitted for Documentary Blob-Head aesthetic)
+      // Animated Minimalist Mouth (Simple line/curve, open on speech beats)
+      this.drawBlobHeadMouth(ctx, state.emotion, state.action, headR, ink);
+    } else {
+      // 4. Eyebrows
+      this.drawEyebrows(ctx, dna.face.eyebrowStyle, state.emotion, headR, ink);
+
+      // 5. Expressive Eyes
+      const gaze = state.gazeTarget || [0.4, 0.0];
+      this.drawEye(ctx, -headR * 0.34, -headR * 0.08, gaze, state.emotion === 'laughing', dna.face.eyeColor || '#2C1D11', ink);
+      this.drawEye(ctx, headR * 0.34, -headR * 0.08, gaze, state.emotion === 'laughing', dna.face.eyeColor || '#2C1D11', ink);
+
+      // 6. Sculpted Nose
+      ctx.strokeStyle = ink;
+      ctx.lineWidth = 2.4;
+      ctx.beginPath();
+      ctx.moveTo(0, -headR * 0.08);
+      ctx.lineTo(headR * 0.08, headR * 0.22);
+      ctx.lineTo(-headR * 0.06, headR * 0.25);
+      ctx.stroke();
+
+      // 7. Facial Hair
+      this.drawFacialHair(ctx, dna.face.facialHair, dna.face.facialHairColor || ink, headR);
+
+      // 8. Animated Mouth
+      this.drawMouth(ctx, state.emotion, headR, ink);
+    }
 
     // 9. Eye Accessories (Glasses / Goggles)
     if (dna.hair.accessory === 'glasses_round') {
@@ -721,6 +815,211 @@ export class UniversalCharacterEngine {
       ctx.beginPath();
       ctx.ellipse(0, headR * 0.72, 8, 14, 0, 0, Math.PI * 2);
       ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  private drawBlobHeadEyebrows(
+    ctx: CanvasRenderingContext2D,
+    emotion: CharacterEmotionV5,
+    headR: number,
+    ink: string
+  ) {
+    ctx.save();
+    ctx.strokeStyle = ink;
+    ctx.lineWidth = 1.8;
+    ctx.lineCap = 'round';
+
+    if (emotion === 'angry') {
+      // Sharp furrowed brows angled downward toward center
+      ctx.beginPath();
+      ctx.moveTo(-headR * 0.36, -headR * 0.28);
+      ctx.quadraticCurveTo(-headR * 0.24, -headR * 0.24, -headR * 0.12, -headR * 0.20);
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.moveTo(headR * 0.12, -headR * 0.20);
+      ctx.quadraticCurveTo(headR * 0.24, -headR * 0.24, headR * 0.36, -headR * 0.28);
+      ctx.stroke();
+    } else if (emotion === 'curious') {
+      // Asymmetric: left brow relaxed, right brow arched high
+      ctx.beginPath();
+      ctx.moveTo(-headR * 0.34, -headR * 0.24);
+      ctx.quadraticCurveTo(-headR * 0.23, -headR * 0.27, -headR * 0.12, -headR * 0.23);
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.moveTo(headR * 0.12, -headR * 0.26);
+      ctx.quadraticCurveTo(headR * 0.24, -headR * 0.34, headR * 0.36, -headR * 0.28);
+      ctx.stroke();
+    } else if (emotion === 'happy' || emotion === 'laughing' || emotion === 'relief' || emotion === 'confident') {
+      // Soft pleasant lifted arcs
+      ctx.beginPath();
+      ctx.moveTo(-headR * 0.35, -headR * 0.25);
+      ctx.quadraticCurveTo(-headR * 0.24, -headR * 0.31, -headR * 0.13, -headR * 0.25);
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.moveTo(headR * 0.13, -headR * 0.25);
+      ctx.quadraticCurveTo(headR * 0.24, -headR * 0.31, headR * 0.35, -headR * 0.25);
+      ctx.stroke();
+    } else if (emotion === 'sad' || emotion === 'somber') {
+      // Inner brows raised, outer drooping
+      ctx.beginPath();
+      ctx.moveTo(-headR * 0.35, -headR * 0.21);
+      ctx.quadraticCurveTo(-headR * 0.24, -headR * 0.26, -headR * 0.12, -headR * 0.28);
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.moveTo(headR * 0.12, -headR * 0.28);
+      ctx.quadraticCurveTo(headR * 0.24, -headR * 0.26, headR * 0.35, -headR * 0.21);
+      ctx.stroke();
+    } else if (emotion === 'shocked' || emotion === 'surprised') {
+      // High raised wide arches
+      ctx.beginPath();
+      ctx.moveTo(-headR * 0.35, -headR * 0.30);
+      ctx.quadraticCurveTo(-headR * 0.24, -headR * 0.36, -headR * 0.13, -headR * 0.30);
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.moveTo(headR * 0.13, -headR * 0.30);
+      ctx.quadraticCurveTo(headR * 0.24, -headR * 0.36, headR * 0.35, -headR * 0.30);
+      ctx.stroke();
+    } else if (emotion === 'afraid' || emotion === 'panic') {
+      // High inner corners, tense raised angle
+      ctx.beginPath();
+      ctx.moveTo(-headR * 0.34, -headR * 0.24);
+      ctx.quadraticCurveTo(-headR * 0.23, -headR * 0.30, -headR * 0.12, -headR * 0.32);
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.moveTo(headR * 0.12, -headR * 0.32);
+      ctx.quadraticCurveTo(headR * 0.24, -headR * 0.30, headR * 0.34, -headR * 0.24);
+      ctx.stroke();
+    } else if (emotion === 'confused') {
+      // Inquisitive asymmetric: one down, one up
+      ctx.beginPath();
+      ctx.moveTo(-headR * 0.35, -headR * 0.23);
+      ctx.quadraticCurveTo(-headR * 0.24, -headR * 0.21, -headR * 0.12, -headR * 0.25);
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.moveTo(headR * 0.12, -headR * 0.27);
+      ctx.quadraticCurveTo(headR * 0.24, -headR * 0.34, headR * 0.36, -headR * 0.28);
+      ctx.stroke();
+    } else if (emotion === 'determined' || emotion === 'focused' || emotion === 'intense') {
+      // Firm straight brows angled slightly downward towards center
+      ctx.beginPath();
+      ctx.moveTo(-headR * 0.35, -headR * 0.26);
+      ctx.lineTo(-headR * 0.13, -headR * 0.23);
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.moveTo(headR * 0.13, -headR * 0.23);
+      ctx.lineTo(headR * 0.35, -headR * 0.26);
+      ctx.stroke();
+    } else if (emotion === 'exhausted') {
+      // Drooping flat/low brows
+      ctx.beginPath();
+      ctx.moveTo(-headR * 0.34, -headR * 0.19);
+      ctx.quadraticCurveTo(-headR * 0.23, -headR * 0.22, -headR * 0.13, -headR * 0.22);
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.moveTo(headR * 0.13, -headR * 0.22);
+      ctx.quadraticCurveTo(headR * 0.24, -headR * 0.22, headR * 0.34, -headR * 0.19);
+      ctx.stroke();
+    } else {
+      // Neutral relaxed arc
+      ctx.beginPath();
+      ctx.moveTo(-headR * 0.36, -headR * 0.24);
+      ctx.quadraticCurveTo(-headR * 0.24, -headR * 0.28, -headR * 0.12, -headR * 0.22);
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.moveTo(headR * 0.12, -headR * 0.22);
+      ctx.quadraticCurveTo(headR * 0.24, -headR * 0.28, headR * 0.36, -headR * 0.24);
+      ctx.stroke();
+    }
+
+    ctx.restore();
+  }
+
+  private drawBlobHeadMouth(
+    ctx: CanvasRenderingContext2D,
+    emotion: CharacterEmotionV5,
+    action: CharacterActionV5,
+    headR: number,
+    ink: string
+  ) {
+    ctx.save();
+    ctx.translate(0, headR * 0.38);
+    ctx.strokeStyle = ink;
+    ctx.lineWidth = 2.4;
+    ctx.lineCap = 'round';
+
+    const isSpeaking = action === 'speak' || action === 'speak_gestural';
+    if (isSpeaking) {
+      // 3–5 held mouth shapes for speech beats (clean round open shape)
+      ctx.beginPath();
+      ctx.ellipse(0, 0, headR * 0.16, headR * 0.11, 0, 0, Math.PI * 2);
+      ctx.fillStyle = '#261612';
+      ctx.fill();
+      ctx.stroke();
+    } else if (emotion === 'happy' || emotion === 'laughing' || emotion === 'confident' || emotion === 'relief') {
+      // Gentle smile arc
+      ctx.beginPath();
+      ctx.arc(0, -headR * 0.02, headR * 0.16, 0.2 * Math.PI, 0.8 * Math.PI, false);
+      ctx.stroke();
+    } else if (emotion === 'shocked' || emotion === 'surprised' || emotion === 'afraid' || emotion === 'panic') {
+      // Small surprise oval
+      ctx.beginPath();
+      ctx.ellipse(0, 0, headR * 0.11, headR * 0.14, 0, 0, Math.PI * 2);
+      ctx.fillStyle = '#261612';
+      ctx.fill();
+      ctx.stroke();
+    } else if (emotion === 'sad' || emotion === 'somber') {
+      // Gentle downturned curve
+      ctx.beginPath();
+      ctx.arc(0, headR * 0.15, headR * 0.16, 1.2 * Math.PI, 1.8 * Math.PI, false);
+      ctx.stroke();
+    } else if (emotion === 'angry') {
+      // Tight stern grimace line
+      ctx.beginPath();
+      ctx.moveTo(-headR * 0.14, headR * 0.04);
+      ctx.quadraticCurveTo(0, headR * 0.01, headR * 0.14, headR * 0.04);
+      ctx.stroke();
+    } else if (emotion === 'curious') {
+      // Small inquiring circle
+      ctx.beginPath();
+      ctx.arc(0, headR * 0.02, headR * 0.065, 0, Math.PI * 2);
+      ctx.fillStyle = '#261612';
+      ctx.fill();
+      ctx.stroke();
+    } else if (emotion === 'confused') {
+      // Inquisitive tilted line
+      ctx.beginPath();
+      ctx.moveTo(-headR * 0.13, headR * 0.03);
+      ctx.quadraticCurveTo(0, -headR * 0.02, headR * 0.13, 0);
+      ctx.stroke();
+    } else if (emotion === 'determined' || emotion === 'focused' || emotion === 'intense') {
+      // Firm horizontal line
+      ctx.beginPath();
+      ctx.moveTo(-headR * 0.12, 0);
+      ctx.lineTo(headR * 0.12, 0);
+      ctx.stroke();
+    } else if (emotion === 'exhausted') {
+      // Drooping sigh line
+      ctx.beginPath();
+      ctx.moveTo(-headR * 0.12, headR * 0.04);
+      ctx.quadraticCurveTo(0, headR * 0.02, headR * 0.12, headR * 0.04);
+      ctx.stroke();
+    } else {
+      // Neutral: Clean subtle line / neutral curve
+      ctx.beginPath();
+      ctx.moveTo(-headR * 0.13, 0);
+      ctx.quadraticCurveTo(0, headR * 0.025, headR * 0.13, 0);
+      ctx.stroke();
     }
     ctx.restore();
   }
@@ -1015,29 +1314,36 @@ export class UniversalCharacterEngine {
     ink: string,
     skin: string
   ) {
-    const limbW = (dna.proportions.limbThicknessPx || 11) * 0.95;
+    const isBlobHead = Boolean(
+      (dna as any).visualStyle === 'documentary_blob_head' ||
+      (dna as any).style === 'documentary_blob_head' ||
+      (dna.proportions?.headRatio && dna.proportions.headRatio >= 0.30)
+    );
+    const limbW = (dna.proportions.limbThicknessPx || (isBlobHead ? 8.5 : 11)) * 0.95;
     const sleeveCol = dna.costume.primaryColor || '#1B3B6F';
 
     // Left Arm
-    this.drawOrganicLimb(ctx, skel.shoulderL, skel.elbowL, skel.wristL, limbW * 1.15, limbW * 0.85, ink, sleeveCol);
+    this.drawOrganicLimb(ctx, skel.shoulderL, skel.elbowL, skel.wristL, limbW * (isBlobHead ? 1.0 : 1.15), limbW * 0.85, ink, sleeveCol);
     this.drawArticulatedHand(
       ctx,
       skel.wristL,
       skel.handAngleL ?? 0,
       state.action === 'hang' ? 'grip' : 'open',
       ink,
-      skin
+      skin,
+      isBlobHead
     );
 
     // Right Arm
-    this.drawOrganicLimb(ctx, skel.shoulderR, skel.elbowR, skel.wristR, limbW * 1.15, limbW * 0.85, ink, sleeveCol);
+    this.drawOrganicLimb(ctx, skel.shoulderR, skel.elbowR, skel.wristR, limbW * (isBlobHead ? 1.0 : 1.15), limbW * 0.85, ink, sleeveCol);
     this.drawArticulatedHand(
       ctx,
       skel.wristR,
       skel.handAngleR ?? 0,
       state.action === 'hang' ? 'pinch_high' : dna.heldProps?.rightHand ? 'grip' : 'open',
       ink,
-      skin
+      skin,
+      isBlobHead
     );
   }
 
@@ -1104,7 +1410,8 @@ export class UniversalCharacterEngine {
     angle: number,
     gripType: 'open' | 'grip' | 'pinch_high',
     ink: string,
-    skin: string
+    skin: string,
+    isBlobHead: boolean = false
   ) {
     ctx.save();
     ctx.translate(pos.x, pos.y);
@@ -1112,6 +1419,26 @@ export class UniversalCharacterEngine {
     ctx.fillStyle = skin;
     ctx.strokeStyle = ink;
     ctx.lineWidth = 1.8;
+
+    if (isBlobHead) {
+      // Documentary Blob-Head: Simple mitten / stub shape, no finger articulation
+      ctx.beginPath();
+      if (gripType === 'grip') {
+        ctx.arc(4, 0, 6.0, 0, Math.PI * 2);
+      } else {
+        // Mitten palm
+        ctx.ellipse(4, 0, 5.5, 7.0, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        // Thumb stub
+        ctx.beginPath();
+        ctx.ellipse(1.0, -3.2, 2.2, 3.5, -0.6, 0, Math.PI * 2);
+      }
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+      return;
+    }
 
     if (gripType === 'grip') {
       ctx.beginPath();
@@ -1242,28 +1569,170 @@ export class UniversalCharacterEngine {
   }
 
   // ============================================================================
-  // PROPS & ARTIFACTS (Strict Grip Anchor Alignment)
+  // PROPS & ARTIFACTS (Strict Grip Anchor Alignment & Zero Offset Parenting)
   // ============================================================================
+  /**
+   * INVARIANT AUDIT: Any handheld prop must be parented to the hand bone with zero positional offset tolerance.
+   * Validate that prop_position == hand_bone_world_position ± 2px before finalizing render.
+   * Reject frames where prop-to-hand distance exceeds 5px.
+   */
+  public validateHandheldProps(
+    dna: CharacterDNA_V5,
+    state: CharacterStateV5,
+    skel: SkeletalRigV5 & CanonicalJointHierarchy
+  ): PropAttachmentAudit[] {
+    const audits: PropAttachmentAudit[] = [];
+    const charId = dna.characterId || dna.canonicalName || 'character';
+    const held = dna.heldProps || {};
+
+    const checkHand = (
+      hand: 'right' | 'left',
+      propType: string | undefined,
+      handBone: Point2D,
+      explicitOffset?: [number, number],
+      explicitWorldPos?: Point2D
+    ) => {
+      if (!propType || propType === 'none' || propType.trim() === '') {
+        return;
+      }
+
+      // Hand bone world coordinates
+      const handBoneWorld: Point2D = {
+        x: state.screenX + handBone.x * (state.scale * state.facing),
+        y: state.screenY + handBone.y * state.scale,
+      };
+
+      // Prop world position (zero offset tolerance by default)
+      let propWorld: Point2D;
+      if (explicitWorldPos) {
+        propWorld = { x: explicitWorldPos.x, y: explicitWorldPos.y };
+      } else if (explicitOffset) {
+        propWorld = {
+          x: handBoneWorld.x + explicitOffset[0],
+          y: handBoneWorld.y + explicitOffset[1],
+        };
+      } else {
+        // Zero positional offset tolerance
+        propWorld = { x: handBoneWorld.x, y: handBoneWorld.y };
+      }
+
+      const dx = propWorld.x - handBoneWorld.x;
+      const dy = propWorld.y - handBoneWorld.y;
+      const distance = Math.hypot(dx, dy);
+      const withinTolerance = distance <= 2.0; // ± 2px tolerance
+      const rejected = distance > 5.0; // Reject frame if > 5px
+
+      const audit: PropAttachmentAudit = {
+        characterId: charId,
+        hand,
+        propType,
+        prop_position: { x: Number(propWorld.x.toFixed(2)), y: Number(propWorld.y.toFixed(2)) },
+        hand_bone_world_position: { x: Number(handBoneWorld.x.toFixed(2)), y: Number(handBoneWorld.y.toFixed(2)) },
+        distance: Number(distance.toFixed(3)),
+        withinTolerance,
+        rejected,
+      };
+
+      // Record to window telemetry if running inside browser/runner context
+      if (typeof window !== 'undefined') {
+        const win = window as any;
+        win.__lastPropAudits = win.__lastPropAudits || [];
+        win.__lastPropAudits.push(audit);
+
+        if (win.__renderMetrics) {
+          if (!win.__renderMetrics.propAttachmentAudit) {
+            win.__renderMetrics.propAttachmentAudit = {
+              passed: true,
+              maxDistance: 0,
+              checkedCount: 0,
+              violations: [],
+            };
+          }
+          const pa = win.__renderMetrics.propAttachmentAudit;
+          pa.checkedCount++;
+          pa.maxDistance = Math.max(pa.maxDistance, distance);
+          if (!withinTolerance) {
+            pa.passed = false;
+            pa.violations.push(audit);
+          }
+        }
+      }
+
+      // Strict Frame Rejection Rule: Reject frames where prop-to-hand distance exceeds 5px
+      if (rejected) {
+        throw new Error(
+          `FRAME_REJECTED: Handheld prop-to-hand distance ${distance.toFixed(2)}px exceeds 5px threshold ` +
+          `(actor: "${charId}", hand: "${hand}", prop: "${propType}", propPos: [${propWorld.x.toFixed(1)}, ${propWorld.y.toFixed(1)}], ` +
+          `handBonePos: [${handBoneWorld.x.toFixed(1)}, ${handBoneWorld.y.toFixed(1)}])`
+        );
+      }
+
+      audits.push(audit);
+    };
+
+    checkHand('right', held.rightHand, skel.handR, state.propOffsetR, state.propWorldPosR);
+    checkHand('left', held.leftHand, skel.handL, state.propOffsetL, state.propWorldPosL);
+
+    return audits;
+  }
+
   private drawProps(
     ctx: CanvasRenderingContext2D,
     dna: CharacterDNA_V5,
     state: CharacterStateV5,
     skel: SkeletalRigV5 & CanonicalJointHierarchy
   ) {
-    const rHand = skel.handR;
-    const rAngle = skel.handAngleR ?? 0;
     const propR = (dna.heldProps?.rightHand as string) || '';
+    const propL = (dna.heldProps?.leftHand as string) || '';
 
-    const isReadingLetter = propR === 'letter_scroll_open' ||
+    // Right hand prop parenting with zero positional offset tolerance
+    if (propR && propR !== 'none') {
+      const scaleX = state.scale * state.facing || 1;
+      const scaleY = state.scale || 1;
+      const localOffX = state.propOffsetR ? state.propOffsetR[0] / scaleX : 0;
+      const localOffY = state.propOffsetR ? state.propOffsetR[1] / scaleY : 0;
+      const rHand = skel.handR;
+      const rAngle = skel.handAngleR ?? 0;
+
+      ctx.save();
+      ctx.translate(rHand.x + localOffX, rHand.y + localOffY);
+      this.renderPropVisual(ctx, propR, rAngle, dna, state, false);
+      ctx.restore();
+    }
+
+    // Left hand prop parenting with zero positional offset tolerance
+    if (propL && propL !== 'none') {
+      const scaleX = state.scale * state.facing || 1;
+      const scaleY = state.scale || 1;
+      const localOffX = state.propOffsetL ? state.propOffsetL[0] / scaleX : 0;
+      const localOffY = state.propOffsetL ? state.propOffsetL[1] / scaleY : 0;
+      const lHand = skel.handL;
+      const lAngle = skel.handAngleL ?? 0;
+
+      ctx.save();
+      ctx.translate(lHand.x + localOffX, lHand.y + localOffY);
+      this.renderPropVisual(ctx, propL, lAngle, dna, state, true);
+      ctx.restore();
+    }
+  }
+
+  private renderPropVisual(
+    ctx: CanvasRenderingContext2D,
+    propType: string,
+    handAngle: number,
+    dna: CharacterDNA_V5,
+    state: CharacterStateV5,
+    isLeftHand: boolean
+  ) {
+    const isReadingLetter = propType === 'letter_scroll_open' ||
       ((state.action === 'read' || state.action === 'open_letter' || state.action === 'read_letter' || (state.action === 'laugh' && (((dna as any).canonicalName || (dna as any).name || '').toLowerCase().includes('aiko')))) &&
-       (propR.includes('letter') || propR.includes('parchment') || propR.includes('envelope')));
+       (propType.includes('letter') || propType.includes('parchment') || propType.includes('envelope')));
 
-    const isCoffee = propR === 'steaming_coffee_cup' || propR === 'coffee_cup' || state.action === 'sip_coffee' || state.action === 'drink_coffee';
+    const isCoffee = propType === 'steaming_coffee_cup' || propType === 'coffee_cup' || state.action === 'sip_coffee' || state.action === 'drink_coffee';
 
     if (isReadingLetter) {
       ctx.save();
-      ctx.translate(rHand.x, rHand.y);
-      ctx.rotate(rAngle * 0.4);
+      ctx.rotate(handAngle * 0.4);
       ctx.fillStyle = '#FFF9EC';
       ctx.fillRect(-45, -55, 90, 110);
       ctx.strokeStyle = '#181614';
@@ -1285,10 +1754,9 @@ export class UniversalCharacterEngine {
       ctx.lineWidth = 1.0;
       ctx.strokeRect(18, 25, 14, 14);
       ctx.restore();
-    } else if (propR === 'letter_scroll_sealed') {
+    } else if (propType === 'letter_scroll_sealed') {
       ctx.save();
-      ctx.translate(rHand.x, rHand.y);
-      ctx.rotate(rAngle + 0.15);
+      ctx.rotate(handAngle + 0.15);
       ctx.fillStyle = '#F5E4B8';
       ctx.fillRect(-12, -22, 24, 44);
       ctx.strokeStyle = '#181614';
@@ -1300,10 +1768,9 @@ export class UniversalCharacterEngine {
       ctx.arc(0, 0, 5.5, 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
-    } else if (propR === 'tablet_computer') {
+    } else if (propType === 'tablet_computer') {
       ctx.save();
-      ctx.translate(rHand.x, rHand.y);
-      ctx.rotate(rAngle + 0.1);
+      ctx.rotate(handAngle + 0.1);
       ctx.fillStyle = '#111822';
       ctx.fillRect(-14, -24, 28, 48);
       ctx.strokeStyle = '#00D2FF';
@@ -1313,10 +1780,9 @@ export class UniversalCharacterEngine {
       ctx.fillStyle = 'rgba(0, 210, 255, 0.45)';
       ctx.fillRect(-12, -22, 24, 44);
       ctx.restore();
-    } else if (propR === 'scientific_scanner') {
+    } else if (propType === 'scientific_scanner') {
       ctx.save();
-      ctx.translate(rHand.x, rHand.y);
-      ctx.rotate(rAngle);
+      ctx.rotate(handAngle);
       ctx.fillStyle = '#333333';
       ctx.fillRect(-10, -20, 20, 40);
       ctx.strokeStyle = '#F77F00';
@@ -1328,10 +1794,9 @@ export class UniversalCharacterEngine {
       ctx.arc(0, -12, 5, 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
-    } else if (propR === 'letter_envelope' || propR === 'envelope') {
+    } else if (propType === 'letter_envelope' || propType === 'envelope') {
       ctx.save();
-      ctx.translate(rHand.x, rHand.y);
-      ctx.rotate(rAngle + 0.1);
+      ctx.rotate(handAngle + 0.1);
       ctx.fillStyle = '#E8DCC0';
       ctx.fillRect(-18, -14, 36, 28);
       ctx.strokeStyle = '#181614';
@@ -1345,7 +1810,6 @@ export class UniversalCharacterEngine {
       ctx.restore();
     } else if (isCoffee) {
       ctx.save();
-      ctx.translate(rHand.x, rHand.y);
       ctx.fillStyle = '#FAFAFA';
       ctx.fillRect(-10, -16, 20, 26);
       ctx.strokeStyle = '#181614';
@@ -1365,10 +1829,9 @@ export class UniversalCharacterEngine {
       ctx.quadraticCurveTo(8, -26, 4, -32);
       ctx.stroke();
       ctx.restore();
-    } else if (propR === 'stethascope_or_clipboard' || propR === 'clipboard') {
+    } else if (propType === 'stethascope_or_clipboard' || propType === 'clipboard') {
       ctx.save();
-      ctx.translate(rHand.x, rHand.y);
-      ctx.rotate(rAngle * 0.2);
+      ctx.rotate(handAngle * 0.2);
       ctx.fillStyle = '#8D6E63';
       ctx.fillRect(-15, -24, 30, 48);
       ctx.strokeStyle = '#181614';
@@ -1379,10 +1842,9 @@ export class UniversalCharacterEngine {
       ctx.fillStyle = '#CFD8DC';
       ctx.fillRect(-6, -26, 12, 6);
       ctx.restore();
-    } else if (propR && propR !== 'none') {
+    } else if (propType && propType !== 'none') {
       ctx.save();
-      ctx.translate(rHand.x, rHand.y);
-      ctx.rotate(rAngle);
+      ctx.rotate(handAngle);
       ctx.fillStyle = '#37474F';
       ctx.fillRect(-12, -16, 24, 32);
       ctx.strokeStyle = '#ECEFF1';

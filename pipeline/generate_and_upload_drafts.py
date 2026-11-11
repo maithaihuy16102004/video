@@ -15,7 +15,18 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "pipeline"))
 
-from studio_api import JOBS, ENGINE, RENDER_LOCK, prepare_voice, render_spec, upload_video_and_remove_local, voice_duration
+from studio_api import (
+    JOBS,
+    ENGINE,
+    RENDER_LOCK,
+    prepare_voice,
+    render_spec,
+    upload_video_and_remove_local,
+    voice_duration,
+    compute_file_sha256,
+    verify_variant_parameters_changed,
+    verify_render_hash_differs,
+)
 
 
 def main() -> None:
@@ -53,22 +64,51 @@ def main() -> None:
     ]
 
     print(f"[2/4] Rendering 3 distinctly different drafts ({aspect})...")
+    draft_1_hash = None
+    draft_1_config = None
+
     with RENDER_LOCK:
         target.write_bytes(voice.read_bytes())
         for i, (label, desc) in enumerate(variant_configs):
             print(f"\n--- Generating Draft {i + 1}/3: '{label}' ({desc}) ---")
             spec = render_spec(payload, duration, folder, subtitles, i, f"variant-{i + 1}.json", segments, cast)
+            spec_data = json.loads(spec.read_text(encoding="utf-8")) if spec.exists() else {}
             out = folder / f"draft-{i + 1}.mp4"
+            staged_out = folder / f".staging_draft-{i + 1}.mp4"
 
-            # Render draft preview with PyCairo engine
+            current_config = {
+                "variant_index": i,
+                "scene_seed": spec_data.get("variantSeed", i),
+                "camera_initial": spec_data.get("shots", [{}])[0].get("cameraPreset") if spec_data.get("shots") else i,
+                "camera_keyframes": len(spec_data.get("shots", [])),
+                "voice_hash": compute_file_sha256(voice),
+                "duration": duration,
+                "speech_rate": segments[0].get("rate") if segments else None,
+            }
+
+            if i == 0:
+                draft_1_config = current_config
+            else:
+                # Before writing draft-2 and draft-3:
+                # 1. Verify scene seed, camera, or dialogue timing has deliberately changed
+                verify_variant_parameters_changed(i, current_config, draft_1_config)
+
+            # Render draft preview with PyCairo engine to staged output
             res = subprocess.run(
-                [sys.executable, str(ROOT / "pipeline" / "fast_video_draft.py"), "--mode", "preview", "--spec", str(spec), "--out", str(out)],
+                [sys.executable, str(ROOT / "pipeline" / "fast_video_draft.py"), "--mode", "preview", "--spec", str(spec), "--out", str(staged_out)],
                 cwd=ROOT, capture_output=True, text=True, encoding="utf-8", errors="replace"
             )
             if res.returncode != 0:
-                out.unlink(missing_ok=True)
+                staged_out.unlink(missing_ok=True)
                 print(f"Error rendering draft {i + 1}: {res.stderr[:300]}")
                 continue
+
+            if i == 0:
+                draft_1_hash = compute_file_sha256(staged_out)
+                shutil.move(str(staged_out), str(out))
+            else:
+                # 2. Verify render hash differs from draft-1's output hash before writing final file
+                verify_render_hash_differs(i, staged_out, draft_1_hash, out)
 
             file_size_mb = out.stat().st_size / (1024 * 1024)
             print(f"Rendered local {out.name} ({file_size_mb:.1f} MB). Creating contact sheet...")

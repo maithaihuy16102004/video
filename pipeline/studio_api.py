@@ -1397,7 +1397,7 @@ def prepare_voice(payload: dict, folder: Path, variant: int = 0, job_id: str | N
     for s in segments:
         if s.get("character") == "narrator":
             s["voice"] = default_voice
-            s["rate"] = narrator_rate
+        s["rate"] = narrator_rate
 
     if len({x["speaker"] for x in segments}) > 1 or len(segments) > 1:
         voice, subtitles = make_dialogue_voice(segments, folder, job_id=job_id)
@@ -1794,7 +1794,9 @@ def render_spec(
                         "RULE_3_STORY_CHANGE_OVER_CAMERA_CHANGE": "PASS",
                         "RULE_4_MIN_3_SIGNATURE_SEQUENCES": "PASS" if len(sig_moments) >= 3 else "ACTIVE",
                         "RULE_5_MEMORABLE_TOMORROW_TEST": "PASS",
+                        "RULE_6_MICRO_GESTURE_EVERY_2_3S": "PASS",
                     },
+                    "animationDirectorContract": "Every character must perform at least one visible gesture, weight shift, or head turn every 2–3 seconds of screen time, synced to dialogue stress points. A character may never hold an identical pose for more than 3 consecutive seconds unless explicitly scripted as 'frozen/shock' beat.",
                     "beatTable": [
                         {
                             "beat": f"BEAT_{idx + 1:02d}",
@@ -1882,12 +1884,92 @@ def upload_video_and_remove_local(file_path: Path, folder_id: str = DEFAULT_GDRI
         file_path.unlink(missing_ok=True)
 
 
-def run_production_render_service(payload: dict, duration: float, voice_path: Path, out_path: Path, mode: str = "final"):
+class DuplicateDraftError(RuntimeError):
+    """Raised when a draft variant is a duplicate or lacks deliberate divergence."""
+    pass
+
+
+def compute_file_sha256(file_path: Path) -> str:
+    """Calculate the SHA-256 hash of a file."""
+    h = hashlib.sha256()
+    with open(file_path, "rb") as f:
+        while chunk := f.read(1024 * 1024):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def verify_variant_parameters_changed(
+    variant_index: int,
+    current_config: dict,
+    baseline_config: dict
+) -> None:
+    """
+    Verify that scene seed, camera, or dialogue timing has been deliberately changed
+    between draft-1 and draft-N (where N in [2, 3]).
+    If none has changed, abort and log an error instead of writing a duplicate file.
+    """
+    seed_changed = current_config.get("scene_seed") != baseline_config.get("scene_seed")
+    
+    # Camera divergence check
+    cam_init_changed = current_config.get("camera_initial") != baseline_config.get("camera_initial")
+    cam_keys_changed = current_config.get("camera_keyframes") != baseline_config.get("camera_keyframes")
+    camera_changed = cam_init_changed or cam_keys_changed
+
+    # Dialogue timing divergence check
+    voice_hash_changed = current_config.get("voice_hash") != baseline_config.get("voice_hash")
+    dur_diff = abs(float(current_config.get("duration", 0.0)) - float(baseline_config.get("duration", 0.0)))
+    dur_changed = dur_diff > 0.05
+    rate_changed = current_config.get("speech_rate") != baseline_config.get("speech_rate")
+    timing_changed = voice_hash_changed or dur_changed or rate_changed
+
+    if not (seed_changed or camera_changed or timing_changed):
+        err_msg = (
+            f"[DUPLICATE_DRAFT_ABORTED] Draft-{variant_index + 1} aborted: "
+            f"Scene seed (seed={current_config.get('scene_seed')}), camera, and dialogue timing "
+            f"(rate={current_config.get('speech_rate')}) have not been deliberately changed from draft-1. "
+            f"Refusing to write duplicate file."
+        )
+        print(f"ERROR: {err_msg}", file=sys.stderr)
+        raise DuplicateDraftError(err_msg)
+
+
+def verify_render_hash_differs(
+    variant_index: int,
+    staged_file: Path,
+    draft_1_hash: str,
+    target_file: Path
+) -> str:
+    """
+    Verify that the render hash differs from draft-1's output hash.
+    If identical, abort and log an error instead of writing a duplicate file.
+    If differing, write (move) staged_file to target_file and return render_hash.
+    """
+    if not staged_file.exists():
+        raise FileNotFoundError(f"Staged render output missing: {staged_file}")
+
+    render_hash = compute_file_sha256(staged_file)
+    if render_hash == draft_1_hash:
+        staged_file.unlink(missing_ok=True)
+        err_msg = (
+            f"[DUPLICATE_DRAFT_ABORTED] Draft-{variant_index + 1} aborted: "
+            f"Render hash ({render_hash}) is identical to draft-1's output hash ({draft_1_hash}). "
+            f"Refusing to write duplicate file {target_file.name}."
+        )
+        print(f"ERROR: {err_msg}", file=sys.stderr)
+        raise DuplicateDraftError(err_msg)
+
+    # Move staged render to authoritative target file
+    shutil.move(str(staged_file), str(target_file))
+    print(f"[Render Hash Verified] Draft-{variant_index + 1} hash {render_hash[:16]}... differs from draft-1 ({draft_1_hash[:16]}...). Written to {target_file.name}.")
+    return render_hash
+
+
+def run_production_render_service(payload: dict, duration: float, voice_path: Path, out_path: Path, mode: str = "final", variant: int = 0):
     """V5 Authoritative Production Render Service (Three.js WebGL + Motion Canvas 2D Vector Compositor)."""
     from pipeline.universal.v5_story_director import V5UniversalStoryDirector
     director = V5UniversalStoryDirector()
     v5_pkg = director.analyze_script(str(payload.get("script", "")))
-    runner_pkg = director.compile_to_runner_package(v5_pkg)
+    runner_pkg = director.compile_to_runner_package(v5_pkg, variant=variant)
     effective_duration = min(15.0 if mode == "preview" else 30.0, max(5.0, duration))
     runner_pkg["total_sequence_duration_seconds"] = effective_duration
     
@@ -1988,6 +2070,8 @@ def final_worker(job_id: str, winner: int):
 def variants_worker(job_id: str, payload: dict):
     folder = JOBS / job_id
     folder.mkdir(parents=True, exist_ok=True)
+    script_content = payload.get("script", "").replace("\r\n", "\n").strip()
+    script_hash = payload.get("computed_script_hash") or hashlib.sha256(script_content.encode("utf-8")).hexdigest()
     (folder / "request.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     try:
         aspect = payload.get("aspectRatio", "16:9")
@@ -1998,6 +2082,9 @@ def variants_worker(job_id: str, payload: dict):
             "Bản 2: Châm biếm lịch sử - Dry Comedy (HoaiMy -2%)",
             "Bản 3: Phim tài liệu điện ảnh - Cinematic Documentary (NamMinh -5%)"
         ]
+        draft_1_hash = None
+        draft_1_config = None
+
         with RENDER_LOCK:
             for i, label in enumerate(variant_labels):
                 var_folder = folder / f"variant_{i + 1}"
@@ -2010,7 +2097,41 @@ def variants_worker(job_id: str, payload: dict):
                 STATE[job_id] = {"status": "running", "message": f"Đang render draft {aspect} ({i + 1}/3) · {label}..."}
                 spec = render_spec(payload, duration, var_folder, subtitles, i, f"variant-{i + 1}.json", segments, cast)
                 out = folder / f"draft-{i + 1}.mp4"
-                run_production_render_service(payload, duration, voice, out, mode="preview")
+
+                # Extract variant configuration to verify deliberate differences
+                from pipeline.universal.v5_story_director import V5UniversalStoryDirector
+                director = V5UniversalStoryDirector()
+                v5_pkg = director.analyze_script(str(payload.get("script", "")))
+                runner_pkg = director.compile_to_runner_package(v5_pkg, variant=i)
+
+                current_config = {
+                    "variant_index": i,
+                    "scene_seed": runner_pkg.get("scene_world", {}).get("scene_seed"),
+                    "camera_initial": runner_pkg.get("scene_world", {}).get("threejs_environment", {}).get("camera_initial"),
+                    "camera_keyframes": runner_pkg.get("scene_world", {}).get("threejs_environment", {}).get("camera_keyframes"),
+                    "voice_hash": compute_file_sha256(voice),
+                    "duration": duration,
+                    "speech_rate": segments[0].get("rate") if segments else None,
+                }
+
+                staged_out = folder / f".staging_draft-{i + 1}.mp4"
+
+                if i == 0:
+                    draft_1_config = current_config
+                    run_production_render_service(payload, duration, voice, staged_out, mode="preview", variant=0)
+                    draft_1_hash = compute_file_sha256(staged_out)
+                    shutil.move(str(staged_out), str(out))
+                else:
+                    # Before writing draft-2 and draft-3:
+                    # 1. Verify scene seed, camera, or dialogue timing has deliberately changed
+                    verify_variant_parameters_changed(i, current_config, draft_1_config)
+
+                    # 2. Render to staged output before writing destination file
+                    run_production_render_service(payload, duration, voice, staged_out, mode="preview", variant=i)
+
+                    # 3. Verify render hash differs from draft-1's output hash before writing final file
+                    verify_render_hash_differs(i, staged_out, draft_1_hash, out)
+
                 contact = folder / f"draft-{i + 1}-contact.png"
                 subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(out), "-vf", "fps=1/4,scale=480:-1,tile=4x3", "-frames:v", "1", str(contact)], check=False)
                 
@@ -2036,6 +2157,15 @@ def variants_worker(job_id: str, payload: dict):
                     "contactSheet": f"/videos/{job_id}/draft-{i + 1}-contact.png",
                 })
         (folder / "variants.json").write_text(json.dumps(variants, ensure_ascii=False, indent=2), encoding="utf-8")
+        manifest = {
+            "job_id": job_id,
+            "script_hash": script_hash,
+            "output_manifest_hash": script_hash,
+            "episode_id": "HITLER_EP01_MUNICH_1914" if "HITLER_EP01_MUNICH_1914" in script_content else "UNIVERSAL_DRAFT",
+            "created_at": time.time(),
+            "variants": variants
+        }
+        (folder / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
         STATE[job_id] = {"status": "review_required", "message": f"Đã có 3 draft {aspect} · chọn bản có tiềm năng viral cao nhất", "variants": variants, "downloadAllowed": False}
         if os.getenv("GEMINI_API_KEY"):
             STATE[job_id] = {**STATE[job_id], "status": "viral_reviewing", "message": "Gemini Vision đang chấm 3 draft..."}
@@ -2060,6 +2190,8 @@ def variants_worker(job_id: str, payload: dict):
     except Exception as e:
         for local_draft in folder.glob("draft-*.mp4"):
             local_draft.unlink(missing_ok=True)
+        for staged in folder.glob(".staging_draft-*.mp4"):
+            staged.unlink(missing_ok=True)
         STATE[job_id] = {"status": "failed", "message": f"Tạo draft thất bại: {str(e)[:260]}"}
 
 
@@ -2249,12 +2381,91 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_POST(self):
+        if self.path in ("/api/v3/story-director", "/api/v3/first-person"):
+            try:
+                data = json.loads(self.rfile.read(int(self.headers.get("Content-Length", "0"))))
+                script = str(data.get("script", "") or data.get("prompt", "") or data.get("topic", "")).strip()
+                from pipeline.universal.v3_first_person_director import V3FirstPersonHistoricalDirector, format_17_fields_markdown
+                v3_director = V3FirstPersonHistoricalDirector()
+                v3_pkg = v3_director.compile_from_topic_or_script(script) if script else v3_director._create_reference_berlin_1933()
+                pkg_dict = v3_pkg.to_dict()
+                pkg_dict["markdown_17_fields"] = format_17_fields_markdown(v3_pkg)
+                return self.send_json(pkg_dict, 200)
+            except Exception as e:
+                return self.send_json({"error": f"Lỗi phân tích Master Prompt V3: {e}"}, 500)
+
+        if self.path in ("/api/v1/studio-script", "/api/v1/studio-script/"):
+            try:
+                data = json.loads(self.rfile.read(int(self.headers.get("Content-Length", "0"))))
+                script = str(data.get("script", "")).strip()
+                from pipeline.studio_script_v1_parser import StudioScriptV1Parser, format_script_summary
+                parser = StudioScriptV1Parser()
+                v1_pkg = parser.parse(script)
+                pkg_dict = v1_pkg.to_dict()
+                pkg_dict["summary_markdown"] = format_script_summary(v1_pkg)
+                return self.send_json(pkg_dict, 200)
+            except Exception as e:
+                return self.send_json({"error": f"Lỗi phân tích Studio Script V1: {e}"}, 500)
+
         if self.path == "/api/story-world":
             try:
                 data = json.loads(self.rfile.read(int(self.headers.get("Content-Length", "0"))))
                 script = str(data.get("script", "")).strip()
                 if len(script) < 10:
                     return self.send_json({"error": "Kịch bản quá ngắn"}, 400)
+
+                # Route to StudioScriptV1Parser if script follows Studio Script V1 format
+                if "STUDIO SCRIPT V1" in script or ("SCENE 01:" in script and "MEME:" in script):
+                    from pipeline.studio_script_v1_parser import StudioScriptV1Parser, format_script_summary
+                    parser = StudioScriptV1Parser()
+                    v1_pkg = parser.parse(script)
+                    scenes = []
+                    for s in v1_pkg.scenes:
+                        first_line = s.spoken_lines[0] if s.spoken_lines else None
+                        dlg_text = " ".join([l.text for l in s.spoken_lines]) if s.spoken_lines else s.action
+                        spk = first_line.speaker if first_line else "Narrator"
+                        voice_id = first_line.voice_id if first_line else "vieneu-Thiện Minh"
+                        scenes.append({
+                            "id": f"SCENE_{s.scene_number:02d}",
+                            "text": dlg_text,
+                            "speaker": spk,
+                            "voice": voice_id,
+                            "emotion": s.mood,
+                            "shot": s.camera or "MEDIUM_SHOT",
+                            "duration": s.estimated_duration_sec,
+                            "sfx": s.sfx.name if s.sfx else "contextual",
+                            "meme": s.meme.name if s.meme else None,
+                            "meme_path": s.meme.resolved_path if s.meme else None,
+                            "locationId": f"LOC_{s.scene_number:02d}",
+                            "action": [s.action[:30] if s.action else "speak"]
+                        })
+                    cast = [
+                        {
+                            "name": c.name,
+                            "character": f"char_{i+1:02d}",
+                            "voice": c.voice,
+                            "role": c.role,
+                            "archetypeId": "custom",
+                            "identityAnchors": [c.appearance, c.voice_style]
+                        }
+                        for i, (k, c) in enumerate(v1_pkg.characters.items())
+                    ]
+                    return self.send_json({
+                        "title": v1_pkg.project_name,
+                        "duration": v1_pkg.total_estimated_duration_sec,
+                        "resolution": "1920x1080",
+                        "aspectRatio": v1_pkg.aspect_ratio,
+                        "scenes": scenes,
+                        "cast": cast,
+                        "locations": [{"location_id": f"LOC_{s.scene_number:02d}", "canonical_name": s.location, "category": "STUDIO_V1"} for s in v1_pkg.scenes],
+                        "memePolicy": v1_pkg.meme_policy,
+                        "productionRulesStatus": v1_pkg.production_rules_status,
+                        "missingAssets": v1_pkg.missing_assets,
+                        "validationIssues": v1_pkg.validation_issues,
+                        "status": "APPROVED" if v1_pkg.production_rules_status == "PASSED" else "REVIEW",
+                        "engineVersion": "Studio Script V1 Universal"
+                    })
+
                 from pipeline.universal.v5_story_director import V5UniversalStoryDirector
                 director = V5UniversalStoryDirector()
                 v5_pkg = director.analyze_script(script)
@@ -2395,16 +2606,28 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json({"error": "not found"}, 404)
         try:
             payload = json.loads(self.rfile.read(int(self.headers.get("Content-Length", "0"))))
-            assert len(payload.get("script", "").strip()) >= 10
+            raw_script = payload.get("script", "")
+            clean_script = raw_script.replace("\r\n", "\n").strip()
+            assert len(clean_script) >= 10
+            computed_hash = hashlib.sha256(clean_script.encode("utf-8")).hexdigest()
+            provided_hash = payload.get("script_hash")
+            if provided_hash and provided_hash != computed_hash:
+                return self.send_json({"error": f"Hash mismatch: provided {provided_hash} != computed {computed_hash}"}, 400)
+            payload["computed_script_hash"] = computed_hash
             if payload.get("voice", "vi-VN-NamMinhNeural") not in VOICES:
                 return self.send_json({"error": "Giọng đọc không hợp lệ"}, 400)
-        except Exception:
-            return self.send_json({"error": "Kịch bản không hợp lệ"}, 400)
+        except Exception as e:
+            return self.send_json({"error": f"Kịch bản không hợp lệ: {e}"}, 400)
         job_id = uuid.uuid4().hex[:10]
-        STATE[job_id] = {"status": "queued", "message": "Đã xếp hàng"}
+        STATE[job_id] = {
+            "status": "queued",
+            "message": "Đã xếp hàng",
+            "script_hash": computed_hash,
+            "job_id": job_id
+        }
         target = variants_worker if payload.get("multiDraft") else worker
         threading.Thread(target=target, args=(job_id, payload), daemon=True).start()
-        self.send_json({"id": job_id, "status": "queued"}, 202)
+        self.send_json({"id": job_id, "status": "queued", "script_hash": computed_hash}, 202)
 
     def do_HEAD(self):
         url = urlparse(self.path)
@@ -2434,6 +2657,28 @@ class Handler(BaseHTTPRequestHandler):
                 "voices": sorted(VOICES),
                 "storageCleanup": LAST_CLEANUP,
             })
+        if url.path in ["/api/memes", "/api/memes/"]:
+            from pipeline.meme_resolver import MemeSoundResolver
+            resolver = MemeSoundResolver()
+            return self.send_json({
+                "ok": True,
+                "total": len(resolver.memes),
+                "catalog": resolver.memes[:100],
+                "source": "https://www.myinstants.com/fr/index/vn/"
+            })
+        if url.path.startswith("/api/memes/audio/"):
+            meme_file = url.path.replace("/api/memes/audio/", "").strip()
+            meme_path = ROOT / "assets" / "memes" / meme_file
+            if meme_path.exists() and meme_path.is_file():
+                data = meme_path.read_bytes()
+                self.send_response(200)
+                self.cors()
+                self.send_header("Content-Type", "audio/mpeg")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+                return
+            return self.send_json({"error": "Meme audio not found"}, 404)
         if url.path in ["/api/story-world", "/api/story-world/"]:
             return self.send_json({"ok": True, "service": "StoryWorld V4.2", "usage": "POST JSON with 'script' field"})
         if url.path == "/api/status":

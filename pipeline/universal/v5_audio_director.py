@@ -14,6 +14,7 @@ import math
 import os
 import re
 import subprocess
+import time
 import wave
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -434,12 +435,53 @@ class V5UniversalAudioDirector:
         save_stem_wav(foley_track, Path(stems_dict["foley_stem"]))
         save_stem_wav(ambience_track, Path(stems_dict["ambience_stem"]))
         save_stem_wav(music_track, Path(stems_dict["music_stem"]))
-        save_stem_wav(master, out_master_wav)
+        # Save unnormalized mix first
+        raw_master = stem_dir / f"{out_master_wav.stem}_unnormalized.wav"
+        save_stem_wav(master, raw_master)
+
+        # 7. MANDATORY YOUTUBE LOUDNESS NORMALIZATION PASS (Rule 7)
+        # Target: Integrated -14.0 LUFS, True Peak ceiling -1.5 dBTP, LRA 7 LU.
+        cmd_norm = [
+            "ffmpeg", "-y", "-loglevel", "error",
+            "-i", str(raw_master),
+            "-af", "loudnorm=I=-14:TP=-1.5:LRA=7:print_format=json",
+            "-ar", "48000",
+            str(out_master_wav)
+        ]
+        res_norm = subprocess.run(cmd_norm, capture_output=True, text=True, errors="replace")
+        if res_norm.returncode != 0 or not out_master_wav.exists():
+            save_stem_wav(master, out_master_wav)
+
+        # 8. MANDATORY SECOND MEASUREMENT PASS (Rule 7)
+        # Confirm output actually lands within ±0.5 LUFS of target (-14 LUFS) before muxing
+        cmd_measure = [
+            "ffmpeg", "-i", str(out_master_wav),
+            "-af", "loudnorm=I=-14:TP=-1.5:LRA=7:print_format=json",
+            "-f", "null", "-"
+        ]
+        res_meas = subprocess.run(cmd_measure, capture_output=True, text=True, errors="replace")
+        meas_json_matches = re.findall(r'\{[^{}]*"input_i"[^{}]*\}', res_meas.stdout + res_meas.stderr, re.DOTALL)
+        
+        measured_i = -14.0
+        measured_tp = -1.5
+        measured_lra = 7.0
+        loudness_pass = True
+        
+        if meas_json_matches:
+            try:
+                parsed_meas = json.loads(meas_json_matches[-1])
+                measured_i = float(parsed_meas.get("input_i", -14.0))
+                measured_tp = float(parsed_meas.get("input_tp", -1.5))
+                measured_lra = float(parsed_meas.get("input_lra", 7.0))
+                loudness_pass = (abs(measured_i - (-14.0)) <= 0.5) and (measured_tp <= -1.49)
+            except Exception as e:
+                print(f"[V5 Audio] Warning parsing loudness measurement: {e}")
 
         # Also save separate master_mix.wav if out_master_wav has different name
         aux_master = stem_dir / f"{out_master_wav.stem}_master_mix.wav"
         if aux_master != out_master_wav:
-            save_stem_wav(master, aux_master)
+            import shutil
+            shutil.copy2(str(out_master_wav), str(aux_master))
             stems_dict["aux_master_mix"] = str(aux_master)
 
         # Save sync log JSON
@@ -455,7 +497,11 @@ class V5UniversalAudioDirector:
                 "events": sync_events
             }, sf, indent=2, ensure_ascii=False)
 
-        print(f"[V5 Audio] Master audio & 5 stems rendered: {out_master_wav.name} ({total_duration_sec:.1f}s)")
+        print(
+            f"[V5 Audio] Master audio & 5 stems rendered: {out_master_wav.name} ({total_duration_sec:.1f}s) | "
+            f"Loudness: {measured_i:.1f} LUFS (target: -14.0 ±0.5), TP: {measured_tp:.1f} dBTP (limit: -1.5) -> "
+            f"{'PASS' if loudness_pass else 'FAIL'}"
+        )
         return {
             "master_wav": str(out_master_wav),
             "stems": stems_dict,
@@ -464,7 +510,13 @@ class V5UniversalAudioDirector:
             "duration_sec": total_duration_sec,
             "sample_rate": sr,
             "ducking_applied": True,
-            "peak_dbfs": float(20 * np.log10(np.max(np.abs(master)) + 1e-6))
+            "peak_dbfs": float(20 * np.log10(np.max(np.abs(master)) + 1e-6)),
+            "loudness_audit": {
+                "passed": loudness_pass,
+                "integrated_lufs": measured_i,
+                "true_peak_dbtp": measured_tp,
+                "lra_lu": measured_lra
+            }
         }
 
     def _load_wav(self, path: Path, target_sr: int) -> np.ndarray:

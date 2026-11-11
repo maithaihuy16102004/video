@@ -8,7 +8,7 @@
     #viewport { position: relative; width: 1920px; height: 1080px; }
     #webgl-canvas { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; z-index: 1; }
     #overlay-canvas { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; z-index: 2; pointer-events: none; }
-    #composite-canvas { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; z-index: 3; display: none; }
+    #composite-canvas { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; z-index: 10; display: block; }
   </style>
 </head>
 <body>
@@ -24,7 +24,7 @@
     import { UniversalCharacterEngine } from '/motioncanvas/components/UniversalCharacterEngine.ts';
     import { CinematicOverlayRenderer } from '/motioncanvas/components/CinematicOverlay.ts';
 
-    const w = 1920, h = 1080;
+    let w = 1920, h = 1080;
     const glCanvas = document.getElementById('webgl-canvas');
     const overlayCanvas = document.getElementById('overlay-canvas');
     const compCanvas = document.getElementById('composite-canvas');
@@ -78,7 +78,8 @@
     }
 
     const charEngine = new UniversalCharacterEngine(ctxOverlay);
-    const overlayRenderer = new CinematicOverlayRenderer(ctxOverlay, w, h);
+    const overlayRenderer = new CinematicOverlayRenderer(ctxComp, w, h);
+    window.__overlayRenderer = overlayRenderer;
 
     let activeWorld = null;
     let activePackage = null;
@@ -141,6 +142,32 @@
 
       activePackage = pkg;
 
+      // Handle Dynamic Aspect Ratio / Dimensions (e.g. 9:16 vertical shorts: 1080x1920)
+      if (pkg.width && pkg.height) {
+        w = pkg.width;
+        h = pkg.height;
+      } else if (pkg.aspect_ratio === '9:16') {
+        w = 1080;
+        h = 1920;
+      }
+      document.body.style.width = w + 'px';
+      document.body.style.height = h + 'px';
+      const vp = document.getElementById('viewport');
+      if (vp) {
+        vp.style.width = w + 'px';
+        vp.style.height = h + 'px';
+      }
+      for (const c of [glCanvas, overlayCanvas, compCanvas]) {
+        c.width = w;
+        c.height = h;
+        c.style.width = w + 'px';
+        c.style.height = h + 'px';
+      }
+      if (r) {
+        r.setSize(w, h);
+      }
+      overlayRenderer.resize(w, h);
+
       // 1. Resolve LocationDNA
       const locDna = pkg.scene_world?.location_dna || {
         location_id: pkg.scene_world?.location_id || 'LOC_UNIVERSAL',
@@ -196,14 +223,14 @@
         pkg.scene_world.location_id = 'LOC_EDO_WOODEN_BRIDGE';
         pkg.scene_world.canonical_name = 'Edo Wooden Bridge Canal';
         pkg.scene_world.weather = 'RAIN';
-        // Priority 1 / Defect 7 Fix: Camera elevated to Y=3.8 looking down towards Y=2.65 bridge deck.
-        // Main character Haru standing/hanging is never obscured by bridge deck or underside beams.
+        // Invariant: Elevated camera Y=4.5m keeps >= 60% open sky and characters in lower-middle third
+        // Prevents framing beneath bridge deck and beams
         pkg.scene_world.threejs_environment = {
-          camera_initial: { position: [-2.2, 3.8, 5.6], target: [0.1, 2.7, 0.0], fov: 42 },
+          camera_initial: { position: [-2.0, 4.5, 7.2], target: [0.1, 5.0, 0.0], fov: 44 },
           camera_keyframes: [
-            { t: 0.0, position: [-2.2, 3.8, 5.6], target: [0.1, 2.7, 0.0] },
-            { t: 3.5, position: [-1.0, 3.5, 4.4], target: [0.1, 2.5, 0.0] },
-            { t: 8.0, position: [-0.4, 3.2, 3.4], target: [0.2, 2.3, -0.2] }
+            { t: 0.0, position: [-2.0, 4.5, 7.2], target: [0.1, 5.0, 0.0] },
+            { t: 3.5, position: [-1.2, 4.4, 6.4], target: [0.1, 4.8, 0.0] },
+            { t: 8.0, position: [-0.6, 4.2, 5.4], target: [0.2, 4.6, -0.2] }
           ]
         };
         pkg.actors = [{
@@ -341,26 +368,78 @@
       // 1. Evaluate Three.js World via Motion Canvas ThreeWorldNode contract
       window.__motionCanvasSceneGraph.evaluateNode('ThreeWorldNode', timeSeconds);
       activeWorld.update(timeSeconds);
-      activeWorld.render(r);
 
-      // 2. Clear 2D Vector Overlay
+      // 2. Depth-sort ALL scene elements (props, characters, environment) by z-distance from camera THIS FRAME
+      const depthSortResult = typeof activeWorld.evaluateSceneDepthSort === 'function'
+        ? activeWorld.evaluateSceneDepthSort(timeSeconds, activePackage.actors)
+        : null;
+
+      if (depthSortResult) {
+        window.__renderMetrics.depthSortOrder = depthSortResult.depthSortedElements.map(e => ({
+          id: e.id,
+          name: e.name,
+          type: e.type,
+          worldPosition: e.worldPosition,
+          cameraDistance: e.cameraDistance,
+          viewZ: e.viewZ,
+        }));
+        window.__renderMetrics.occlusionState = depthSortResult.occlusionEvents;
+      }
+
+      // 3. Render 3D Background World (with occluding foreground objects excluded)
+      if (typeof activeWorld.renderBackground === 'function' && depthSortResult) {
+        activeWorld.renderBackground(r, depthSortResult);
+      } else {
+        activeWorld.render(r);
+      }
+
+      // 4. Clear 2D Vector Overlay
       ctxOverlay.clearRect(0, 0, w, h);
 
-      // 3. Evaluate Characters via Motion Canvas UniversalCharacterNode contract
+      // Initialize prop attachment audit telemetry if not yet initialized
+      if (!window.__renderMetrics.propAttachmentAudit) {
+        window.__renderMetrics.propAttachmentAudit = {
+          passed: true,
+          maxDistance: 0,
+          checkedCount: 0,
+          violations: [],
+        };
+      }
+
+      // 5. Evaluate Characters via Motion Canvas UniversalCharacterNode contract
+      // Characters rendered in depth-sorted order (furthest to nearest)
       window.__motionCanvasSceneGraph.evaluateNode('UniversalCharacterGroup', timeSeconds);
-      const actors = activePackage.actors || [];
-      for (const actor of actors) {
+      const rawActors = activePackage.actors || [];
+      const actorsToRender = [...rawActors];
+
+      if (depthSortResult && depthSortResult.actorDepths) {
+        actorsToRender.sort((a, b) => {
+          const charIdA = a.actor_id || a.dna?.characterId || a.dna?.id || '';
+          const charIdB = b.actor_id || b.dna?.characterId || b.dna?.id || '';
+          const da = depthSortResult.actorDepths[charIdA] ?? 0;
+          const db = depthSortResult.actorDepths[charIdB] ?? 0;
+          return db - da; // Furthest rendered first
+        });
+      }
+
+      for (const actor of actorsToRender) {
         renderActorUniversal(actor, timeSeconds, activeWorld);
       }
 
-      // 4. Evaluate Overlay via Motion Canvas CinematicOverlayNode contract
+      // 6. Composite Step A: Draw 3D Background and Characters
+      ctxComp.clearRect(0, 0, w, h);
+      ctxComp.drawImage(glCanvas, 0, 0);       // Background 3D
+      ctxComp.drawImage(overlayCanvas, 0, 0);  // Characters & Handheld Props
+
+      // 7. Composite Step B: Render and draw 3D Foreground Occluders (if any character is occluded)
+      if (depthSortResult && depthSortResult.activeOccluders.length > 0 && typeof activeWorld.renderForeground === 'function') {
+        activeWorld.renderForeground(r, depthSortResult);
+        ctxComp.drawImage(glCanvas, 0, 0);     // Foreground 3D Occluders on top of Characters!
+      }
+
+      // 8. Evaluate Overlay via Motion Canvas CinematicOverlayNode contract
       window.__motionCanvasSceneGraph.evaluateNode('CinematicOverlayGroup', timeSeconds);
       renderCinematicGraphics(activePackage, timeSeconds);
-
-      // 5. Composite Output Frame
-      ctxComp.clearRect(0, 0, w, h);
-      ctxComp.drawImage(glCanvas, 0, 0);
-      ctxComp.drawImage(overlayCanvas, 0, 0);
 
       // 6. Record Telemetry
       window.__renderMetrics.framesRendered++;
@@ -369,6 +448,13 @@
         window.__renderMetrics.webglDrawCalls = r.info.render.calls;
       }
       window.__renderMetrics.sceneGraph = window.__motionCanvasSceneGraph.recordTelemetry();
+      if (typeof activeWorld.evaluateCameraFraming === 'function') {
+        window.__renderMetrics.cameraFraming = activeWorld.evaluateCameraFraming(
+          timeSeconds,
+          actorsToRender,
+          activePackage.shot_tag || activePackage.scene_world?.shot_tag
+        );
+      }
 
       return true;
     };
@@ -433,6 +519,17 @@
       const isBridgeScene = activePackage.scene_world?.location_id?.includes('BRIDGE') ?? false;
       const isPostBridgeScene = (activePackage.scene_world?.location_id?.includes('HOUSE') ?? false) || (activePackage.project_id && activePackage.project_id.includes('draft_3'));
 
+      const actorDna = JSON.parse(JSON.stringify(actor.dna || {}));
+      if (actor.staging && actor.staging.hand_held_prop) {
+        const hp = actor.staging.hand_held_prop;
+        actorDna.heldProps = actorDna.heldProps || actorDna.held_props || {};
+        if (hp.hand === 'LEFT') {
+          actorDna.heldProps.leftHand = hp.type || 'generic_prop';
+        } else {
+          actorDna.heldProps.rightHand = hp.type || 'generic_prop';
+        }
+      }
+
       const charState = {
         screenX: proj.x,
         screenY: proj.y,
@@ -448,7 +545,14 @@
         debugSkeleton: activePackage.debug_skeleton || window.__debugSkeleton || false,
       };
 
-      charEngine.render(actor.dna, charState);
+      if (actor.staging) {
+        if (actor.staging.propOffsetR) charState.propOffsetR = actor.staging.propOffsetR;
+        if (actor.staging.propOffsetL) charState.propOffsetL = actor.staging.propOffsetL;
+        if (actor.staging.propWorldPosR) charState.propWorldPosR = actor.staging.propWorldPosR;
+        if (actor.staging.propWorldPosL) charState.propWorldPosL = actor.staging.propWorldPosL;
+      }
+
+      charEngine.render(actorDna, charState);
     }
 
     /**
@@ -492,7 +596,40 @@
         locationCard,
         subtitle
       });
+      window.__renderMetrics.lastSubtitleLayout = overlayRenderer.getLastSubtitleLayout();
     }
+
+    /**
+     * FINAL RENDER INVARIANT VALIDATION
+     * Validates that prop_position == hand_bone_world_position ± 2px before finalizing render.
+     */
+    window.finalizeRender = function() {
+      const audit = window.__renderMetrics.propAttachmentAudit;
+      if (!audit || audit.checkedCount === 0) {
+        return {
+          success: true,
+          status: 'NO_PROPS_EVALUATED',
+          checkedCount: 0,
+          maxDistance: 0,
+          tolerancePx: 2.0
+        };
+      }
+
+      if (!audit.passed || audit.violations.length > 0 || audit.maxDistance > 2.0) {
+        const errorMsg = `RENDER_FINALIZATION_REJECTED: Handheld prop-to-hand distance tolerance (±2px) violated. ` +
+          `Max deviation: ${audit.maxDistance.toFixed(2)}px (tolerance: ±2.0px). Total violations: ${audit.violations.length}`;
+        console.error(errorMsg, audit.violations);
+        throw new Error(errorMsg);
+      }
+
+      return {
+        success: true,
+        status: 'VALIDATED_WITHIN_TOLERANCE',
+        checkedCount: audit.checkedCount,
+        maxDistance: Number(audit.maxDistance.toFixed(3)),
+        tolerancePx: 2.0
+      };
+    };
 
     window.runnerReady = true;
     console.log('[UniversalRunner] Universal Three.js & Motion Canvas Runner V4.2.3 Ready.');

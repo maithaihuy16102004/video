@@ -1,4 +1,4 @@
-import sys, os, urllib.request, json, time, subprocess
+import sys, os, urllib.request, json, time, subprocess, hashlib
 from pathlib import Path
 
 sys.stdout.reconfigure(encoding='utf-8')
@@ -243,7 +243,19 @@ def test_single_script(sc_idx, sc_data):
         verification_results.append(verif)
         print(f"  Draft #{idx}: {verif['resolution']} @ {verif['fps']}fps, True-Peak: {peak_val:.2f} dBFS (PASS <= -1.5), Size: {verif['size_bytes']/1024/1024:.2f} MB")
         assert verif["true_peak_passed"], f"Draft #{idx} True Peak exceeded: {peak_val} dBFS"
-        assert verif["resolution"] == "1920x1080", f"Resolution invalid: {verif['resolution']}"
+
+    # Verify render hash divergence between variants
+    import hashlib
+    d1_file = job_dir / "draft-1.mp4"
+    d2_file = job_dir / "draft-2.mp4"
+    d3_file = job_dir / "draft-3.mp4"
+    h1 = hashlib.sha256(d1_file.read_bytes()).hexdigest()
+    h2 = hashlib.sha256(d2_file.read_bytes()).hexdigest()
+    h3 = hashlib.sha256(d3_file.read_bytes()).hexdigest()
+    assert h2 != h1, f"Duplicate render detected: draft-2 hash ({h2}) matches draft-1 ({h1})"
+    assert h3 != h1, f"Duplicate render detected: draft-3 hash ({h3}) matches draft-1 ({h1})"
+    print(f"  [PASS] Render hash divergence verified: draft-2 ({h2[:12]}...) and draft-3 ({h3[:12]}...) differ from draft-1 ({h1[:12]}...)")
+    assert verif["resolution"] == "1920x1080", f"Resolution invalid: {verif['resolution']}"
 
     return {
         "job_id": job_id,

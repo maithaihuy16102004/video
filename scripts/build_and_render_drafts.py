@@ -66,8 +66,11 @@ def build_draft_1_cafe_dialogue() -> dict:
                 "performance_cues": [
                     {"time": 0.0, "pos": [-0.65, 0.0, 0.1], "action": "sip_coffee", "emotion": "reflective", "facing": 1},
                     {"time": 2.5, "pos": [-0.65, 0.0, 0.1], "action": "speak", "emotion": "excited", "facing": 1},
+                    {"time": 4.8, "pos": [-0.58, 0.0, 0.12], "action": "speak_gestural", "emotion": "excited", "facing": 1},
                     {"time": 7.0, "pos": [-0.65, 0.0, 0.1], "action": "listen", "emotion": "focused", "facing": 1},
-                    {"time": 10.5, "pos": [-0.65, 0.0, 0.1], "action": "speak", "emotion": "relief", "facing": 1}
+                    {"time": 9.0, "pos": [-0.60, 0.0, 0.08], "action": "think", "emotion": "focused", "facing": 1},
+                    {"time": 10.5, "pos": [-0.65, 0.0, 0.1], "action": "speak", "emotion": "relief", "facing": 1},
+                    {"time": 12.8, "pos": [-0.58, 0.0, 0.12], "action": "speak_gestural", "emotion": "relief", "facing": 1}
                 ]
             },
             {
@@ -85,9 +88,12 @@ def build_draft_1_cafe_dialogue() -> dict:
                 "staging": {"initial_world_pos": [0.65, 0.0, -0.1], "facing": "LEFT", "posture": "sit"},
                 "performance_cues": [
                     {"time": 0.0, "pos": [0.65, 0.0, -0.1], "action": "listen", "emotion": "focused", "facing": -1},
+                    {"time": 2.5, "pos": [0.60, 0.0, -0.08], "action": "think", "emotion": "curious", "facing": -1},
                     {"time": 5.0, "pos": [0.65, 0.0, -0.1], "action": "sip_coffee", "emotion": "reflective", "facing": -1},
                     {"time": 7.5, "pos": [0.65, 0.0, -0.1], "action": "speak", "emotion": "reflective", "facing": -1},
-                    {"time": 11.0, "pos": [0.65, 0.0, -0.1], "action": "laugh", "emotion": "happy", "facing": -1}
+                    {"time": 9.3, "pos": [0.70, 0.0, -0.12], "action": "speak_gestural", "emotion": "reflective", "facing": -1},
+                    {"time": 11.0, "pos": [0.65, 0.0, -0.1], "action": "laugh", "emotion": "happy", "facing": -1},
+                    {"time": 13.0, "pos": [0.62, 0.0, -0.08], "action": "listen", "emotion": "happy", "facing": -1}
                 ]
             }
         ],
@@ -365,19 +371,33 @@ def render_draft(pkg: dict, draft_num: int, label: str):
 def main():
     start_all = time.time()
     print("Beginning Authoritative Rendering for all 3 V5.1 Acceptance Drafts...")
+    from pipeline.pre_upload_quality_gate import PreUploadQualityGate
+    gate = PreUploadQualityGate()
     
     d1_pkg = build_draft_1_cafe_dialogue()
     mp4_1, contact_1 = render_draft(d1_pkg, 1, "Cảnh Đối Thoại (Quán Cà Phê)")
+    p1, r1 = gate.run_pre_upload_quality_gate(mp4_1, d1_pkg, sibling_mp4_paths=[])
+    if not p1:
+        mp4_1.unlink(missing_ok=True)
+        raise RuntimeError(f"[QUALITY_GATE_FAILED] Draft 1 failed pre-upload quality gate: {r1}")
     
     d2_pkg = build_draft_2_bridge_action()
     mp4_2, contact_2 = render_draft(d2_pkg, 2, "Cảnh Hành Động (Cầu Gỗ - Haru Suýt Rơi)")
+    p2, r2 = gate.run_pre_upload_quality_gate(mp4_2, d2_pkg, sibling_mp4_paths=[mp4_1])
+    if not p2:
+        mp4_2.unlink(missing_ok=True)
+        raise RuntimeError(f"[QUALITY_GATE_FAILED] Draft 2 failed pre-upload quality gate: {r2}")
     
     d3_pkg = build_draft_3_emotional_twist()
     mp4_3, contact_3 = render_draft(d3_pkg, 3, "Cảnh Cảm Xúc & Cú Chốt Hài (Aiko Mở Thư & Mất Dép)")
+    p3, r3 = gate.run_pre_upload_quality_gate(mp4_3, d3_pkg, sibling_mp4_paths=[mp4_1, mp4_2])
+    if not p3:
+        mp4_3.unlink(missing_ok=True)
+        raise RuntimeError(f"[QUALITY_GATE_FAILED] Draft 3 failed pre-upload quality gate: {r3}")
     
     total_sec = time.time() - start_all
     print(f"\n==================================================================")
-    print(f"ALL 3 DRAFTS RENDERED IN {total_sec:.1f}s!")
+    print(f"ALL 3 DRAFTS RENDERED & CERTIFIED FOR YOUTUBE IN {total_sec:.1f}s!")
     print(f"1. {mp4_1.name}")
     print(f"2. {mp4_2.name}")
     print(f"3. {mp4_3.name}")

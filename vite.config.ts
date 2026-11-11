@@ -19,5 +19,8 @@ export default defineConfig({
   server: {
     port: 9000,
     open: false,
+    watch: {
+      ignored: ['**/output/**', '**/cache/**', '**/.staging_*', '**/node_modules/**', '**/.git/**'],
+    },
   },
 });

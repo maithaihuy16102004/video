@@ -165,7 +165,10 @@ class LLMDirector:
             "để tạo sự kịch tính dồn dập, không bao giờ để điểm số đều đều.\n"
             "3. b_roll_overlay_ratio: Cảnh 1 (Hook mở đầu) để 0.0 (Avatar nói 100%). "
             "Các cảnh giải thích tiếp theo để 0.6 - 0.8 (Cắt đè B-roll minh họa).\n"
-            "4. Chỉ trả về JSON thuần, không kèm markdown hoặc giải thích."
+            "4. CHỈ THỊ ANIMATION DIRECTOR: Every character must perform at least one visible gesture, weight shift, "
+            "or head turn every 2–3 seconds of screen time, synced to dialogue stress points. "
+            "A character may never hold an identical pose for more than 3 consecutive seconds unless explicitly scripted as 'frozen/shock' beat.\n"
+            "5. Chỉ trả về JSON thuần, không kèm markdown hoặc giải thích."
         )
 
         user_prompt = f"Chủ đề: {topic}\nKịch bản thô cần phân tích và đạo diễn:\n{raw_script}"

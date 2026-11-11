@@ -125,9 +125,29 @@ def main() -> None:
     out = folder / ("master-1080p.mp4" if render_master else "draft.mp4")
     mode = "final" if render_master else "preview"
     print(f"3. Rendering 16:9 ({mode}) Drafts for preview (lightweight filesize, Master skipped until approved)...")
+    draft_1_hash = None
+    draft_1_config = None
     for i, label in enumerate(["High retention", "Dry Historical Comedy", "Cinematic Documentary"]):
         v_spec = studio_api.render_spec(payload, duration, folder, subtitles, i, f"variant-{i + 1}.json", segments, cast)
+        spec_data = json.loads(v_spec.read_text(encoding="utf-8")) if v_spec.exists() else {}
         v_out = folder / f"draft-{i + 1}.mp4"
+        staged_out = folder / f".staging_draft-{i + 1}.mp4"
+
+        current_config = {
+            "variant_index": i,
+            "scene_seed": spec_data.get("retentionDirector", {}).get("variantSeed", i),
+            "camera_initial": spec_data.get("shots", [{}])[0].get("cameraPreset") if spec_data.get("shots") else i,
+            "camera_keyframes": len(spec_data.get("shots", [])),
+            "voice_hash": studio_api.compute_file_sha256(voice),
+            "duration": duration,
+            "speech_rate": segments[0].get("rate") if segments else None,
+        }
+
+        if i == 0:
+            draft_1_config = current_config
+        else:
+            studio_api.verify_variant_parameters_changed(i, current_config, draft_1_config)
+
         studio_api.command([
             sys.executable,
             str(studio_api.ROOT / "pipeline" / "fast_video_draft.py"),
@@ -136,8 +156,14 @@ def main() -> None:
             "--spec",
             str(v_spec),
             "--out",
-            str(v_out),
+            str(staged_out),
         ])
+
+        if i == 0:
+            draft_1_hash = studio_api.compute_file_sha256(staged_out)
+            shutil.move(str(staged_out), str(v_out))
+        else:
+            studio_api.verify_render_hash_differs(i, staged_out, draft_1_hash, v_out)
     shutil.copy2(folder / "draft-1.mp4", folder / "draft.mp4")
     if render_master:
         studio_api.command([

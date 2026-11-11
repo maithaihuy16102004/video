@@ -1,5 +1,6 @@
 "use client";
 import { useMemo, useState } from "react";
+import { PreflightPanel } from "../components/PreflightPanel";
 import {
   Clapperboard,
   Mic2,
@@ -155,8 +156,246 @@ HITLER:
 NGƯỜI DẪN:
 Và rất nhanh, ông phát hiện ra thứ mà mình làm tốt hơn vẽ tranh: Nói. Rất nhiều. Cuộc chiến đã kết thúc, nhưng câu chuyện nguy hiểm hơn... chỉ vừa mới bắt đầu.`;
 
+const CANONICAL_EPISODE_01 = `# STUDIO SCRIPT V1 — UNIVERSAL VIDEO FORMAT
+
+PROJECT: HITLER_EP01_MUNICH_1914
+LANGUAGE: vi-VN
+GENRE: Lịch sử
+STYLE: Premium Stickman Cinematic B
+ASPECT_RATIO: 16:9
+TARGET_DURATION: AUTO
+TONE: Lịch sử, châm biếm sâu sắc
+MEME_POLICY: CONTEXTUAL
+MEME_MAX_PER_MINUTE: 2
+
+# NHÂN VẬT
+
+CHARACTER: Adolf Hitler
+ROLE: Nhân vật chính (Chàng trai thất bại tại Munich, họa sĩ tranh màu nước 25 tuổi)
+APPEARANCE: Blob-Head đầu tròn 42%, áo khoác nâu sờn vai, túi đựng tranh màu nước
+VOICE: vieneu-Thiện Minh
+VOICE_STYLE: Tự sự, cay đắng, có phần mỉa mai và cuồng nhiệt ở cuối
+
+CHARACTER: Bà Chủ Nhà
+ROLE: Bà chủ nhà trọ tại số 34 Schleißheimer Straße, Munich
+APPEARANCE: Blob-Head váy dài hoa văn cũ, khăn quàng cổ xám, tạp dề Bavarian, tay chống nạnh
+VOICE: vieneu-Trúc Ly
+VOICE_STYLE: Đanh đá, gắt gỏng, giục nợ tiền phòng
+
+CHARACTER: Người Bán Báo
+ROLE: Người bán báo dạo và người đi đường tại Munich
+APPEARANCE: Blob-Head mũ vải mềm, áo gi-lê len, cầm xấp báo phụ trương chiến tranh
+VOICE: vieneu-Phạm Tuyên
+VOICE_STYLE: Hối hả, hô hào, dò xét người lạ
+
+CHARACTER: Người Dẫn Chuyện
+ROLE: Kể chuyện bối cảnh lịch sử thành phố Munich năm 1914
+APPEARANCE: Không xuất hiện hình thể
+VOICE: vieneu-Hải Đăng
+VOICE_STYLE: Điềm tĩnh, khách quan, sâu sắc, trang nghiêm
+
+# KỊCH BẢN
+
+SCENE 01: Căn gác Munich và bức tranh ế ẩm
+LOCATION: Căn phòng trọ số 34 Schleißheimer Straße, Munich, Mùa xuân 1914
+TIME_OF_DAY: Sáng
+MOOD: Thất vọng, chua chát
+DURATION: AUTO
+
+VISUAL: Căn gác xép trọ nhỏ hẹp tại Munich, ánh nắng rọi qua cửa sổ mái lên chiếc bàn gỗ chất đầy tranh màu nước vẽ cảnh Nhà thờ Đức Bà Munich.
+ACTION: Hitler buông cọ vẽ xuống bàn, bần thần nhìn bức tranh màu nước vừa hoàn thành nhưng không ai mua, thở dài não nề.
+CAMERA: Cận cảnh bức tranh màu nước vẽ Nhà thờ Frauenkirche trên bàn, sau đó lùi chậm ra trung cảnh để lộ căn gác xép chật chội.
+
+VOICE_NOTE: Hitler — Giọng bàng hoàng, cay đắng, chán nản cùng cực.
+ADOLF HITLER: Vẽ cả tuần trời mà chẳng bán nổi một bức... Người Munich chỉ thích uống bia, chẳng ai thèm ngó ngàng nghệ thuật cả!
+
+SFX: Paint brush set down on wooden table | TRIGGER: Đặt cọ vẽ xuống bàn gỗ | PRIORITY: REQUIRED
+AMBIENCE: Quiet Munich attic room tone | MODE: LOOP
+MUSIC: Melancholic piano solo | INTENSITY: MEDIUM
+
+MEME: ối dồi ôi | TRIGGER: Ngay sau khi buông cọ vẽ và thở dài về tranh ế ẩm | GAIN_DB: -12 | PRIORITY: OPTIONAL
+MEME_NOTE: Nhấn mạnh sự chua chát khi giấc mơ họa sĩ tại Munich hoàn toàn bế tắc.
+
+TRANSITION: DISSOLVE
+
+END_SCENE
+
+SCENE 02: Tiếng gõ cửa giục tiền phòng
+LOCATION: Căn phòng trọ số 34 Schleißheimer Straße, Munich, Tháng 5 năm 1914
+TIME_OF_DAY: Chiều muộn
+MOOD: Ngượng ngùng, áp lực
+DURATION: AUTO
+
+VISUAL: Cửa gỗ phòng trọ mở hé, bà chủ nhà trọ Frau Popp tay cầm sổ thu tiền, Hitler đứng co ro bên giá vẽ.
+ACTION: Bà chủ nhà trọ gõ mạnh cửa bước vào đòi tiền phòng tháng năm; Hitler giật mình vội vàng giấu cọ vẽ sau lưng phân bua.
+CAMERA: Góc hai nhân vật đối xứng (Two-shot), bà chủ nhà ở bên trái, Hitler co ro ở bên phải.
+
+VOICE_NOTE: Bà Chủ Nhà — Giọng the thé, đay nghiến từng chữ.
+BÀ CHỦ NHÀ: Herr Hitler! Tiền thuê phòng tháng này cậu tính sao đây? Đã khất hai tuần rồi đấy!
+ADOLF HITLER: Bác thông cảm... ngày mai tôi sẽ mang mấy bức tranh Nhà thờ Theatiner ra phố bán, chắc chắn sẽ trả đủ!
+
+SFX: Heavy door knock on wood | TRIGGER: Khi bà chủ gõ cửa phòng trọ | PRIORITY: REQUIRED
+AMBIENCE: Munich evening street noise | MODE: LOOP
+MUSIC: Comic tension plucked strings | INTENSITY: MEDIUM
+
+MEME: Gòi gòi tới công chuyện | TRIGGER: Ngay sau câu hỏi tiền phòng của bà chủ nhà | GAIN_DB: -12 | PRIORITY: OPTIONAL
+MEME_NOTE: Tạo điểm nhấn hài hước cho tình cảnh khốn đốn nợ nần tiền trọ tại Munich.
+
+TRANSITION: CUT
+
+END_SCENE
+
+SCENE 03: Góc phố Munich vắng khách
+LOCATION: Phố cổ Munich gần Cổng Isartor, Mùa hè 1914
+TIME_OF_DAY: Trưa nắng
+MOOD: Lẻ loi, chật vật
+DURATION: AUTO
+
+VISUAL: Đường phố Munich lát đá cuội cổ kính, những ngôi nhà mái ngói Bavaria đặc trưng, dòng người Munich tấp nập qua lại dưới ánh nắng.
+ACTION: Hitler đứng nép bên lề đường, ôm tập tranh bưu thiếp chào mời nhưng người đi bộ Munich chỉ lướt qua thờ ơ.
+CAMERA: Góc máy ngang tầm mắt lia chậm qua dòng người Munich tấp nập, dừng lại ở vẻ mặt thất thểu của Hitler bên lề đường.
+
+VOICE_NOTE: Người Dẫn Chuyện — Giọng điềm đạm, nhấn mạnh vào sự bần cùng vô danh.
+NGƯỜI DẪN CHUYỆN: Munich năm 1914. Chàng thanh niên 25 tuổi kiếm sống bằng từng bức tranh bưu thiếp trên vỉa hè. Một cuộc đời vô danh, không tiền tài, không tương lai giữa lòng nước Đức.
+
+SFX: Footsteps on cobblestones and horse carriage | TRIGGER: Dòng người bước đi trên đường đá | PRIORITY: REQUIRED
+AMBIENCE: Bustling Munich cobblestone street | MODE: LOOP
+MUSIC: Somber cello drone | INTENSITY: LOW
+
+MEME: NONE
+MEME_NOTE: Tự sự lịch sử nghiêm túc về hoàn cảnh vô danh tại Munich, tuyệt đối không dùng meme.
+
+TRANSITION: FADE
+
+END_SCENE
+
+SCENE 04: Tiếng rao báo trước cơn bão
+LOCATION: Quầy báo đầu phố Kaufingerstraße, Munich, Cuối tháng 7 năm 1914
+TIME_OF_DAY: Chiều tà
+MOOD: Căng thẳng, bất an
+DURATION: AUTO
+
+VISUAL: Quầy báo đầu phố Kaufingerstraße đông đúc người tụ tập, chồng báo in tiêu đề khủng hoảng tối hậu thư chiến tranh Áo-Hung.
+ACTION: Cậu bé bán báo giơ cao tờ phụ trương mới in, Hitler đứng cạnh ngỡ ngàng đọc dòng tít lớn loan báo chiến tranh.
+CAMERA: Trung cảnh qua vai Hitler nhìn về quầy báo, đẩy nhẹ vào tiêu đề báo in đậm.
+
+VOICE_NOTE: Người Bán Báo — Giọng dồn dập, cấp báo, vang động cả góc phố.
+NGƯỜI BÁN BÁO: Báo mới đây! Chiến tranh sắp bùng nổ rồi! Áo-Hung tổng động viên, cả châu Âu đứng trước bờ vực chiến tranh!
+
+SFX: Rustling paper and paperboy shout | TRIGGER: Xấp báo rung lên khi rao | PRIORITY: REQUIRED
+AMBIENCE: Distant murmuring city crowd | MODE: LOOP
+MUSIC: Tense brass pulse | INTENSITY: MEDIUM
+
+MEME: NONE
+MEME_NOTE: Cột mốc thời sự lịch sử căng thẳng trước chiến tranh, không chèn meme.
+
+TRANSITION: CUT
+
+END_SCENE
+
+SCENE 05: Va chạm ngượng ngùng nơi phố xá
+LOCATION: Ngã tư Theatinerstraße, Munich, Cuối tháng 7 năm 1914
+TIME_OF_DAY: Chiều tà
+MOOD: Bối rối, trớ trêu
+DURATION: AUTO
+
+VISUAL: Góc phố đông người hối hả qua lại trước thông tin chiến tranh, Hitler ôm cặp tranh vô tình va phải người đi đường.
+ACTION: Cặp tranh rơi xáo trộn trên vỉa hè; người đi bộ Munich nhặt vội trả rồi nhìn Hitler vẻ nghi ngại dò xét thân phận.
+CAMERA: Cận cảnh cú va chạm, lia nhanh lên ánh mắt hai bên nhìn nhau sượng sùng.
+
+VOICE_NOTE: Người Bán Báo — Giọng hạch hỏi, nghi ngờ người lạ mặt.
+NGƯỜI BÁN BÁO: Này anh bạn, đi đứng kiểu gì thế? Nhìn anh... đâu phải người Munich gốc đúng không?
+ADOLF HITLER: Xin lỗi bác... Tôi là công dân Áo, nhưng Munich mới là nhà của tôi!
+
+SFX: Postcards dropping on cobblestone pavement | TRIGGER: Tranh vẽ rơi xuống đường đá cuội | PRIORITY: REQUIRED
+AMBIENCE: Cold street wind and footsteps | MODE: LOOP
+MUSIC: Comic suspense bassline | INTENSITY: MEDIUM
+
+MEME: Among Us Role Reveal | TRIGGER: Ngay sau cái nhìn dò xét về thân phận kẻ trốn quân dịch Áo sống tại Munich | GAIN_DB: -12 | PRIORITY: OPTIONAL
+MEME_NOTE: Nhấn mạnh sự trớ trêu khi kẻ trốn quân dịch Áo lại đang chuẩn bị gia nhập quân đội Đức tại Munich.
+
+TRANSITION: CUT
+
+END_SCENE
+
+SCENE 06: Chuông nhà thờ gióng hồi báo động
+LOCATION: Tháp chuông Nhà thờ Frauenkirche, Munich, Ngày 1 tháng 8 năm 1914
+TIME_OF_DAY: Hoàng hôn
+MOOD: Khẩn cấp, chấn động
+DURATION: AUTO
+
+VISUAL: Hai tòa tháp củ hành xanh biểu tượng của Nhà thờ Frauenkirche in trên nền trời hoàng hôn rực lửa, đàn bồ câu tung cánh bay loạn xạ.
+ACTION: Tiếng chuông nhà thờ đồng loạt gióng lên từng hồi dồn dập khắp thành phố; người dân Munich ùa ra đường hoang mang.
+CAMERA: Góc máy từ thấp ngước nhìn lên hai ngọn tháp đôi Frauenkirche, lia chậm xuống dòng người đổ về trung tâm thành phố.
+
+VOICE_NOTE: Người Dẫn Chuyện — Giọng kịch tính, trầm hùng, báo hiệu biến cố lịch sử.
+NGƯỜI DẪN CHUYỆN: Chuông nhà thờ Frauenkirche ngân vang khắp Munich. Lệnh tổng động viên được ban bố. Trật tự hòa bình hàng chục năm của châu Âu chính thức sụp đổ.
+
+SFX: Cathedral bells tolling and distant sirens | TRIGGER: Khi tiếng chuông nhà thờ bắt đầu gióng | PRIORITY: REQUIRED
+AMBIENCE: Distant church bells echo | MODE: LOOP
+MUSIC: Ominous low brass fanfare | INTENSITY: HIGH
+
+MEME: NONE
+MEME_NOTE: Khoảnh khắc bước ngoặt lịch sử trọng đại của Munich, tuyệt đối không chèn meme.
+
+TRANSITION: MATCH_CUT
+
+END_SCENE
+
+SCENE 07: Biển người tại Odeonsplatz
+LOCATION: Quảng trường Odeonsplatz và Tượng đài Feldherrnhalle, Munich, Ngày 2 tháng 8 năm 1914
+TIME_OF_DAY: Trưa nắng rực rỡ
+MOOD: Cuồng nhiệt, phấn khích cực độ
+DURATION: AUTO
+
+VISUAL: Biển người hàng vạn công dân Munich phủ kín quảng trường Odeonsplatz trước tượng đài Feldherrnhalle, cờ xứ Bavaria và cờ Đức tung bay rợp trời.
+ACTION: Giữa đám đông đang reo hò cuồng nhiệt đón chào chiến tranh, Hitler đứng lẫn trong dòng người, ngước mắt nhìn lên với nụ cười sùng kính.
+CAMERA: Toàn cảnh góc rộng quảng trường, đẩy chậm vào biển người, dừng lại cận cảnh gương mặt Hitler giữa đám đông.
+
+VOICE_NOTE: Hitler — Giọng xúc động, phấn khích, như tìm thấy lẽ sống.
+ADOLF HITLER: Chiến tranh đã đến! Đây không phải là sự hủy diệt... đây chính là giải thoát cho nước Đức và cho cả cuộc đời tôi!
+
+SFX: Massive crowd roar and martial fanfare | TRIGGER: Tiếng reo hò rền vang tại Odeonsplatz | PRIORITY: REQUIRED
+AMBIENCE: Roaring crowd cheering and flags waving | MODE: LOOP
+MUSIC: Epic martial orchestral crescendo | INTENSITY: HIGH
+
+MEME: NONE
+MEME_NOTE: Cảnh lịch sử kinh điển tại Odeonsplatz Munich, giữ nguyên sự chân thực và bi tráng.
+
+TRANSITION: FADE
+
+END_SCENE
+
+SCENE 08: Lời tuyên thệ dưới bóng cờ Bavaria
+LOCATION: Doanh trại Trung đoàn Bộ binh Dự bị Bavaria số 16, Munich, Tháng 8 năm 1914
+TIME_OF_DAY: Chiều muộn
+MOOD: Trang nghiêm, định mệnh lạnh lẽo
+DURATION: AUTO
+
+VISUAL: Sân doanh trại quân đội Munich, những tân binh xếp hàng ngay ngắn dưới lá cờ xanh trắng Bavaria, bầu trời xám lạnh.
+ACTION: Hitler trong bộ quân phục tân binh đứng nghiêm trang, tay cầm mũ, ánh mắt lạnh lùng nhìn thẳng về phía trước.
+CAMERA: Đổi góc máy đa dạng: Toàn cảnh doanh trại, trung cảnh hàng lính, và cận cảnh khuôn mặt băng giá của Hitler khi bước vào cuộc chiến.
+
+VOICE_NOTE: Người Dẫn Chuyện — Giọng đọc chậm rãi, trang nghiêm, khép lại hồi 1 đầy cảnh báo lịch sử.
+NGƯỜI DẪN CHUYỆN: Hitler gia nhập Trung đoàn Bộ binh Dự bị Bavaria số 16. Chàng họa sĩ thất bại trên đường phố Munich đã tìm thấy chiến trường cho số phận của mình. Một chương bi kịch đẫm máu của nhân loại chính thức bắt đầu.
+
+SFX: Military boots stamp in unison and solemn bugle call | TRIGGER: Bước chân lính dậm đều | PRIORITY: REQUIRED
+AMBIENCE: Cold barracks wind tone | MODE: LOOP
+MUSIC: Somber military horn outro | INTENSITY: HIGH
+
+MEME: NONE
+MEME_NOTE: Đoạn kết lịch sử sâu sắc và bi tráng, bảo toàn tuyệt đối tính trang nghiêm và shot variety (Rule 9 & 10).
+
+TRANSITION: FADE_TO_BLACK
+
+END_SCENE
+
+END_SCRIPT
+`;
+
 export default function Home() {
-  const [script, setScript] = useState(sample),
+  const [script, setScript] = useState(CANONICAL_EPISODE_01),
+    [scriptHash, setScriptHash] = useState("9865b2a1c5fd69e2010595094b872eeb9cfcc08160efaba69bfba4f5859bd545"),
     [voice, setVoice] = useState("vieneu-Thiện Minh"),
     [energy, setEnergy] = useState("dynamic"),
     [quality, setQuality] = useState("fast"),
@@ -179,6 +418,19 @@ export default function Home() {
     [script],
   );
 
+  // Synchronize SHA-256 Script Hash across Editor, Preflight, Storyboard, TTS and Render
+  useMemo(() => {
+    if (typeof window !== "undefined" && window.crypto && window.crypto.subtle) {
+      const enc = new TextEncoder();
+      const data = enc.encode(script.trim());
+      window.crypto.subtle.digest("SHA-256", data).then((buffer) => {
+        const hashArray = Array.from(new Uint8Array(buffer));
+        const hashHex = hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
+        setScriptHash(hashHex);
+      });
+    }
+  }, [script]);
+
   async function analyze() {
     setBusy(true);
     setMessage("Đang chia cảnh 16:9 và phân vai VieNeu-TTS v3 Turbo 48kHz...");
@@ -186,7 +438,7 @@ export default function Home() {
       const r = await fetch("/api/plan", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ script, voice, energy, multiVoice }),
+        body: JSON.stringify({ script, script_hash: scriptHash, voice, energy, multiVoice }),
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error);
@@ -212,7 +464,7 @@ export default function Home() {
         const pr = await fetch("/api/plan", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ script, voice, energy, multiVoice }),
+          body: JSON.stringify({ script, script_hash: scriptHash, voice, energy, multiVoice }),
         });
         if (pr.ok) {
           activePlan = await pr.json();
@@ -276,6 +528,7 @@ export default function Home() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           script,
+          script_hash: scriptHash,
           voice,
           energy,
           quality,
@@ -385,6 +638,16 @@ export default function Home() {
       </header>
       <div className="mx-auto grid max-w-[1500px] gap-6 p-5 md:p-9 xl:grid-cols-[1.05fr_.95fr]">
         <section className="space-y-5">
+          <PreflightPanel
+            script={script}
+            scriptHash={scriptHash}
+            onLoadCompliantScript={() => {
+              setScript(CANONICAL_EPISODE_01);
+              setPlan(null);
+              setMessage("Đã nạp STUDIO SCRIPT V1 Episode 01 Chuẩn (8 cảnh · 4 nhân vật · 3 meme cues)");
+            }}
+            onAllowDraftRender={render}
+          />
           <div>
             <div className="mb-3 flex items-end justify-between">
               <div>
@@ -395,9 +658,14 @@ export default function Home() {
                   Ném kịch bản vào đây
                 </h2>
               </div>
-              <span className="rounded-full bg-[#172033] px-3 py-1 text-xs font-bold text-white">
-                {words} từ
-              </span>
+              <div className="flex items-center gap-2">
+                <span className="font-mono text-xs text-[#5b6477] bg-[#f1f5f9] px-2.5 py-1 rounded-full border border-[#cbd5e1] font-semibold" title={scriptHash}>
+                  Hash: {scriptHash.slice(0, 8)}...{scriptHash.slice(-6)}
+                </span>
+                <span className="rounded-full bg-[#172033] px-3 py-1 text-xs font-bold text-white">
+                  {words} từ
+                </span>
+              </div>
             </div>
             <textarea
               value={script}
@@ -706,6 +974,9 @@ export default function Home() {
                 02 · Đạo diễn AI & Trình phát Master 16:9
               </p>
               <h2 className="text-2xl font-black">Storyboard & Render</h2>
+              <p className="text-[11px] font-mono text-white/60">
+                Content Hash: {scriptHash ? `${scriptHash.slice(0, 16)}...` : "Đang tính..."} (Đồng bộ Editor / Storyboard / TTS / Render)
+              </p>
             </div>
             {plan && (
               <span className="rounded-full bg-white/10 px-3 py-2 text-xs font-bold">
@@ -856,13 +1127,19 @@ export default function Home() {
                       )}
                       <button
                         type="button"
-                        onClick={() => chooseWinner(v.index)}
-                        disabled={busy || selectedWinner !== null}
-                        className="mt-2 w-full rounded-lg bg-[#51d8e5] px-3 py-2 text-xs font-black text-[#172033] disabled:opacity-50"
+                        onClick={() => {
+                          if (!script.includes("STUDIO SCRIPT V1") || !script.includes("SCENE 08")) {
+                            alert("🛑 MASTER RENDERING BLOCKED: Kịch bản hiện tại chưa vượt qua Preflight Gate (Yêu cầu đủ 8 cảnh, 4 nhân vật, 3 meme chuẩn và kiểm định âm thanh).");
+                            return;
+                          }
+                          chooseWinner(v.index);
+                        }}
+                        disabled={busy || selectedWinner !== null || !script.includes("STUDIO SCRIPT V1")}
+                        className="mt-2 w-full rounded-lg bg-[#51d8e5] px-3 py-2 text-xs font-black text-[#172033] disabled:opacity-40"
                       >
                         {selectedWinner === v.index
                           ? "Đang render Master..."
-                          : "Chọn bản này · Render Full HD"}
+                          : (!script.includes("STUDIO SCRIPT V1") ? "🛑 Master Bị Khóa (Preflight Failed)" : "Chọn bản này · Render Full HD")}
                       </button>
                     </div>
                   ))}

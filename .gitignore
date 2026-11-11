@@ -36,3 +36,5 @@ tts/models/
 step_*.txt
 user_prompt_*.txt
 
+
+/memes/

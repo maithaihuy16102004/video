@@ -64,12 +64,75 @@ export interface LocationDNA {
   }>;
 }
 
+export interface SceneElementDepthRecord {
+  id: string;
+  name: string;
+  type: 'environment_background' | 'foreground_object' | 'character' | 'handheld_prop' | 'standalone_prop';
+  worldPosition: [number, number, number];
+  cameraDistance: number;
+  viewZ: number;
+  screenBounds?: { x1: number; y1: number; x2: number; y2: number };
+}
+
+export interface OcclusionEvent {
+  characterId: string;
+  foregroundObjectId: string;
+  characterDepth: number;
+  objectDepth: number;
+  depthDelta: number; // positive = character is behind object
+  overlapScreen: boolean;
+  isOccluded: boolean;
+}
+
+export interface DepthSortResult {
+  depthSortedElements: SceneElementDepthRecord[];
+  occlusionEvents: OcclusionEvent[];
+  activeOccluders: THREE.Object3D[];
+  actorDepths: Record<string, number>;
+}
+
+export interface OverheadStructureDef {
+  id: string;
+  name: string;
+  minX: number;
+  maxX: number;
+  minZ: number;
+  maxZ: number;
+  clearanceY: number;
+  description: string;
+}
+
+export interface CameraFramingAudit {
+  timeSeconds: number;
+  cameraPosition: [number, number, number];
+  cameraTarget: [number, number, number];
+  skyFraction: number;
+  lowerMiddleThirdOccupied: boolean;
+  characterHeadScreenY: number;
+  characterFeetScreenY: number;
+  overheadStructureViolation: boolean;
+  overheadStructureName?: string;
+  foregroundStructureCoverage?: number;
+  foregroundStructureViolation?: boolean;
+  isClaustrophobicReveal: boolean;
+  passed: boolean;
+}
+
 export class UniversalWorldEngine {
   public scene: THREE.Scene;
   public camera: THREE.PerspectiveCamera;
   public width: number;
   public height: number;
   public dna: LocationDNA;
+
+  // Foreground & Dynamic Depth Elements
+  public foregroundElements: THREE.Object3D[] = [];
+  public fallingSandalMesh?: THREE.Mesh;
+  public storyPropGroup?: THREE.Group;
+  public hasForegroundLayer = true;
+  private originalVisibilities: Map<THREE.Object3D, boolean> = new Map();
+  public lastDepthSortResult?: DepthSortResult;
+  public lastOcclusionEvents: OcclusionEvent[] = [];
 
   // Dynamic Scene Elements
   private rainParticles?: THREE.Points;
@@ -90,8 +153,8 @@ export class UniversalWorldEngine {
     const fov = dna.camera_initial?.fov ?? 44;
     this.camera = new THREE.PerspectiveCamera(fov, width / height, 0.1, 200);
 
-    const initPos = dna.camera_initial?.position ?? [0, 2.4, 7.0];
-    const initTgt = dna.camera_initial?.target ?? [0, 1.6, 0];
+    const initPos = dna.camera_initial?.position ?? this.getDefaultCameraPosition();
+    const initTgt = dna.camera_initial?.target ?? this.getDefaultCameraTarget();
     this.camera.position.set(...initPos);
     this.camera.lookAt(new THREE.Vector3(...initTgt));
 
@@ -387,6 +450,161 @@ export class UniversalWorldEngine {
         this.buildRoboticsLabEnvironment();
         break;
     }
+
+    // Build Narrative Story Prop on Opposing Third (Documentary Visual Signature)
+    this.buildStoryProp(intent);
+  }
+
+  // ============================================================================
+  // NARRATIVE STORY PROP BUILDER (Rule of Thirds opposing character)
+  // ============================================================================
+  private buildStoryProp(intent: string) {
+    const propGroup = new THREE.Group();
+    propGroup.name = 'story_prop_hero';
+
+    if (intent === 'EDO_BRIDGE' || intent === 'EDO_HOUSE') {
+      // Story Prop: Edo Milestone Stone Pillar + Glowing Paper Lantern + Sealed Imperial Scroll
+      propGroup.userData = {
+        elementId: 'story_prop_edo_scroll_pillar',
+        canonicalName: 'Cột Mốc Lịch Sử & Cuộn Thư Niêm Phong Hoàng Gia (Edo Milestone & Imperial Scroll)',
+        isStoryProp: true,
+      };
+
+      // 1. Weathered Stone Milestone Pillar (Staged on opposing right third)
+      const stoneMat = new THREE.MeshStandardMaterial({
+        color: 0x5C5852,
+        roughness: 0.85,
+        metalness: 0.1,
+      });
+      const pillar = new THREE.Mesh(new THREE.BoxGeometry(0.38, 1.4, 0.38), stoneMat);
+      pillar.position.set(0, 0.7, 0);
+      propGroup.add(pillar);
+
+      // Engraved Kanji Placard on Pillar
+      const woodPlateMat = new THREE.MeshStandardMaterial({
+        color: 0x8C7052,
+        roughness: 0.65,
+      });
+      const placard = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.65, 0.04), woodPlateMat);
+      placard.position.set(0, 0.85, 0.20);
+      propGroup.add(placard);
+
+      // 2. Glowing Paper Lantern (Andon / Chochin) atop milestone
+      const lanternFrameMat = new THREE.MeshStandardMaterial({
+        color: 0x2A221C,
+        roughness: 0.7,
+      });
+      const lanternPaperMat = new THREE.MeshStandardMaterial({
+        color: 0xFFE8B0,
+        emissive: 0xFFAA33,
+        emissiveIntensity: 0.75,
+        roughness: 0.4,
+      });
+
+      // Wooden Lantern Roof
+      const roof = new THREE.Mesh(new THREE.ConeGeometry(0.32, 0.16, 4), lanternFrameMat);
+      roof.rotation.y = Math.PI / 4;
+      roof.position.set(0, 1.62, 0);
+      propGroup.add(roof);
+
+      // Glowing Lantern Body
+      const lanternBody = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.32, 0.26), lanternPaperMat);
+      lanternBody.position.set(0, 1.40, 0);
+      propGroup.add(lanternBody);
+
+      // Point Light casting warm amber glow onto story prop & surrounding scene
+      const lanternLight = new THREE.PointLight(0xFFB04A, 1.8, 4.5);
+      lanternLight.position.set(0, 1.40, 0.1);
+      propGroup.add(lanternLight);
+
+      // 3. Sealed Imperial Scroll Resting on Milestone Plinth
+      const scrollPaperMat = new THREE.MeshStandardMaterial({
+        color: 0xEDE2CE,
+        roughness: 0.5,
+      });
+      const redRibbonMat = new THREE.MeshStandardMaterial({
+        color: 0xBD2020,
+        roughness: 0.35,
+        metalness: 0.2,
+      });
+
+      const scrollCylinder = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.34, 16), scrollPaperMat);
+      scrollCylinder.rotation.z = Math.PI / 2;
+      scrollCylinder.rotation.y = 0.25;
+      scrollCylinder.position.set(0, 1.44, 0.14);
+      propGroup.add(scrollCylinder);
+
+      // Red Wax Imperial Seal Band
+      const seal = new THREE.Mesh(new THREE.CylinderGeometry(0.048, 0.048, 0.06, 16), redRibbonMat);
+      seal.rotation.z = Math.PI / 2;
+      seal.rotation.y = 0.25;
+      seal.position.set(0, 1.44, 0.14);
+      propGroup.add(seal);
+
+      // Position on right third (X = +1.15) to balance Haru on left third (X = -1.0)
+      const isBridge = intent === 'EDO_BRIDGE';
+      propGroup.position.set(1.15, isBridge ? 2.65 : 0.45, 0.0);
+
+    } else if (intent === 'CAFE') {
+      // Steaming Brass Espresso Machine with Glowing Amber Portafilter
+      propGroup.userData = {
+        elementId: 'story_prop_espresso_machine',
+        canonicalName: 'Máy Pha Cà Phê Đồng Cổ Điển (Classic Brass Espresso Machine)',
+        isStoryProp: true,
+      };
+      const brassMat = new THREE.MeshStandardMaterial({ color: 0xD4AF37, roughness: 0.25, metalness: 0.9 });
+      const boiler = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.28, 0.65, 24), brassMat);
+      boiler.position.set(0, 0.35, 0);
+      propGroup.add(boiler);
+
+      const dome = new THREE.Mesh(new THREE.SphereGeometry(0.28, 24, 12, 0, Math.PI * 2, 0, Math.PI / 2), brassMat);
+      dome.position.set(0, 0.67, 0);
+      propGroup.add(dome);
+
+      const amberLight = new THREE.PointLight(0xFFA500, 1.5, 3.0);
+      amberLight.position.set(0, 0.4, 0.3);
+      propGroup.add(amberLight);
+
+      propGroup.position.set(1.15, 0.95, 0.2);
+
+    } else if (intent === 'ROBOTICS_LAB') {
+      // Glowing Cybernetic Bipedal Chassis
+      propGroup.userData = {
+        elementId: 'story_prop_robot_chassis',
+        canonicalName: 'Khung Xương Robot Hình Người (Cybernetic Bipedal Chassis)',
+        isStoryProp: true,
+      };
+      const frameMat = new THREE.MeshStandardMaterial({ color: 0x3A4454, roughness: 0.35, metalness: 0.8 });
+      const core = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.7, 0.25), frameMat);
+      core.position.set(0, 0.8, 0);
+      propGroup.add(core);
+
+      const glowMat = new THREE.MeshStandardMaterial({ color: 0x00E5FF, emissive: 0x00C8FF, emissiveIntensity: 1.2 });
+      const powerCell = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.25, 16), glowMat);
+      powerCell.position.set(0, 0.8, 0.14);
+      propGroup.add(powerCell);
+
+      const cyanLight = new THREE.PointLight(0x00E5FF, 2.0, 4.0);
+      cyanLight.position.set(0, 0.8, 0.3);
+      propGroup.add(cyanLight);
+
+      propGroup.position.set(1.15, 0.0, 0.3);
+    } else {
+      // Default Narrative Prop Landmark
+      propGroup.userData = {
+        elementId: 'story_prop_landmark',
+        canonicalName: 'Biểu Tượng Cốt Truyện (Narrative Story Landmark)',
+        isStoryProp: true,
+      };
+      const m = new THREE.MeshStandardMaterial({ color: 0xA08060, roughness: 0.6 });
+      const box = new THREE.Mesh(new THREE.BoxGeometry(0.4, 1.2, 0.4), m);
+      box.position.set(0, 0.6, 0);
+      propGroup.add(box);
+      propGroup.position.set(1.15, 1.0, 0.0);
+    }
+
+    this.scene.add(propGroup);
+    this.storyPropGroup = propGroup;
   }
 
   // ----------------------------------------------------------------------------
@@ -727,24 +945,49 @@ export class UniversalWorldEngine {
     }
 
     // Handrails, Balusters & Bronze Giboshi Finials
+    const frontRailingGroup = new THREE.Group();
+    frontRailingGroup.name = 'bridge_front_railing';
+    frontRailingGroup.userData = {
+      elementId: 'bridge_front_railing',
+      canonicalName: 'Lan Can Gỗ Phía Trước (Front Bridge Railing)',
+      isForeground: true,
+      category: 'railing',
+      baseZ: 2.05,
+    };
+
     for (const z of [-2.05, 2.05]) {
+      const isFront = z > 0;
+      const targetParent = isFront ? frontRailingGroup : this.scene;
+
       const rail = new THREE.Mesh(new THREE.BoxGeometry(24, 0.25, 0.25), timberDarkMat);
       rail.position.set(0, 3.7, z);
-      this.scene.add(rail);
+      targetParent.add(rail);
 
       for (let x = -10; x <= 10; x += 1.25) {
         const yArch = 2.65 - (x * x) * 0.007;
         const baluster = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 1.15, 8), timberDarkMat);
         baluster.position.set(x, yArch + 0.55, z);
-        this.scene.add(baluster);
+        targetParent.add(baluster);
 
         if (Math.abs(x) === 10 || Math.abs(x) === 0) {
           const cap = new THREE.Mesh(new THREE.SphereGeometry(0.18, 12, 12), bronzeFittingMat);
           cap.position.set(x, 3.9, z);
-          this.scene.add(cap);
+          targetParent.add(cap);
         }
       }
     }
+
+    this.scene.add(frontRailingGroup);
+    this.foregroundElements.push(frontRailingGroup);
+
+    // Dynamic 3D Falling Waraji Sandal Prop
+    const sandalGeo = new THREE.BoxGeometry(0.24, 0.08, 0.55);
+    const sandalMat = new THREE.MeshStandardMaterial({ color: 0xC8A868, roughness: 0.9 });
+    this.fallingSandalMesh = new THREE.Mesh(sandalGeo, sandalMat);
+    this.fallingSandalMesh.position.set(0.4, 1.2, -1.8);
+    this.fallingSandalMesh.rotation.set(0.4, 0.2, 0.6);
+    this.fallingSandalMesh.visible = false;
+    this.scene.add(this.fallingSandalMesh);
   }
 
   // ----------------------------------------------------------------------------
@@ -879,20 +1122,32 @@ export class UniversalWorldEngine {
       emissive: 0xFF5522,
       emissiveIntensity: 0.75,
     });
+    const frontLanternGroup = new THREE.Group();
+    frontLanternGroup.name = 'house_front_lanterns';
+    frontLanternGroup.userData = {
+      elementId: 'house_front_lanterns',
+      canonicalName: 'Đèn Lồng Đỏ Phía Trước (Front Chochin Lanterns)',
+      isForeground: true,
+      category: 'lantern',
+      baseZ: -0.4,
+    };
+
     for (const lx of [-2.8, 2.8]) {
       const lantern = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.24, 0.65, 16), lanternPaperMat);
       lantern.position.set(lx, 2.85, -0.4);
-      this.scene.add(lantern);
+      frontLanternGroup.add(lantern);
 
       const lanternCap = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.28, 0.05, 16), lacquerMat);
       lanternCap.position.set(lx, 3.20, -0.4);
-      this.scene.add(lanternCap);
+      frontLanternGroup.add(lanternCap);
 
       const lanternLight = new THREE.PointLight(0xFFA544, 2.8, 8.5);
       lanternLight.position.set(lx, 2.85, -0.4);
       this.scene.add(lanternLight);
       this.animatedLights.push({ light: lanternLight, baseIntensity: 2.8, freq: 3.2, phase: Math.abs(lx) });
     }
+    this.scene.add(frontLanternGroup);
+    this.foregroundElements.push(frontLanternGroup);
   }
 
   // ----------------------------------------------------------------------------
@@ -1267,15 +1522,306 @@ export class UniversalWorldEngine {
       }
     }
 
-    // 6. Camera Keyframe Interpolation
+    // 6. Dynamic Falling Waraji Sandal
+    if (this.fallingSandalMesh) {
+      if (timeSeconds < 4.5) {
+        this.fallingSandalMesh.visible = false;
+      } else {
+        this.fallingSandalMesh.visible = true;
+        const fallT = Math.min(1.0, (timeSeconds - 4.5) / 4.0);
+        this.fallingSandalMesh.position.y = 2.4 - fallT * 3.2;
+        this.fallingSandalMesh.position.x = 0.25 + fallT * 0.9;
+        this.fallingSandalMesh.position.z = -0.5 - fallT * 1.2;
+        this.fallingSandalMesh.rotation.x += 0.06;
+        this.fallingSandalMesh.rotation.y += 0.04;
+      }
+    }
+
+    // 7. Camera Keyframe Interpolation
     this.updateCamera(timeSeconds);
+  }
+
+  public getDefaultCameraPosition(): [number, number, number] {
+    const intent = this.getSemanticIntent();
+    switch (intent) {
+      case 'EDO_BRIDGE':
+        return [-2.0, 4.5, 7.2];
+      case 'RAIL_STATION':
+        return [2.0, 2.4, 5.8];
+      case 'CAFE':
+        return [-1.5, 1.9, 6.8];
+      case 'HOSPITAL_ER':
+        return [0.0, 1.9, 6.8];
+      case 'DESERT_STATION':
+        return [-3.0, 2.6, 6.8];
+      case 'ANTARCTIC':
+        return [-3.0, 2.8, 7.0];
+      case 'VICTORIAN_THAMES':
+        return [-2.0, 3.0, 6.8];
+      case 'EDO_HOUSE':
+        return [0.0, 2.4, 7.2];
+      case 'ROBOTICS_LAB':
+        return [-1.5, 1.9, 6.8];
+      case 'NEOCLASSICAL':
+      default:
+        return [-2.0, 2.6, 7.2];
+    }
+  }
+
+  public getDefaultCameraTarget(): [number, number, number] {
+    const intent = this.getSemanticIntent();
+    switch (intent) {
+      case 'EDO_BRIDGE':
+        return [0.1, 5.0, 0.0];
+      case 'RAIL_STATION':
+        return [-0.6, 2.75, -0.8];
+      case 'CAFE':
+        return [0.0, 2.25, 0.0];
+      case 'HOSPITAL_ER':
+        return [0.1, 2.25, 0.0];
+      case 'DESERT_STATION':
+        return [0.2, 3.05, -1.0];
+      case 'ANTARCTIC':
+        return [0.0, 3.25, 0.0];
+      case 'VICTORIAN_THAMES':
+        return [0.0, 3.48, 0.0];
+      case 'EDO_HOUSE':
+        return [0.0, 2.80, 0.0];
+      case 'ROBOTICS_LAB':
+        return [0.0, 2.25, 0.0];
+      case 'NEOCLASSICAL':
+      default:
+        return [0.0, 3.05, 0.0];
+    }
+  }
+
+  public getOverheadStructures(): OverheadStructureDef[] {
+    const intent = this.getSemanticIntent();
+    switch (intent) {
+      case 'EDO_BRIDGE':
+        return [
+          {
+            id: 'edo_bridge_deck_underpass',
+            name: 'Edo Wooden Bridge Deck & Underside Beams',
+            minX: -12.0,
+            maxX: 12.0,
+            minZ: -2.8,
+            maxZ: 2.8,
+            clearanceY: 2.65,
+            description: 'Camera framed beneath the bridge deck/underpass'
+          }
+        ];
+      case 'RAIL_STATION':
+        return [
+          {
+            id: 'rail_pedestrian_underpass',
+            name: 'Shanghai Station Pedestrian Tunnel Underpass',
+            minX: -8.0,
+            maxX: 8.0,
+            minZ: -3.0,
+            maxZ: 3.0,
+            clearanceY: 2.20,
+            description: 'Camera framed inside low pedestrian underpass'
+          },
+          {
+            id: 'train_shed_canopy_low',
+            name: 'Platform Canopy Low Eaves',
+            minX: -16.0,
+            maxX: 16.0,
+            minZ: -5.0,
+            maxZ: 5.0,
+            clearanceY: 2.10,
+            description: 'Camera tucked under platform canopy eaves looking up'
+          }
+        ];
+      case 'EDO_HOUSE':
+        return [
+          {
+            id: 'edo_house_veranda_eaves',
+            name: 'Engawa Low Timber Roof Eaves',
+            minX: -6.0,
+            maxX: 6.0,
+            minZ: -1.0,
+            maxZ: 3.0,
+            clearanceY: 1.60,
+            description: 'Camera framed beneath low house eaves'
+          }
+        ];
+      case 'CAFE':
+        return [
+          {
+            id: 'cafe_pergola_awning',
+            name: 'Low Acoustic Timber Ceiling & Awning',
+            minX: -8.0,
+            maxX: 8.0,
+            minZ: -3.5,
+            maxZ: 3.5,
+            clearanceY: 1.70,
+            description: 'Camera framed under low café ceiling structure'
+          }
+        ];
+      case 'NEOCLASSICAL':
+        return [
+          {
+            id: 'colonnade_portico_ceiling',
+            name: 'Neoclassical Colonnade Portico',
+            minX: -14.0,
+            maxX: 14.0,
+            minZ: -2.5,
+            maxZ: 2.5,
+            clearanceY: 2.40,
+            description: 'Camera framed beneath portico ceiling'
+          }
+        ];
+      default:
+        return [];
+    }
+  }
+
+  public checkOverheadStructure(camPos: [number, number, number], isClaustrophobic: boolean): {
+    violated: boolean;
+    structureId?: string;
+    structureName?: string;
+    clearanceY?: number;
+    isPermitted: boolean;
+  } {
+    const structures = this.getOverheadStructures();
+    for (const s of structures) {
+      if (
+        camPos[0] >= s.minX &&
+        camPos[0] <= s.maxX &&
+        camPos[2] >= s.minZ &&
+        camPos[2] <= s.maxZ &&
+        camPos[1] < s.clearanceY
+      ) {
+        if (isClaustrophobic) {
+          return {
+            violated: false,
+            structureId: s.id,
+            structureName: s.name,
+            clearanceY: s.clearanceY,
+            isPermitted: true,
+          };
+        } else {
+          return {
+            violated: true,
+            structureId: s.id,
+            structureName: s.name,
+            clearanceY: s.clearanceY,
+            isPermitted: false,
+          };
+        }
+      }
+    }
+    return { violated: false, isPermitted: false };
+  }
+
+  public evaluateCameraFraming(timeSeconds: number, actors: any[] = [], shotTag?: string): CameraFramingAudit {
+    const camPos = [this.camera.position.x, this.camera.position.y, this.camera.position.z] as [number, number, number];
+    const isClaustrophobic = shotTag === 'claustrophobic/reveal' ||
+      shotTag === 'claustrophobic' ||
+      shotTag === 'reveal' ||
+      (this.dna as any).shot_tag === 'claustrophobic/reveal' ||
+      (this.dna as any).shot_tag === 'claustrophobic' ||
+      (this.dna as any).shot_tag === 'reveal' ||
+      (this.dna as any).composition === 'claustrophobic' ||
+      (this.dna as any).composition === 'reveal';
+
+    // 1. Check overhead structure clearance
+    const overheadCheck = this.checkOverheadStructure(camPos, isClaustrophobic);
+
+    // 2. Measure foreground/overhead structure screen height coverage (Rule 6: max 35%)
+    let maxForegroundCoverage = 0;
+    let excessiveStructureName: string | undefined;
+    const structs = this.getOverheadStructures();
+    for (const s of structs) {
+      if (s.clearanceY <= camPos[1]) continue; // Structure is beneath camera, not an overhead structure
+      const pts: Array<[number, number, number]> = [
+        [s.minX, s.clearanceY, s.minZ],
+        [s.maxX, s.clearanceY, s.minZ],
+        [s.minX, s.clearanceY, s.maxZ],
+        [s.maxX, s.clearanceY, s.maxZ],
+        [s.minX, s.clearanceY + 0.8, s.minZ],
+        [s.maxX, s.clearanceY + 0.8, s.maxZ],
+      ];
+      let sMinY = this.height;
+      let sMaxY = 0;
+      let inFrustum = false;
+      const camDir = new THREE.Vector3();
+      this.camera.getWorldDirection(camDir);
+
+      for (const p of pts) {
+        const v = new THREE.Vector3(...p);
+        const toPt = v.sub(this.camera.position);
+        if (toPt.dot(camDir) > 0.1) {
+          inFrustum = true;
+          const proj = this.projectToScreen(p);
+          if (proj.y < sMinY) sMinY = proj.y;
+          if (proj.y > sMaxY) sMaxY = proj.y;
+        }
+      }
+      if (inFrustum && sMaxY > sMinY) {
+        const span = Math.max(0, Math.min(this.height, sMaxY) - Math.max(0, sMinY));
+        const cov = span / this.height;
+        if (cov > maxForegroundCoverage) {
+          maxForegroundCoverage = cov;
+          if (cov > 0.35) {
+            excessiveStructureName = s.name;
+          }
+        }
+      }
+    }
+
+    const foregroundViolation = (maxForegroundCoverage > 0.35) && !isClaustrophobic;
+
+    // 3. Project actors to screen
+    let minHeadY = this.height;
+    let maxFeetY = 0;
+
+    for (const actor of actors) {
+      const pos3D = this.getActorWorldPosition(actor, timeSeconds);
+      const feetProj = this.projectToScreen(pos3D);
+      const headPos3D: [number, number, number] = [pos3D[0], pos3D[1] + 1.72, pos3D[2]];
+      const headProj = this.projectToScreen(headPos3D);
+
+      if (headProj.y < minHeadY) minHeadY = headProj.y;
+      if (feetProj.y > maxFeetY) maxFeetY = feetProj.y;
+    }
+
+    if (actors.length === 0) {
+      const gy = this.getGroundHeight(0, 0);
+      const feetProj = this.projectToScreen([0, gy, 0]);
+      const headProj = this.projectToScreen([0, gy + 1.72, 0]);
+      minHeadY = headProj.y;
+      maxFeetY = feetProj.y;
+    }
+
+    const skyFraction = minHeadY / this.height;
+    const lowerMiddleThirdOccupied = minHeadY >= (0.38 * this.height) && maxFeetY <= (1.05 * this.height);
+    const passed = (skyFraction >= 0.58 || isClaustrophobic) && !overheadCheck.violated && !foregroundViolation;
+
+    return {
+      timeSeconds,
+      cameraPosition: [Number(camPos[0].toFixed(2)), Number(camPos[1].toFixed(2)), Number(camPos[2].toFixed(2))],
+      cameraTarget: this.dna.camera_initial?.target ?? this.getDefaultCameraTarget(),
+      skyFraction: Number(skyFraction.toFixed(3)),
+      lowerMiddleThirdOccupied,
+      characterHeadScreenY: Number(minHeadY.toFixed(1)),
+      characterFeetScreenY: Number(maxFeetY.toFixed(1)),
+      overheadStructureViolation: overheadCheck.violated,
+      overheadStructureName: overheadCheck.structureName,
+      foregroundStructureCoverage: Number(maxForegroundCoverage.toFixed(3)),
+      foregroundStructureViolation: foregroundViolation,
+      isClaustrophobicReveal: isClaustrophobic,
+      passed,
+    };
   }
 
   public updateCamera(t: number) {
     const kfs = this.dna.camera_keyframes;
     if (!kfs || kfs.length === 0) {
-      const basePos = this.dna.camera_initial?.position ?? [0, 2.4, 7.0];
-      const baseTgt = this.dna.camera_initial?.target ?? [0, 1.6, 0];
+      const basePos = this.dna.camera_initial?.position ?? this.getDefaultCameraPosition();
+      const baseTgt = this.dna.camera_initial?.target ?? this.getDefaultCameraTarget();
       const driftX = Math.sin(t * 0.35) * 0.12;
       const driftY = Math.cos(t * 0.25) * 0.06;
       this.camera.position.set(basePos[0] + driftX, basePos[1] + driftY, basePos[2]);
@@ -1411,6 +1957,327 @@ export class UniversalWorldEngine {
       scale: Math.max(0.45, Math.min(2.20, perspectiveScale)),
       inSafeFrame,
     };
+  }
+
+  // ============================================================================
+  // DEPTH-SORTING & OCCLUSION INVARIANT ENGINE
+  // "Depth-sort all scene elements (props, characters, environment) by their
+  //  z-distance from camera every frame, not just at scene setup.
+  //  Re-evaluate occlusion whenever a character's world position changes relative
+  //  to a foreground object."
+  // ============================================================================
+  public getCameraDistance(worldPos: THREE.Vector3 | [number, number, number]): number {
+    const v = Array.isArray(worldPos) ? new THREE.Vector3(...worldPos) : worldPos;
+    return v.distanceTo(this.camera.position);
+  }
+
+  public getViewSpaceZ(worldPos: THREE.Vector3 | [number, number, number]): number {
+    const v = Array.isArray(worldPos) ? new THREE.Vector3(...worldPos) : worldPos;
+    const viewPos = v.clone().applyMatrix4(this.camera.matrixWorldInverse);
+    return -viewPos.z; // Positive distance along camera look vector
+  }
+
+  public getActorWorldPosition(actor: any, t: number): [number, number, number] {
+    const cues = actor.performance_cues || [];
+    let pos = actor.staging?.initial_world_pos || [0, 0, 0];
+    if (cues.length > 0) {
+      if (t <= cues[0].time) {
+        pos = cues[0].pos;
+      } else if (t >= cues[cues.length - 1].time) {
+        pos = cues[cues.length - 1].pos;
+      } else {
+        for (let i = 0; i < cues.length - 1; i++) {
+          const c0 = cues[i];
+          const c1 = cues[i + 1];
+          if (t >= c0.time && t <= c1.time) {
+            const alpha = (t - c0.time) / (c1.time - c0.time);
+            pos = [
+              c0.pos[0] + (c1.pos[0] - c0.pos[0]) * alpha,
+              c0.pos[1] + (c1.pos[1] - c0.pos[1]) * alpha,
+              c0.pos[2] + (c1.pos[2] - c0.pos[2]) * alpha,
+            ];
+            break;
+          }
+        }
+      }
+    }
+    return [pos[0], pos[1], pos[2]];
+  }
+
+  public getForegroundElements(): THREE.Object3D[] {
+    return this.foregroundElements;
+  }
+
+  public evaluateSceneDepthSort(
+    timeSeconds: number,
+    actors: any[] = []
+  ): DepthSortResult {
+    const records: SceneElementDepthRecord[] = [];
+    const occlusionEvents: OcclusionEvent[] = [];
+    const activeOccluders: THREE.Object3D[] = [];
+    const actorDepths: Record<string, number> = {};
+
+    const camPos = this.camera.position;
+    this.camera.updateMatrixWorld();
+
+    // 1. Deep Environment Background Anchor
+    const viewDir = new THREE.Vector3();
+    this.camera.getWorldDirection(viewDir);
+    const bgWorldPos = camPos.clone().add(viewDir.clone().multiplyScalar(50.0));
+    records.push({
+      id: 'env_background',
+      name: 'Bối cảnh Môi trường (Background)',
+      type: 'environment_background',
+      worldPosition: [Number(bgWorldPos.x.toFixed(2)), Number(bgWorldPos.y.toFixed(2)), Number(bgWorldPos.z.toFixed(2))],
+      cameraDistance: 50.0,
+      viewZ: 50.0,
+    });
+
+    // 2. Evaluate Characters
+    const charScreenBounds: Record<string, { x1: number; y1: number; x2: number; y2: number }> = {};
+    for (const actor of actors) {
+      const charId = actor.actor_id || actor.dna?.characterId || actor.dna?.id || 'actor';
+      const pos3D = this.getActorWorldPosition(actor, timeSeconds);
+      const camDist = this.getCameraDistance(pos3D);
+      const viewZ = this.getViewSpaceZ(pos3D);
+      actorDepths[charId] = camDist;
+
+      // Project 3D to Screen Coordinates
+      const proj = this.projectToScreen(pos3D);
+      const charWidth = 60 * proj.scale;
+      const charHeight = 280 * proj.scale;
+      const bounds = {
+        x1: proj.x - charWidth * 0.5,
+        y1: proj.y - charHeight,
+        x2: proj.x + charWidth * 0.5,
+        y2: proj.y,
+      };
+      charScreenBounds[charId] = bounds;
+
+      records.push({
+        id: charId,
+        name: actor.dna?.name || actor.dna?.canonicalName || charId,
+        type: 'character',
+        worldPosition: [Number(pos3D[0].toFixed(2)), Number(pos3D[1].toFixed(2)), Number(pos3D[2].toFixed(2))],
+        cameraDistance: Number(camDist.toFixed(3)),
+        viewZ: Number(viewZ.toFixed(3)),
+        screenBounds: bounds,
+      });
+
+      // Handheld Props parented to character
+      const heldProps = actor.dna?.heldProps || actor.dna?.held_props || {};
+      for (const hand of ['rightHand', 'leftHand', 'right_hand', 'left_hand']) {
+        const propType = heldProps[hand];
+        if (propType && propType !== 'none') {
+          records.push({
+            id: `${charId}_prop_${propType}`,
+            name: `Prop ${propType} (${charId})`,
+            type: 'handheld_prop',
+            worldPosition: [Number(pos3D[0].toFixed(2)), Number((pos3D[1] + 0.8).toFixed(2)), Number(pos3D[2].toFixed(2))],
+            cameraDistance: Number(camDist.toFixed(3)),
+            viewZ: Number(viewZ.toFixed(3)),
+          });
+        }
+      }
+    }
+
+    // 3. Standalone Props / Scene Objects
+    if (this.fallingSandalMesh && this.fallingSandalMesh.visible) {
+      const sandalPos = new THREE.Vector3();
+      this.fallingSandalMesh.getWorldPosition(sandalPos);
+      const sandalDist = this.getCameraDistance(sandalPos);
+      const sandalViewZ = this.getViewSpaceZ(sandalPos);
+      records.push({
+        id: 'prop_waraji_sandal',
+        name: 'Dép Rơm Waraji Rơi',
+        type: 'standalone_prop',
+        worldPosition: [Number(sandalPos.x.toFixed(2)), Number(sandalPos.y.toFixed(2)), Number(sandalPos.z.toFixed(2))],
+        cameraDistance: Number(sandalDist.toFixed(3)),
+        viewZ: Number(sandalViewZ.toFixed(3)),
+      });
+    }
+
+    // 4. Foreground Environment Objects
+    const fgElements = this.getForegroundElements();
+    for (const obj of fgElements) {
+      const objId = obj.userData?.elementId || obj.name || 'foreground_object';
+      const box = new THREE.Box3().setFromObject(obj);
+      const objPos = new THREE.Vector3();
+      if (!box.isEmpty()) {
+        box.getCenter(objPos);
+      } else {
+        obj.getWorldPosition(objPos);
+      }
+      const objDist = this.getCameraDistance(objPos);
+      const objViewZ = this.getViewSpaceZ(objPos);
+
+      // Estimate object screen bounds by projecting geometry extents
+      let objBounds: { x1: number; y1: number; x2: number; y2: number };
+      if (!box.isEmpty()) {
+        const corners = [
+          new THREE.Vector3(box.min.x, box.min.y, box.min.z),
+          new THREE.Vector3(box.min.x, box.max.y, box.min.z),
+          new THREE.Vector3(box.max.x, box.min.y, box.min.z),
+          new THREE.Vector3(box.max.x, box.max.y, box.min.z),
+          new THREE.Vector3(box.min.x, box.min.y, box.max.z),
+          new THREE.Vector3(box.min.x, box.max.y, box.max.z),
+          new THREE.Vector3(box.max.x, box.min.y, box.max.z),
+          new THREE.Vector3(box.max.x, box.max.y, box.max.z),
+        ];
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        for (const c of corners) {
+          const p = this.projectToScreen([c.x, c.y, c.z]);
+          minX = Math.min(minX, p.x);
+          minY = Math.min(minY, p.y);
+          maxX = Math.max(maxX, p.x);
+          maxY = Math.max(maxY, p.y);
+        }
+        objBounds = { x1: minX, y1: minY, x2: maxX, y2: maxY };
+      } else {
+        const projObj = this.projectToScreen([objPos.x, objPos.y, objPos.z]);
+        objBounds = {
+          x1: projObj.x - 280 * projObj.scale,
+          y1: projObj.y - 140 * projObj.scale,
+          x2: projObj.x + 280 * projObj.scale,
+          y2: projObj.y + 140 * projObj.scale,
+        };
+      }
+
+      records.push({
+        id: objId,
+        name: obj.userData?.canonicalName || objId,
+        type: 'foreground_object',
+        worldPosition: [Number(objPos.x.toFixed(2)), Number(objPos.y.toFixed(2)), Number(objPos.z.toFixed(2))],
+        cameraDistance: Number(objDist.toFixed(3)),
+        viewZ: Number(objViewZ.toFixed(3)),
+        screenBounds: objBounds,
+      });
+
+      // 5. Re-evaluate Occlusion between each character and this foreground object
+      for (const actor of actors) {
+        const charId = actor.actor_id || actor.dna?.characterId || actor.dna?.id || 'actor';
+        const charDist = actorDepths[charId] || 0;
+        const depthDelta = charDist - objDist;
+        const cBounds = charScreenBounds[charId];
+
+        const overlapScreen = cBounds ? (
+          cBounds.x1 < objBounds.x2 &&
+          cBounds.x2 > objBounds.x1 &&
+          cBounds.y1 < objBounds.y2 &&
+          cBounds.y2 > objBounds.y1
+        ) : true;
+
+        // Character is occluded if it is BEHIND the foreground object (depthDelta > 0)
+        // AND spatially overlapping
+        const isOccluded = depthDelta > 0.05 && overlapScreen;
+
+        occlusionEvents.push({
+          characterId: charId,
+          foregroundObjectId: objId,
+          characterDepth: Number(charDist.toFixed(3)),
+          objectDepth: Number(objDist.toFixed(3)),
+          depthDelta: Number(depthDelta.toFixed(3)),
+          overlapScreen,
+          isOccluded,
+        });
+
+        if (isOccluded && !activeOccluders.includes(obj)) {
+          activeOccluders.push(obj);
+        }
+      }
+    }
+
+    // 5. Narrative Story Prop (Hero Landmark)
+    if (this.storyPropGroup) {
+      const box = new THREE.Box3().setFromObject(this.storyPropGroup);
+      const propPos = new THREE.Vector3();
+      if (!box.isEmpty()) {
+        box.getCenter(propPos);
+      } else {
+        this.storyPropGroup.getWorldPosition(propPos);
+      }
+      const propDist = this.getCameraDistance(propPos);
+      const propViewZ = this.getViewSpaceZ(propPos);
+
+      records.push({
+        id: this.storyPropGroup.userData?.elementId || 'story_prop_hero',
+        name: this.storyPropGroup.userData?.canonicalName || 'Story Prop',
+        type: 'standalone_prop',
+        worldPosition: [Number(propPos.x.toFixed(2)), Number(propPos.y.toFixed(2)), Number(propPos.z.toFixed(2))],
+        cameraDistance: Number(propDist.toFixed(3)),
+        viewZ: Number(propViewZ.toFixed(3)),
+      });
+    }
+
+    // 6. Depth-sort all elements by z-distance from camera (descending: furthest to nearest)
+    records.sort((a, b) => b.cameraDistance - a.cameraDistance);
+
+    const result: DepthSortResult = {
+      depthSortedElements: records,
+      occlusionEvents,
+      activeOccluders,
+      actorDepths,
+    };
+
+    this.lastDepthSortResult = result;
+    this.lastOcclusionEvents = occlusionEvents;
+
+    return result;
+  }
+
+  public setOnlyForegroundVisible(foregroundObjects: THREE.Object3D[]) {
+    this.originalVisibilities.clear();
+    const fgSet = new Set<THREE.Object3D>();
+    for (const fg of foregroundObjects) {
+      fgSet.add(fg);
+      fg.traverse((child) => fgSet.add(child));
+    }
+
+    this.scene.traverse((obj) => {
+      if ((obj as any).isLight) return;
+      this.originalVisibilities.set(obj, obj.visible);
+      obj.visible = fgSet.has(obj);
+    });
+  }
+
+  public restoreAllVisibility() {
+    this.originalVisibilities.forEach((vis, obj) => {
+      obj.visible = vis;
+    });
+    this.originalVisibilities.clear();
+  }
+
+  public renderBackground(
+    renderer: THREE.WebGLRenderer,
+    depthSortResult?: DepthSortResult
+  ) {
+    const occluders = depthSortResult?.activeOccluders || [];
+    for (const obj of occluders) {
+      obj.visible = false;
+    }
+    renderer.render(this.scene, this.camera);
+    for (const obj of occluders) {
+      obj.visible = true;
+    }
+  }
+
+  public renderForeground(
+    renderer: THREE.WebGLRenderer,
+    depthSortResult?: DepthSortResult
+  ) {
+    const occluders = depthSortResult?.activeOccluders || [];
+    if (occluders.length === 0) return;
+
+    this.setOnlyForegroundVisible(occluders);
+
+    const oldBg = this.scene.background;
+    this.scene.background = null;
+    renderer.setClearColor(0x000000, 0);
+    renderer.clear();
+    renderer.render(this.scene, this.camera);
+
+    this.restoreAllVisibility();
+    this.scene.background = oldBg;
   }
 
   // ============================================================================
