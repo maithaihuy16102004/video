@@ -27,7 +27,8 @@ so segment boundaries no longer teleport hands 100-240 px.
 import math
 
 from .rig import (Stickman, walk_pose, interp_keys, smoothstep, lerp,
-                  head_track, GAIT_DEFAULT, GAIT_RUN, STAND_SPLIT_FRAC)
+                  head_track, plant_feet, GAIT_DEFAULT, GAIT_RUN,
+                  STAND_SPLIT_FRAC)
 
 
 def _pose(char, **kw):
@@ -169,8 +170,12 @@ def _locomote(char, from_x, to_x, duration, ground_y, gait, *,
     # anticipation + settle: the walk starts from a stand (feet
     # together, body at rest) and ends in a stand. Both are short
     # (0.2 s) so the middle of the walk runs at constant speed.
+    # v8: the settle is LONGER (0.25 s / 20% of the segment) -- the
+    # v7 settle (0.165 s for a 1.1 s run) gathered the feet so fast
+    # the foot hit 42 px/frame and the knee jerked 45.7 px/frame^2 at
+    # the travel->settle boundary (rubric E7/E2).
     t_ant = min(0.20, duration * 0.15)
-    t_set = min(0.20, duration * 0.15)
+    t_set = min(0.25, duration * 0.20)
     t_travel = max(0.05, duration - t_ant - t_set)
     stand_root_y = ground_y - leg * 0.93
     walk_root_y = ground_y - leg * 0.90
@@ -285,13 +290,27 @@ def _locomote(char, from_x, to_x, duration, ground_y, gait, *,
                   arm_r=lerp(0.08, -arm_amp, a),
                   elbow_l=lerp(0.15, 0.50, a),
                   elbow_r=lerp(0.15, 0.25, a),
-                  head_look=0.0)
+                  head_look=0.0,
+                  # v8: head ANTICIPATION -- the head dips back a few
+                  # px before the body moves (secondary motion). The
+                  # v7 head was rigid on the torso (0 frames of lag).
+                  head_sway_x=-_s(char, 6) * math.sin(math.pi * a))
             for side, stand_xy in (("l", stand_fl), ("r", stand_fr)):
                 sx, sy = _turn["foot_" + side]
                 gx = lerp(sx, stand_xy[0], a)
                 gy = lerp(sy, ground_y, a)
                 if abs(stand_xy[0] - sx) > 1.0:
-                    gy -= lift * math.sin(math.pi * a)
+                    # v8: the anticipation step lifts PROPORTIONALLY to
+                    # how far the foot actually steps, never the full
+                    # gait lift. The v7 code lifted EVERY anticipation
+                    # step by the full gait lift (44 px for the run) --
+                    # a 12 px sideways step became a 44 px hop, both
+                    # feet in the air at once, and the knee velocity
+                    # oscillated 31 -> 8 -> 34 -> 4 px/frame (rubric
+                    # E1/E2). A 12 px step now lifts ~8 px; a 100 px
+                    # step lifts ~35 px.
+                    step_lift = min(lift, max(8.0, 0.35 * abs(stand_xy[0] - sx)))
+                    gy -= step_lift * math.sin(math.pi * a)
                 if side == "l":
                     char.foot_target_l = (gx, gy)
                 else:
@@ -320,7 +339,11 @@ def _locomote(char, from_x, to_x, duration, ground_y, gait, *,
                   arm_r=lerp(-arm_amp * cyc_end, 0.08, b),
                   elbow_l=lerp(0.25 + 0.25 * max(0.0, cyc_end), 0.15, b),
                   elbow_r=lerp(0.25 + 0.25 * max(0.0, -cyc_end), 0.15, b),
-                  head_look=0.0)
+                  head_look=0.0,
+                  # v8: head FOLLOW-THROUGH -- the head overshoots
+                  # forward a few px as the body stops and settles
+                  # back. The v7 head stopped dead with the hips.
+                  head_sway_x=_s(char, 8) * math.sin(math.pi * b))
             # (named gather_* -- assigning to stand_fl/stand_fr here
             # would make them locals of fn() and shadow the closure
             # variables the anticipation branch uses; the v7 settle
@@ -348,7 +371,12 @@ def _locomote(char, from_x, to_x, duration, ground_y, gait, *,
                 gx = lerp(end_xy[0], gather_xy[0], b)
                 gy = lerp(end_xy[1], ground_y, b)
                 if abs(gather_xy[0] - end_xy[0]) > 1.0:
-                    gy -= lift * math.sin(math.pi * b)
+                    # v8: proportional gather lift (see anticipation)
+                    # -- the v7 full-lift gather (44 px) in a 0.165 s
+                    # settle drove the foot to 42 px/frame.
+                    gather_lift = min(
+                        lift, max(8.0, 0.35 * abs(gather_xy[0] - end_xy[0])))
+                    gy -= gather_lift * math.sin(math.pi * b)
                 if side == "l":
                     char.foot_target_l = (gx, gy)
                 else:
@@ -503,11 +531,32 @@ def wave(char, duration, freq=1.8):
     rise takes 0.7 s (v6: was 0.5 s -- the elbow swung 87.8 px in a
     single frame on the rise; the longer rise keeps the elbow under
     ~60 px/frame while still leaving sway time in a 1.1 s wave).
+
+    v8 (audit 2026-11-11): two fixes. (1) The rise is an ARC, not a
+    straight line: the hand travels a quadratic Bezier whose control
+    point bulges forward (facing direction) and up, so the hand
+    sweeps out and up the way a real greeting does. The v7 rise was
+    a perfect straight line (0.1 px deviation from the chord --
+    rubric E8). (2) The rise goes FORWARD (facing direction). The
+    v7 code used ``hx + 80`` with no facing factor, so Lan (facing
+    left) waved BEHIND her back in the v7 motion test (hand at x
+    1615, root at 1503).
+
+    v8.1: the control bulge is (20, -10), not (40, -20) -- the
+    40 px bulge made the rise START at 68% of peak velocity
+    (rubric E10 ease-in, first3 10.7 / peak 15.8) because the hand
+    lunges toward the far control point. The smaller bulge still
+    gives ~13 px arc deviation (E8 needs >= 10) with a gentler
+    start. The sway also EASES OUT over the last 0.3 s of the wave
+    so the hand settles at the raised position instead of stopping
+    mid-swing when the segment (and the video) ends (E10 end
+    ratio was 0.82).
     """
     _start = {}
 
     def fn(t):
         hx, hy = char.pose["root_x"], char.pose["root_y"]
+        f = char.pose.get("facing", 1)
         if "hand" not in _start:
             _start["hand"] = char.joints()["hand_r"]
             _start["last"] = None
@@ -518,10 +567,22 @@ def wave(char, duration, freq=1.8):
         sx, sy = _start["hand"]
         rise = smoothstep(min(1.0, t / 0.7))
         sway = math.sin(2 * math.pi * freq * max(0.0, t - 0.7))
-        tx = hx + _s(char, 80)
+        # Ease the sway OUT over the last 0.3 s so the hand settles
+        # at the raised position instead of stopping mid-swing.
+        if t > duration - 0.3:
+            sway *= 1.0 - smoothstep((t - (duration - 0.3)) / 0.3)
+        tx = hx + f * _s(char, 80)
         ty = hy - _s(char, 225)
-        x = lerp(sx, tx, rise) + _s(char, 22) * sway * rise
-        y = lerp(sy, ty, rise)
+        # Quadratic Bezier rise: P0 = hang, P1 = shoulder height,
+        # control = midpoint bulged forward and up. Max deviation
+        # from the chord is half the control offset (~10 px at a
+        # (20, -10) bulge -- v8.1, was (40, -20) / ~27 px).
+        cx = (sx + tx) / 2 + f * _s(char, 20)
+        cy = (sy + ty) / 2 - _s(char, 10)
+        q = rise
+        x = (1 - q) ** 2 * sx + 2 * (1 - q) * q * cx + q * q * tx
+        y = (1 - q) ** 2 * sy + 2 * (1 - q) * q * cy + q * q * ty
+        x += _s(char, 22) * sway * rise
         char.hand_target_r = (x, y)
         _start["last"] = char.hand_target_r
         char.set_pose(elbow_r=0.6, torso_lean=-0.05 * rise,
@@ -638,6 +699,48 @@ def idle(char, duration, ground_y):
     return fn
 
 
+def standing(char, root_x, ground_y, facing=1, lean=0.0):
+    """Stand at ``root_x`` with the feet where they already are.
+
+    v8 (animation audit 2026-11-11): the old per-script standing()
+    (and rig.plant_feet) always forced the canonical +/-0.125H split.
+    After a walk the feet end SWAPPED (the settle's nearest-split
+    gather) -- the canonical split is the same two positions with the
+    feet exchanged -- so forcing it made each foot cross ~196 px in
+    the 0.2 s blend into the handover (59 px/frame, rubric E6). A
+    standing split does not care which foot is ahead: if the feet are
+    already planted on the ground in a reasonable split around this
+    root, KEEP them; only an unposed character (no foot targets, or
+    feet nowhere near this root) gets the canonical split. Hands are
+    cleared -- the caller sets a hold after this, as before.
+    """
+    leg = char.u_leg + char.l_leg
+    char.set_pose(root_x=root_x,
+                  root_y=ground_y - leg * 0.93,
+                  facing=facing, thigh_l=0.08, thigh_r=-0.08,
+                  knee_l=0.12, knee_r=0.12, arm_l=0.08, arm_r=0.08,
+                  elbow_l=0.15, elbow_r=0.15, bob=0.0,
+                  torso_lean=lean, head_look=0.0, head_sway_x=0.0)
+    char.hand_target_l = None
+    char.hand_target_r = None
+    fl = char.foot_target_l
+    fr = char.foot_target_r
+    spread = abs(fl[0] - fr[0]) if fl is not None and fr is not None else 0.0
+    mid = (fl[0] + fr[0]) / 2.0 if fl is not None and fr is not None else None
+    keep = (fl is not None and fr is not None
+            and abs(fl[1] - ground_y) <= 4.0
+            and abs(fr[1] - ground_y) <= 4.0
+            and 0.10 * float(char.H) <= spread <= 0.35 * float(char.H)
+            and mid is not None
+            and abs(mid - root_x) <= 0.15 * float(char.H))
+    if keep:
+        char.foot_target_l = (fl[0], ground_y)
+        char.foot_target_r = (fr[0], ground_y)
+    else:
+        plant_feet(char, ground_y)
+    return char
+
+
 def bend_pick(char, target, duration, ground_y, hand="r"):
     """Bend down to pick up a prop at `target` (x, y) on the ground.
 
@@ -683,8 +786,19 @@ def bend_pick(char, target, duration, ground_y, hand="r"):
         rise = smoothstep(max(0.0, (u - 0.65) / 0.35))
         sx, sy = _start["hand"]
         tx, ty = target
-        hx = lerp(sx, tx, reach)
-        hy = lerp(sy, ty, reach) - _s(char, 60) * rise
+        # v8: the rise carries the prop to the WAIST hold (root_x +
+        # 40s forward, standing root_y - 60s) -- the same hold the
+        # next walk segment uses. The v7 rise lifted the hand only
+        # 60 px, leaving it 298 px from the waist, so the next
+        # segment's 0.2 s blend had to sprint it 66 px/frame (rubric
+        # E3/E4). The hand now travels the whole way during the
+        # 0.49 s rise, smoothstepped, arriving at the waist exactly
+        # when the body stands up.
+        f = char.pose.get("facing", 1)
+        waist = (char.pose["root_x"] + f * _s(char, 40),
+                 ground_y - leg * 0.93 - _s(char, 60))
+        hx = lerp(lerp(sx, tx, reach), waist[0], rise)
+        hy = lerp(lerp(sy, ty, reach), waist[1], rise)
         char.set_pose(root_y=root_y, torso_lean=lean)
         # head tracks the prop (clamped by head_track)
         head_track(char, (tx, ty))
@@ -813,13 +927,18 @@ def kneel_pick(char, target, duration, ground_y, hand="r"):
             else:
                 char.foot_target_r = (gx, gy)
         # hand: reach the target by the end of the descend, hold it,
-        # then lift it ~60 px as the body rises.
+        # then carry it to the WAIST hold as the body rises (v8 -- see
+        # bend_pick: the v7 rise lifted the hand only 60 px, leaving
+        # it 298 px from the waist, so the next segment's 0.2 s blend
+        # had to sprint it 66 px/frame, rubric E3/E4).
         reach = smoothstep(min(1.0, u / 0.50))
         rise = smoothstep(max(0.0, (u - 0.65) / 0.35))
         sx, sy = _start["hand"]
         tx, ty = target
-        hx = lerp(sx, tx, reach)
-        hy = lerp(sy, ty, reach) - _s(char, 60) * rise
+        waist = (rx + f * _s(char, 40),
+                 ground_y - leg * 0.93 - _s(char, 60))
+        hx = lerp(lerp(sx, tx, reach), waist[0], rise)
+        hy = lerp(lerp(sy, ty, reach), waist[1], rise)
         char.set_pose(root_y=root_y, torso_lean=lean)
         # head tracks the prop -- CAPPED at 0.25 rad (v7): the default
         # 0.6 clamp let the head point down-forward and dropped it to
@@ -870,6 +989,18 @@ def apply_snapshot(char, snap_a, snap_b=None, u=0.0):
     fk = char.joints()
 
     def _blend_target(ta, tb, fk_key):
+        # v8: when NEITHER snapshot has a target, return None -- do
+        # NOT invent one from the FK position. The old code always
+        # returned the FK hand/foot position, which made a free limb
+        # IK-driven during the blend; the IK elbow branch (bend=f)
+        # sits on the OPPOSITE side of the shoulder->hand line from
+        # the FK elbow, so the elbow snapped 60 px in one frame when
+        # the blend ended and the limb went back to FK (rubric E5:
+        # walk_hold elbow_l 59.5 px/frame at fi 115->116). A target
+        # that exists in only one snapshot still blends from/to the
+        # FK position, as before.
+        if ta is None and tb is None:
+            return None
         a = ta if ta is not None else fk[fk_key]
         b = tb if tb is not None else fk[fk_key]
         return (lerp(a[0], b[0], u), lerp(a[1], b[1], u))

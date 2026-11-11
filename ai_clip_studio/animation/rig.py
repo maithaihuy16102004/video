@@ -45,6 +45,15 @@ HIP_HALF_FRAC = 0.06
 # thin arm on a wide torso (PREMIUM_STICKMAN v4 line rule).
 BODY_WIDTH_SCALE = {"slim": 0.9, "standard": 1.0, "sturdy": 1.15}
 
+# Moustache styles (v8, animation audit 2026-11-11): a character's
+# signature facial trait, carried as template data. See Stickman.
+MOUSTACHE_STYLES = ("none", "toothbrush", "handlebar", "full")
+
+# Hair styles (v8): "short" | "long" | "tuft" | "side_part" (hair
+# parted on one side -- a slanted hairline, a signature trait for
+# historical-figure-style test instances).
+HAIR_STYLES = ("short", "long", "tuft", "side_part")
+
 # Canonical standing foot split (v7, animation audit 2026-11-11): the
 # feet stand +/-STAND_SPLIT_FRAC*H around the root in EVERY standing
 # pose -- plant_feet, idle, the walk's start/end split (+/-step/2 with
@@ -154,7 +163,8 @@ class Stickman:
     """A V51 stickman. Pose is set per frame via `pose` dict, then `joints()`."""
 
     def __init__(self, height=560, suit="#172033", skin="#F3F0E8",
-                 hat="bowler", moustache=True, name="lustig",
+                 hat="bowler", moustache=True, moustache_style=None,
+                 name="lustig",
                  template="male", body_variant="standard",
                  hair_style=None, glasses=False, cane=False,
                  costume="none", gait=None):
@@ -170,7 +180,21 @@ class Stickman:
         self.suit = suit
         self.skin = skin
         self.hat = hat
-        self.moustache = moustache
+        # v8 (animation audit 2026-11-11): moustache STYLES -- a
+        # character's signature trait is data, not a per-story
+        # drawing. Styles: "none" | "toothbrush" (small dark block
+        # under the nose) | "handlebar" (wide, upturned ends) |
+        # "full" (solid band above the mouth). ``moustache`` (bool)
+        # is kept for backward compatibility: True with no style
+        # means "full", False means "none".
+        if moustache_style is None:
+            moustache_style = "full" if moustache else "none"
+        if moustache_style not in MOUSTACHE_STYLES:
+            raise ValueError(
+                f"unknown moustache_style: {moustache_style!r} "
+                f"(expected one of {sorted(MOUSTACHE_STYLES)})")
+        self.moustache_style = moustache_style
+        self.moustache = moustache_style != "none"
         self.name = name
         # PREMIUM_STICKMAN v4 identity (see animation/character_art.py).
         # template: male | female | child | elderly. body_variant scales
@@ -201,6 +225,12 @@ class Stickman:
             "thigh_l": 0.0, "thigh_r": 0.0, "knee_l": 0.0, "knee_r": 0.0,
             "arm_l": 0.0, "arm_r": 0.0, "elbow_l": 0.0, "elbow_r": 0.0,
             "bob": 0.0,
+            # head_sway_x (v8, animation audit 2026-11-11): secondary
+            # motion -- the head lags the torso by a few px during
+            # anticipation (dips back before the body moves) and
+            # follow-through (overshoots forward after the body stops).
+            # Set by _locomote; 0.0 = head rigid on the torso (v7).
+            "head_sway_x": 0.0,
             # turn_u: 0 = not turning (profile view, facing as set);
             # 1 = turn complete. Mid-turn (0.5) the character is
             # front-on -- see character_art.resolve_view(). Set by
@@ -246,7 +276,8 @@ class Stickman:
         # shoulder), so the head bottom sits exactly at shoulder level
         # -- the reference stickman's head sits directly on its
         # shoulders with no neck gap, and the drawn total height is H.
-        head_x = neck_x + math.sin(lean + p["head_look"]) * self.head_r * 0.6
+        head_x = (neck_x + math.sin(lean + p["head_look"]) * self.head_r * 0.6
+                  + p.get("head_sway_x", 0.0))
         head_y = neck_y - math.cos(lean + p["head_look"]) * self.head_r * 0.6
         J = {"hip": (hip_x, hip_y), "shoulder": (sh_x, sh_y),
              "neck": (neck_x, neck_y), "head": (head_x, head_y),

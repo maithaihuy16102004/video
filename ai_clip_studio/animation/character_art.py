@@ -278,13 +278,26 @@ CHARACTER_INSTANCES = {
     # a confident swagger, not a shuffle. His identifier is the
     # bowler + moustache, not his walk.
     "lustig": dict(template="male", name="lustig", suit="#172033",
-                   hat="bowler", moustache=True,
+                   hat="bowler", moustache=True, moustache_style="full",
                    gait=dict(stride_frac=0.15, arm_amp=0.40, lean=0.12,
                              bob_frac=0.04, lift_frac=0.08, overlap=0.20)),
+    # v8 (animation audit 2026-11-11): the "officer" is a
+    # VISUAL-IDENTITY test instance, defined ONLY by template data --
+    # toothbrush moustache + side-parted hair + uniform. No name, no
+    # narrative, no political content: it proves the accessory system
+    # can give a character its real-world signature traits from data,
+    # and that the resulting silhouette is distinct from Lustig's
+    # (bowler + full moustache + plain suit) with no colour and no
+    # face. Field-grey suit, no hat, no glasses, no cane.
+    "officer": dict(template="male", name="officer", suit="#4A4A3C",
+                    hat="none", moustache=True, moustache_style="toothbrush",
+                    hair_style="side_part", glasses=False, cane=False,
+                    costume="uniform", body_variant="slim"),
 }
 
 _STICKMAN_KWARGS = (
-    "height", "suit", "skin", "hat", "moustache", "name", "template",
+    "height", "suit", "skin", "hat", "moustache", "moustache_style",
+    "name", "template",
     "body_variant", "hair_style", "glasses", "cane", "costume", "gait",
 )
 
@@ -517,17 +530,37 @@ def _draw_face(draw, char, hx, hy, view, face_dx, params, ink, pal):
     else:
         draw.line([(mx - mw / 2, my), (mx + mw / 2, my)],
                   fill=ink, width=int(mouth_w))
-    # Moustache (Lustig): two short strokes on the mouth line, same ink.
-    if getattr(char, "moustache", False):
-        my0 = my - 0.13 * r
-        draw.line([(mx - 0.30 * r, my0 - 0.02 * r), (mx - 0.03 * r, my0 + 0.02 * r)],
-                  fill=ink, width=int(brow_w))
-        draw.line([(mx + 0.03 * r, my0 + 0.02 * r), (mx + 0.30 * r, my0 - 0.02 * r)],
-                  fill=ink, width=int(brow_w))
+    # Moustache (v8): drawn by STYLE, from template data -- a
+    # character's signature trait, never a per-story drawing.
+    # toothbrush: small dark block under the nose, centred on the
+    # mouth line. handlebar: wide strokes with upturned ends. full:
+    # solid band above the mouth. none: no moustache at all.
+    _style = getattr(char, "moustache_style", None)
+    if _style is None:
+        _style = "full" if getattr(char, "moustache", False) else "none"
+    if _style == "toothbrush":
+        _mw = 0.07 * r
+        draw.rectangle([mx - _mw, my - 0.30 * r,
+                        mx + _mw, my - 0.08 * r], fill=ink)
+    elif _style == "handlebar":
+        _bw = int(brow_w)
+        draw.line([(mx - 0.40 * r, my - 0.15 * r),
+                   (mx + 0.40 * r, my - 0.15 * r)],
+                  fill=ink, width=_bw)
+        draw.line([(mx - 0.40 * r, my - 0.15 * r),
+                   (mx - 0.48 * r, my - 0.32 * r)],
+                  fill=ink, width=_bw)
+        draw.line([(mx + 0.40 * r, my - 0.15 * r),
+                   (mx + 0.48 * r, my - 0.32 * r)],
+                  fill=ink, width=_bw)
+    elif _style == "full":
+        draw.rounded_rectangle([mx - 0.35 * r, my - 0.30 * r,
+                                mx + 0.35 * r, my - 0.08 * r],
+                               radius=int(0.06 * r), fill=ink)
     return mx, my
 
 
-def _hair_cap(draw, hx, hy, r, ink, chord=0.72, bow=0.12):
+def _hair_cap(draw, hx, hy, r, ink, chord=0.72, bow=0.12, slant=0.0):
     """Hair cap as a polygon that follows the head circle EXACTLY: the
     top arc of the head circle down to a chord at ``hy - chord*r``.
 
@@ -540,6 +573,11 @@ def _hair_cap(draw, hx, hy, r, ink, chord=0.72, bow=0.12):
     hairline reads as a curve, not a straight bowl-cut line across the
     forehead. Short hair stays recognisable as a hair identifier, but
     the head is mostly the reference's plain white circle again.
+
+    v8: ``slant`` (fraction of r) tilts the hairline -- positive slants
+    it DOWN on the +x side (the facing side in profile) -- a side
+    part. The hairline is lower on the part side and higher on the
+    other, so the part reads from the silhouette alone.
     """
     a_lo = 180 + math.degrees(math.asin(chord))
     a_hi = 360 - math.degrees(math.asin(chord))
@@ -552,12 +590,17 @@ def _hair_cap(draw, hx, hy, r, ink, chord=0.72, bow=0.12):
     rad = math.radians(a_hi)
     pts.append((hx + r * math.cos(rad), hy + r * math.sin(rad)))
     # bottom edge: from the right chord end back to the left, bowed up
-    # in the middle so the hairline is higher at the centre.
+    # in the middle so the hairline is higher at the centre, and
+    # slanted (v8) so a side part reads as a diagonal hairline. The
+    # slant is ONE-SIDED (max(0, x/half_w)): it only LOWERS the edge
+    # on the part (+x) side -- a symmetric slant would push the other
+    # edge above the head circle and poke a horn out of the silhouette.
     half_w = r * math.cos(math.asin(chord))
     n = 16
     for i in range(1, n + 1):
         x = half_w * (1.0 - 2.0 * i / n)
-        y = hy - chord * r - bow * r * (1.0 - (x / half_w) ** 2)
+        y = (hy - chord * r - bow * r * (1.0 - (x / half_w) ** 2)
+             + slant * r * max(0.0, x / half_w))
         pts.append((hx + x, y))
     draw.polygon(pts, fill=ink)
 
@@ -600,6 +643,19 @@ def _draw_hair(draw, char, hx, hy, view, ink, part="cap"):
         # hairline -- the v4 chord 0.55 buried the top of the head in
         # black while the reference head is plain white.
         _hair_cap(draw, hx, hy, r, ink)
+    elif style == "side_part":
+        # v8: hair parted on one side -- the hairline slants down
+        # toward the facing side, with a short swept fringe on that
+        # side. The part reads from the silhouette alone (no colour,
+        # no face): the dark cap is deeper on the part side.
+        f = 1.0 if float(char.pose.get("facing", 1)) >= 0 else -1.0
+        _hair_cap(draw, hx, hy, r, ink, slant=0.25 * f)
+        # Swept fringe (v8): a diagonal sweep from the part down the
+        # facing side of the forehead, ending above the eye -- the side
+        # part reads as HAIR, not just a slanted cap edge, and the head
+        # silhouette differs from a plain short cap.
+        _thick(draw, (hx + f * 0.30 * r, hy - 0.85 * r),
+               (hx + f * 0.90 * r, hy - 0.32 * r), 0.12 * r, ink)
     elif style == "long":
         _hair_cap(draw, hx, hy, r, ink)
     elif style == "tuft":
@@ -774,6 +830,51 @@ def draw_character_v4(draw, char, expression="neutral", view="profile",
             (hip_d[0] + hem_half, hem_y),
             (hip_d[0] - hem_half, hem_y),
         ], fill=suit)
+    # Costume "uniform" (v8): a belted military-style tunic -- a
+    # flared tunic skirt to mid-thigh + a belt band at the waist +
+    # shoulder boards. The skirt and boards change the SILHOUETTE
+    # (not just the colour), so a uniformed figure reads as a
+    # different character with no colour and no face.
+    if getattr(char, "costume", "none") == "uniform":
+        skirt_y = hip_d[1] + 0.13 * H
+        skirt_half = 0.075 * H * ws
+        draw.polygon([
+            (hip_d[0] - px * w_bot, hip_d[1] - py * w_bot),
+            (hip_d[0] + px * w_bot, hip_d[1] + py * w_bot),
+            (hip_d[0] + skirt_half, skirt_y),
+            (hip_d[0] - skirt_half, skirt_y),
+        ], fill=suit)
+        # belt: dark band across the waist (long axis = torso
+        # perpendicular, thickness along the torso).
+        _bh = 0.022 * H
+        _bw = w_bot + 0.008 * H
+        draw.polygon([
+            (hip_d[0] + px * _bw + ux * _bh / 2,
+             hip_d[1] + py * _bw + uy * _bh / 2),
+            (hip_d[0] - px * _bw + ux * _bh / 2,
+             hip_d[1] - py * _bw + uy * _bh / 2),
+            (hip_d[0] - px * _bw - ux * _bh / 2,
+             hip_d[1] - py * _bw - uy * _bh / 2),
+            (hip_d[0] + px * _bw - ux * _bh / 2,
+             hip_d[1] + py * _bw - uy * _bh / 2),
+        ], fill=ink)
+        # shoulder boards: small dark tabs sticking out past the
+        # torso top on both shoulders.
+        _bt = 0.024 * H
+        _bl = 0.020 * H
+        for _sgn in (+1, -1):
+            _cx = shoulder_d[0] + px * _sgn * (w_top + _bl / 2)
+            _cy = shoulder_d[1] + py * _sgn * (w_top + _bl / 2)
+            draw.polygon([
+                (_cx + px * _bl / 2 + ux * _bt / 2,
+                 _cy + py * _bl / 2 + uy * _bt / 2),
+                (_cx - px * _bl / 2 + ux * _bt / 2,
+                 _cy - py * _bl / 2 + uy * _bt / 2),
+                (_cx - px * _bl / 2 - ux * _bt / 2,
+                 _cy - py * _bl / 2 - uy * _bt / 2),
+                (_cx + px * _bl / 2 - ux * _bt / 2,
+                 _cy + py * _bl / 2 - uy * _bt / 2),
+            ], fill=ink)
 
     # --- arms: same uniform line as the legs, minimal 3-finger hands ---
     for side, col in (("l", ink_far), ("r", ink)):

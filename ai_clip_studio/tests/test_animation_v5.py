@@ -53,8 +53,14 @@ class TestPlantedWalk(unittest.TestCase):
         fast and too shuffly)."""
         c = Stickman(height=H, name="minh")
         frames = _walk_frames(c, walk_to(c, 500, 945, 1.8, GY), 1.8)
-        planted = sorted(set(round(f["foot_l"][0]) for f in frames
-                             if abs(f["foot_l"][1] - GY) < 0.5))
+        # Measure steps during the TRAVEL phase only (v8): the settle's
+        # gather repositions the foot to the nearest split (44 px here),
+        # which is not a step -- counting it would create a spurious
+        # 53 px "step" between the last strike and the settle end.
+        # Travel ends at duration - t_set (t_set <= 0.25 s).
+        planted = sorted(set(round(f["foot_l"][0]) for fi, f in enumerate(frames)
+                             if fi / 24.0 < 1.8 - 0.25
+                             and abs(f["foot_l"][1] - GY) < 0.5))
         steps = [b - a for a, b in zip(planted, planted[1:])]
         self.assertTrue(steps, "no planted foot positions found")
         for s in steps:
@@ -244,7 +250,10 @@ class TestWaveIdleBend(unittest.TestCase):
             j = c.joints()
             max_drop = max(max_drop, j["hip"][1] - (GY - 313))
             max_lean = max(max_lean, c.pose["torso_lean"])
-            if 0.55 * 1.8 <= fi / 24.0 <= 0.75 * 1.8:
+            if 0.55 * 1.8 <= fi / 24.0 <= 0.65 * 1.8:
+                # Hold phase only (u 0.5-0.65; v8): the rise (u > 0.65)
+                # carries the prop to the waist hold, so the hand
+                # legitimately leaves the ground target then.
                 hold_tot += 1
                 if math.hypot(j["hand_r"][0] - 790,
                               j["hand_r"][1] - (GY - 10)) < 15:
