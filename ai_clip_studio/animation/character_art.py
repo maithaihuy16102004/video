@@ -190,8 +190,9 @@ def draw_character_v2(draw, char, mood="neutral", palette=None):
                   fill=hair_c)
     draw.ellipse([hx - r, hy - r * 0.9, hx - f * r * 0.2, hy - r * 0.1],
                  fill=hair_c)
-    # bowler hat, if the rig carries one
-    if getattr(char, "hat", None):
+    # bowler hat, if the rig carries one ("none" means no hat)
+    _hat = getattr(char, "hat", None)
+    if _hat and _hat != "none":
         draw.ellipse([hx - r * 1.15, hy - r * 1.05, hx + r * 1.15,
                       hy - r * 0.72], fill=dark)
         draw.rectangle([hx - r * 0.62, hy - r * 1.75,

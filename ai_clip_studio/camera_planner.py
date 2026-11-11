@@ -78,7 +78,10 @@ COMPOSITION_RULES = {
 # Generic action-cue keywords (substrings, after lower-casing and
 # underscore normalisation). No story, character or scene names here.
 _CUE_HANDOFF = ("give", "handoff", "hand_over")
-_CUE_BOARD = ("board", "bus", "arrive", "depart", "vehicle")
+# NOTE: bare "bus" is NOT a boarding action — it is a location noun
+# (a lead set at a bus stop must not become a boarding shot). Boarding
+# is "board" / "arrive" / "depart" / "vehicle".
+_CUE_BOARD = ("board", "arrive", "depart", "vehicle")
 _CUE_PICK = ("bend_pick", "pick", "take", "open", "take_out", "put_away")
 _CUE_MOVE = ("walk", "run", "hurry", "chase")
 _CUE_LOOK = ("look", "search", "glance", "notice", "spot")
@@ -140,6 +143,38 @@ def _shots_for_segment(segment):
     speaker = (segment.get("speaker") or "").strip().lower()
     is_narration = speaker in ("narrator", "narration", "") or not cues
 
+    # Dialogue segments ("kind": "line"): characters are standing and
+    # talking, so movement cues do NOT apply — the camera should frame
+    # the speaker, the object being discussed, or the emotion.
+    # Narrator + object cue  -> insert on the object under narration.
+    # Narrator + emotion cue -> reaction close-up.
+    # Character speaker + emotion cue -> reaction close-up.
+    # Character speaker otherwise -> medium on the speaker.
+    # Narrator with neither -> establishing (breathing room).
+    if segment.get("kind") == "line":
+        if is_narration:
+            # A boarding/arrival line is about the vehicle arriving,
+            # not about an object — the boarding chain wins over pick.
+            if _has(cues, _CUE_BOARD):
+                return [
+                    ("establishing", "wide shot of the arrival place and "
+                     "the vehicle entering the frame", "scene"),
+                    ("medium", "medium shot of the character as the "
+                     "vehicle arrives / the character boards", "speaker"),
+                ]
+            if _has(cues, _CUE_PICK):
+                return [("object_insert", "close-up insert of the object "
+                         "being talked about, under narration", "object")]
+            if _has(cues, _CUE_EMOTION):
+                return [("reaction", "close-up reaction shot carrying "
+                         "the emotional beat", "speaker")]
+            return [("establishing", "wide establishing shot under "
+                     "narration, letting the scene breathe", "scene")]
+        if _has(cues, _CUE_EMOTION):
+            return [("reaction", "close-up reaction shot carrying the "
+                     "emotional beat", "speaker")]
+        return [("medium", "medium shot of the speaking character",
+                 "speaker")]
     if _has(cues, _CUE_HANDOFF):
         return [
             ("establishing", "establish both characters and the space "

@@ -197,6 +197,57 @@ class TestCameraPlanner(unittest.TestCase):
         self.assertEqual(types, ["tracking", "medium", "object_insert"])
         self.assertLessEqual(len(shots), 3)
 
+    def test_bus_alone_is_not_a_boarding_shot(self):
+        # "bus" is a location noun: a lead set at a bus stop (walk +
+        # pick) must compose walk/pick shots, not a boarding chain.
+        shots = CameraPlanner.plan([_seg(["walk_fast", "bend_pick", "look",
+                                          "bus"], duration=4.2)])
+        types = [s["shot_type"] for s in shots]
+        self.assertEqual(types, ["tracking", "medium", "object_insert"])
+
+    def test_line_narrator_with_object_cue_is_insert(self):
+        shots = CameraPlanner.plan([{
+            "action_cues": ["bend_pick", "look"], "speaker": "narrator",
+            "duration": 5.0, "scene_number": 1, "kind": "line"}])
+        self.assertEqual([s["shot_type"] for s in shots], ["object_insert"])
+
+    def test_line_speaker_is_medium_not_insert(self):
+        shots = CameraPlanner.plan([{
+            "action_cues": ["bend_pick", "look"], "speaker": "Minh",
+            "duration": 3.0, "scene_number": 1, "kind": "line"}])
+        self.assertEqual([s["shot_type"] for s in shots], ["medium"])
+
+    def test_line_narrator_with_emotion_cue_is_reaction(self):
+        shots = CameraPlanner.plan([{
+            "action_cues": ["smile", "relief"], "speaker": "narrator",
+            "duration": 3.0, "scene_number": 3, "kind": "line"}])
+        self.assertEqual([s["shot_type"] for s in shots], ["reaction"])
+
+    def test_line_narrator_without_cues_is_establishing(self):
+        shots = CameraPlanner.plan([{
+            "action_cues": [], "speaker": "narrator",
+            "duration": 3.0, "scene_number": 1, "kind": "line"}])
+        self.assertEqual([s["shot_type"] for s in shots], ["establishing"])
+
+    def test_line_does_not_repeat_handoff_chain(self):
+        shots = CameraPlanner.plan([{
+            "action_cues": ["give", "take", "open"], "speaker": "Lan",
+            "duration": 3.0, "scene_number": 3, "kind": "line"}])
+        self.assertEqual([s["shot_type"] for s in shots], ["medium"])
+
+
+    def test_line_narrator_boarding_beats_pick(self):
+        # Scene 4: the narrator line carries both "open"/"put_away"
+        # (pick cues) and "board"/"bus" — the bus arriving is the
+        # subject, so the boarding chain wins, not a 10 s object insert.
+        shots = CameraPlanner.plan([{
+            "action_cues": ["stop", "open", "put_away", "wave",
+                            "turn_back", "smile", "board", "bus"],
+            "speaker": "narrator", "duration": 9.7, "scene_number": 4,
+            "kind": "line"}])
+        self.assertEqual([s["shot_type"] for s in shots],
+                         ["establishing", "medium"])
+
 
 if __name__ == "__main__":
     unittest.main()

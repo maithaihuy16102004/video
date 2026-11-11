@@ -148,3 +148,31 @@ python3 ai_clip_studio/run_generalization.py
    MP4 thật validate + upload Drive thành công thì trạng thái mới
    chuyển sang `END_TO_END_DRAFT_READY_FOR_REVIEW`, và chỉ sau khi cô
    ấy bấm approve-master mới thành `MASTER_APPROVED_AND_UPLOADED`.
+
+## QA v2 — cập nhật 2026-11-11 (sau khi Mai bác điểm 8,70/10)
+
+- Hai cổng QA tách riêng (`qa_gates.py`): Technical (10 check, đo bằng
+  code) + Creative (10 tiêu chí, cần bằng chứng riêng; thiếu bằng chứng
+  → CREATIVE_REVIEW_REQUIRED, không tự bịa PASS). Cấm ffprobe/RMS/độ
+  phân giải/số frame/motion delta làm bằng chứng camera/mỹ thuật.
+  Giọng chưa kiểm chứng phát âm → audio tối đa 7,0.
+- Chấm lại v3/v4: camera 10,0 → 4,0 (1 shot wide suốt video), giọng
+  10,0 → 7,0 (cap), nhân vật/bối cảnh 8,0 → 6,0. Cả hai về
+  CREATIVE_REVIEW_REQUIRED, không còn DRAFT_PASSED_QA.
+- Engine mới: `camera_planner.py` (22 shot Chiếc Ví v4 / 14 shot Eiffel
+  v5, 5 loại shot), `character_art.py` (v2: áo khoác có cấu trúc, mặt
+  có biểu cảm), `environment_art.py` (3 lớp depth), `subtitles.py`
+  (cụm ngắn, cố định 64px — đã xóa thang thu nhỏ).
+- Chiếc Ví v4: Technical PASS 10/10, Creative tư vấn 7,36.
+  Eiffel v5: Technical PASS 10/10, Creative tư vấn 7,48.
+  **Trạng thái cuối: TECHNICAL_PASS_CREATIVE_FAIL** — không Master,
+  chờ Mai xem frame (clip test 15s cảnh 3 + contact sheet trên Drive).
+- SFX: đã sửa mưa lấn thoại (giọng ≥ 6,4 dB trên phi-thoại trong cả 10
+  cửa sổ sau khi duck mưa/foley + chuẩn hóa giọng). Phát âm kiểm chứng
+  bằng faster-whisper: Chiếc Ví WER 0,094, Eiffel 4/5 câu khớp tuyệt
+  đối; 2 câu cần Mai nghe kiểm chứng (line09 "May quá." → "Mày quá").
+- Regression: 123/123 ai_clip_studio + 11/11 youtube_16x9 pass.
+- Báo cáo đầy đủ: `~/workspace/acceptance_loop/BAO_CAO_QA2.md`.
+- Việc còn lại: push GitHub bổ sung các file QA v2 + engine mới (push
+  13:46 đã xong 59 file cũ; xem sync record
+  `~/workspace/video-16x9-v2.muse-github-snapshot-sync.json`).

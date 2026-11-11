@@ -127,6 +127,28 @@ class TestCharacterArt(unittest.TestCase):
             - np.asarray(img_b, dtype=np.float32))))
         self.assertEqual(diff, 0.0)
 
+    def test_hat_none_draws_no_bowler(self):
+        # The Eiffel rig uses hat="none" for the dealer; the string
+        # "none" is truthy, so it must be treated as no hat, otherwise
+        # every character gets a bowler.
+        img, joints = _render("neutral")
+        ch = _standing_char()
+        ch.hat = "none"
+        img_none = Image.new("RGBA", (W, H), (15, 30, 51, 255))
+        draw_character_v2(ImageDraw.Draw(img_none, "RGBA"), ch,
+                          mood="neutral")
+        ch2 = _standing_char()
+        ch2.hat = "bowler"
+        img_bowler = Image.new("RGBA", (W, H), (15, 30, 51, 255))
+        draw_character_v2(ImageDraw.Draw(img_bowler, "RGBA"), ch2,
+                          mood="neutral")
+        a = np.asarray(img_none, dtype=np.float32)
+        b = np.asarray(img_bowler, dtype=np.float32)
+        self.assertEqual(
+            float(np.mean(np.abs(a - np.asarray(img, dtype=np.float32)))),
+            0.0)
+        self.assertGreater(float(np.mean(np.abs(b - a))), 0.0)
+
 
 if __name__ == "__main__":
     unittest.main()
