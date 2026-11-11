@@ -47,8 +47,10 @@ class TestPlantedWalk(unittest.TestCase):
             self.assertLess(slip, 2.0, f"{key} slid {slip:.1f} px")
 
     def test_step_length_and_cadence(self):
-        """Step ~0.16*H (~125 px at H=783), cadence 100-130 steps/min
-        (v4: 55 px steps at 267 steps/min -- a shuffle)."""
+        """Step ~0.25*H (~196 px at H=783), cadence 65-95 steps/min
+        (v6, RicksClips reference: short steps ~1/4 body height, slow
+        deliberate pace ~70-90/min. v5: 0.16*H steps at 115/min -- too
+        fast and too shuffly)."""
         c = Stickman(height=H, name="minh")
         frames = _walk_frames(c, walk_to(c, 500, 945, 1.8, GY), 1.8)
         planted = sorted(set(round(f["foot_l"][0]) for f in frames
@@ -56,13 +58,13 @@ class TestPlantedWalk(unittest.TestCase):
         steps = [b - a for a, b in zip(planted, planted[1:])]
         self.assertTrue(steps, "no planted foot positions found")
         for s in steps:
-            self.assertGreater(s, 2 * 0.14 * H)
-            self.assertLess(s, 2 * 0.18 * H)
+            self.assertGreater(s, 2 * 0.23 * H)
+            self.assertLess(s, 2 * 0.27 * H)
         # cadence: distance / step length / travel time
         speed = 445 / 1.8
-        cadence = speed / (0.16 * H) * 60
-        self.assertGreater(cadence, 100)
-        self.assertLess(cadence, 130)
+        cadence = speed / (0.25 * H) * 60
+        self.assertGreater(cadence, 65)
+        self.assertLess(cadence, 95)
 
     def test_bob_phase(self):
         """Body LOWEST at foot strike, HIGHEST at mid-stance (v4 bob
@@ -95,9 +97,16 @@ class TestPlantedWalk(unittest.TestCase):
                         "body not lowest at foot strike")
         self.assertLess(max(h for _, h in travel) - mean_mid, 4.0,
                         "body not highest at mid-stance")
+        # v6 (RicksClips reference): the head stays almost LEVEL --
+        # the bob is a small ~5 px breathing of the walk, not a
+        # 10+ px bounce. Phase must still be correct (above), but the
+        # amplitude stays small on purpose.
         self.assertGreater(max(h for _, h in travel)
-                           - min(h for _, h in travel), 8.0,
+                           - min(h for _, h in travel), 2.0,
                            "bob too small to read")
+        self.assertLess(max(h for _, h in travel)
+                        - min(h for _, h in travel), 8.0,
+                        "bob too big -- reference head stays level")
 
     def test_bone_lengths_hold(self):
         c = Stickman(height=H, name="minh")
@@ -159,9 +168,9 @@ class TestRun(unittest.TestCase):
 
     def test_run_stride_longer_than_walk(self):
         cw = Stickman(height=H, name="minh")
-        wf = _walk_frames(cw, walk_to(cw, 500, 900, 1.0, GY), 1.0)
+        wf = _walk_frames(cw, walk_to(cw, 500, 1300, 2.0, GY), 2.0)
         cr = Stickman(height=H, name="minh")
-        rf = _walk_frames(cr, run_to(cr, 500, 900, 1.0, GY), 1.0)
+        rf = _walk_frames(cr, run_to(cr, 500, 1300, 2.0, GY), 2.0)
         w_planted = sorted(set(round(f["foot_l"][0]) for f in wf
                                if abs(f["foot_l"][1] - GY) < 0.5))
         r_planted = sorted(set(round(f["foot_l"][0]) for f in rf
@@ -176,14 +185,15 @@ class TestRun(unittest.TestCase):
 class TestWaveIdleBend(unittest.TestCase):
     def test_wave_is_side_to_side(self):
         """Steady-state wave: hand sways in X, not in Y (v4: x was
-        CONSTANT, y flapped +/-21 px at 3.3 Hz)."""
+        CONSTANT, y flapped +/-21 px at 3.3 Hz). Steady state starts
+        after the 0.7 s rise (v6: was 0.5 s)."""
         c = Stickman(height=H, name="minh")
         c.set_pose(root_x=700, root_y=GY - 313, facing=1)
-        fn = wave(c, 1.2)
+        fn = wave(c, 1.5)
         xs, ys = [], []
-        for fi in range(29):
+        for fi in range(37):
             fn(fi / 24.0)
-            if fi / 24.0 >= 0.5:
+            if fi / 24.0 >= 0.7:
                 j = c.joints()
                 xs.append(j["hand_r"][0])
                 ys.append(j["hand_r"][1])
@@ -193,7 +203,7 @@ class TestWaveIdleBend(unittest.TestCase):
         mean = sum(xs) / len(xs)
         crossings = sum(1 for a, b in zip(xs, xs[1:])
                         if (a - mean) * (b - mean) < 0)
-        duration = 1.2 - 0.5
+        duration = 1.5 - 0.7
         freq = crossings / 2.0 / duration
         self.assertGreater(freq, 1.2)
         self.assertLess(freq, 2.4)
@@ -349,34 +359,46 @@ class TestHeadTrack(unittest.TestCase):
 
 
 class TestGaitIdentity(unittest.TestCase):
-    def test_templates_walk_differently(self):
-        """Minh strides longer than Lan; an elder shuffles shorter
-        and leans more. Gait lives on the template, not in a story."""
-        minh = make_character_instance("minh")
-        lan = make_character_instance("lan")
-        elder = make_character(template="elderly")
-        self.assertGreater(minh.gait["stride_frac"],
-                           lan.gait["stride_frac"])
-        self.assertGreater(elder.gait["lean"], lan.gait["lean"])
-        self.assertLess(elder.gait["stride_frac"],
-                        minh.gait["stride_frac"])
-        self.assertAlmostEqual(minh.gait["stride_frac"], 0.16)
-        self.assertAlmostEqual(lan.gait["stride_frac"], 0.145)
-
-    def test_walk_uses_template_gait(self):
-        """The same walk call moves Lan with shorter steps than Minh."""
+    def test_gait_is_shared_across_templates(self):
+        """v6 (RicksClips reference study 2026-11-11): ONE shared gait
+        -- every character walks the same short-step, level-head
+        idiom. This REPLACES the v5 test that asserted Minh strides
+        longer than Lan and elders shuffle: the reference
+        distinguishes characters by COSTUME colour, hat and hair,
+        NOT by gait. CONFLICT FLAGGED: Mai's earlier instruction asked
+        for per-template gait; the reference + her newest message
+        ("lay rickclip lam tham chieu") take precedence, and the
+        per-template gait data is kept on the objects but no longer
+        drives locomotion (see GAIT_DEFAULT)."""
         def step_of(char):
             frames = _walk_frames(
-                char, walk_to(char, 500, 900, 1.0, GY), 1.0)
+                char, walk_to(char, 500, 1300, 2.0, GY), 2.0)
             planted = sorted(set(round(f["foot_l"][0]) for f in frames
                                  if abs(f["foot_l"][1] - GY) < 0.5))
             steps = [b - a for a, b in zip(planted, planted[1:])]
             return max(steps) if steps else 0
-        minh = make_character_instance("minh")
-        minh.H = H
-        lan = make_character_instance("lan")
-        lan.H = H
-        self.assertGreater(step_of(minh), step_of(lan))
+        minh = make_character_instance("minh", height=H)
+        lan = make_character_instance("lan", height=H)
+        elder = make_character(template="elderly", height=H)
+        self.assertEqual(step_of(minh), step_of(lan))
+        self.assertEqual(step_of(minh), step_of(elder))
+        # identity lives in costume / hair, not in the walk
+        self.assertNotEqual(minh.suit, lan.suit)
+        self.assertNotEqual(minh.hair_style, lan.hair_style)
+
+    def test_walk_uses_shared_gait(self):
+        """The same walk call moves Lan with the same steps as Minh."""
+        def step_of(char):
+            frames = _walk_frames(
+                char, walk_to(char, 500, 1300, 2.0, GY), 2.0)
+            planted = sorted(set(round(f["foot_l"][0]) for f in frames
+                                 if abs(f["foot_l"][1] - GY) < 0.5))
+            steps = [b - a for a, b in zip(planted, planted[1:])]
+            return max(steps) if steps else 0
+        minh = make_character_instance("minh", height=H)
+        lan = make_character_instance("lan", height=H)
+        self.assertGreater(step_of(minh), 0)
+        self.assertEqual(step_of(minh), step_of(lan))
 
 
 class TestHairAndFraming(unittest.TestCase):

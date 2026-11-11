@@ -90,38 +90,51 @@ def interp_keys(keys, t):
     return keys[-1][1]
 
 
-# Gait parameters (audit 2026-11-11 vs RicksClips): every template walks
-# differently -- these are DATA on the template, never hardcoded per
-# story and never a character name inside the animation code.
-#   stride_frac: step length as a fraction of total height H
-#     (natural walk ~0.35-0.45 x leg length = ~0.15-0.19 H; the old
-#     walk used 55 px steps = 0.10 H at 267 steps/min -- a shuffle).
-#   arm_amp: arm-swing amplitude in radians (anti-phase with the legs).
-#   lean: forward torso lean in radians while walking.
-#   bob_frac: vertical COM excursion as a fraction of leg length
-#     (real ~0.04-0.05; the old bob was 10 px = 0.013 H and INVERTED:
-#     highest at foot strike, lowest at mid-stance).
-#   lift_frac: max foot lift during swing, fraction of H.
+# Gait parameters (v6: ONE shared gait, RicksClips reference study
+# 2026-11-11 -- every character walks the same short-step, level-head
+# idiom; characters are distinguished by COSTUME colour, hat and hair,
+# NOT by gait. The v5 per-template gaits (Minh strides, Lan steps
+# shorter, elder shuffles) contradicted the reference and are no
+# longer used by walk_to/run_to. Template `gait` data still exists on
+# the character objects but locomotion ignores it; do not reintroduce
+# per-template stride/cadence without a new reference finding.
+#   stride_frac: step length as a fraction of total height H.
+#     Reference: SHORT steps, ~1/4-1/3 body height, a few strides per
+#     2-5 s insert, pace ~70-90 steps/min (estimate from visible
+#     strides, not a measurement). v5 used 0.16 H at 115/min -- too
+#     fast and too shuffly; v6 uses 0.25 H at ~80/min.
+#   arm_amp: arm-swing amplitude in radians. Reference: arms do NOT
+#     swing -- both hands are committed to a task; if they swing at
+#     all, keep it SMALL and opposite to the legs. v6 cuts 0.45->0.25.
+#   lean: forward torso lean in radians while walking. Reference:
+#     weight is sold by forward LEAN into effort, not by bob.
+#   bob_frac: vertical COM excursion as a fraction of leg length.
+#     Reference: the head stays almost LEVEL -- v5's +9.6 px bob was
+#     too much. v6 keeps the phase (lowest at strike, highest at
+#     mid-stance) but cuts the amplitude to ~5 px.
+#   lift_frac: max foot lift during swing, fraction of H (heel raised
+#     on the swing, flat on the plant).
 #   overlap: fraction of a step the old foot stays planted AFTER the
 #     other foot strikes (+0.20 = 20% double support, a walk;
 #     negative = flight phase, a run).
 GAIT_DEFAULT = {
-    "stride_frac": 0.16,
-    "arm_amp": 0.45,
-    "lean": 0.08,
-    "bob_frac": 0.04,
-    "lift_frac": 0.08,
+    "stride_frac": 0.25,
+    "arm_amp": 0.25,
+    "lean": 0.12,
+    "bob_frac": 0.015,
+    "lift_frac": 0.05,
     "overlap": 0.20,
 }
 
 # Run gait: longer stride, real flight phase (overlap < 0), more lean,
-# bigger arm pump. A run is NOT a fast walk.
+# bigger arm pump. A run is a SHORT shot, not a sped-up walk cycle
+# (the reference narrates runs; it does not show a run cycle).
 GAIT_RUN = {
-    "stride_frac": 0.22,
-    "arm_amp": 0.60,
+    "stride_frac": 0.28,
+    "arm_amp": 0.45,
     "lean": 0.22,
-    "bob_frac": 0.05,
-    "lift_frac": 0.10,
+    "bob_frac": 0.02,
+    "lift_frac": 0.06,
     "overlap": -0.30,
     "flight_lift_frac": 0.03,
 }
@@ -162,10 +175,12 @@ class Stickman:
         self.cane = cane
         # costume: "none" | "dress" (dress extends the torso A-line).
         self.costume = costume
-        # gait: per-template walk parameters (see GAIT_DEFAULT). A
-        # character's walk is part of its identity -- Minh strides,
-        # Lan steps shorter, an elder shuffles -- and it lives here,
-        # on the character, not in a per-story animation routine.
+        # gait: v6 (RicksClips reference study 2026-11-11) -- locomotion
+        # uses ONE shared gait (GAIT_DEFAULT / GAIT_RUN); characters
+        # are told apart by costume, hat and hair, not by how they
+        # walk. The per-template gait dicts below are kept as data
+        # (and still stored here) but walk_to/run_to deliberately do
+        # not read them. See GAIT_DEFAULT.
         self.gait = dict(GAIT_DEFAULT)
         if gait:
             self.gait.update(gait)
@@ -176,6 +191,13 @@ class Stickman:
             "thigh_l": 0.0, "thigh_r": 0.0, "knee_l": 0.0, "knee_r": 0.0,
             "arm_l": 0.0, "arm_r": 0.0, "elbow_l": 0.0, "elbow_r": 0.0,
             "bob": 0.0,
+            # turn_u: 0 = not turning (profile view, facing as set);
+            # 1 = turn complete. Mid-turn (0.5) the character is
+            # front-on -- see character_art.resolve_view(). Set by
+            # turn_to and by _locomote when a walk starts facing the
+            # wrong way. A turn is a visible rotation, never an
+            # instant facing flip.
+            "turn_u": 0.0,
         }
         # IK targets (screen coords) override FK for a limb when set
         self.hand_target_l = None
@@ -226,9 +248,20 @@ class Stickman:
             if tgt is not None:
                 tgt = clamped_target(hip_x, hip_y, tgt[0], tgt[1],
                                      self.u_leg + self.l_leg)
-                # knee bends forward (toward facing) in side view
+                # Knee bends FORWARD (toward facing) in side view.
+                # v6 (backwards-walk audit 2026-11-11): this used
+                # bend=f, which puts the knee on the WRONG side of the
+                # hip->foot line -- the knee sat 60-110 px BEHIND the
+                # line in every walk frame, so the legs read as bending
+                # backwards (the "di nguoc" Mai reported) even though
+                # the face pointed the right way. ik_2bone's bend=+1
+                # offsets the middle joint toward (-uy, +ux); for a leg
+                # pointing down-forward that is the BACKWARD side, so
+                # the knee needs bend=-f. (Arms keep bend=f: an elbow
+                # hangs BELOW/BEHIND the shoulder->hand line, which is
+                # what bend=+1 gives for a forward reach.)
                 kx, ky = ik_2bone(hip_x, hip_y, tgt[0], tgt[1],
-                                  self.u_leg, self.l_leg, bend=f)
+                                  self.u_leg, self.l_leg, bend=-f)
                 J[f"knee_{side}"] = (kx, ky)
                 J[f"foot_{side}"] = tgt
             else:

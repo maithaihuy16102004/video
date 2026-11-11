@@ -91,6 +91,26 @@ def _foot_state(s, step, overlap, lift, ground_y, from_x, direction,
     return x, y, False, s_lift, s_next
 
 
+def _start_moved(char, joint_key, last_target, thresh=50.0):
+    """True if someone OTHER than this primitive moved the joint since
+    the primitive's last call. Primitives capture their start state on
+    the first call ("the hand starts from its CURRENT position") -- but
+    a renderer may PRE-WARM a primitive in one pose and only run it
+    later, after another segment moved the character: the capture is
+    then stale and the hand teleports on the first real frame (v6:
+    wave() pre-warmed in the standing pose, run after the handover,
+    jumped the hand 94 px in one frame). The guard re-captures the
+    start when the joint is far from where this primitive last put it.
+    Callers must still warm a primitive in its start pose; this only
+    saves the pre-warm case. ``last_target`` is None before the first
+    call (nothing to compare against yet)."""
+    if last_target is None:
+        return False
+    cur = char.joints()[joint_key]
+    return math.hypot(cur[0] - last_target[0],
+                      cur[1] - last_target[1]) > thresh
+
+
 def _locomote(char, from_x, to_x, duration, ground_y, gait, *,
               phase_name):
     """Shared planted-foot locomotion core (audit 2026-11-11).
@@ -117,6 +137,14 @@ def _locomote(char, from_x, to_x, duration, ground_y, gait, *,
     arm_amp = gait["arm_amp"]
     direction = 1 if to_x >= from_x else -1
     dist = abs(to_x - from_x)
+    # Visible turn (v6, backwards-walk audit 2026-11-11): if the
+    # character is currently facing the OTHER way, the walk does not
+    # snap its facing around at t=0 -- it turns during the 0.2 s
+    # anticipation, passing through front view (see
+    # character_art.resolve_view). Captured lazily on the first call,
+    # because the pose at closure-creation time is the pre-warm pose,
+    # not the pose the walk actually starts from.
+    _turn = {"start_facing": None, "needed": False}
     # anticipation + settle: the walk starts from a stand (feet
     # together, body at rest) and ends in a stand. Both are short
     # (0.2 s) so the middle of the walk runs at constant speed.
@@ -132,9 +160,14 @@ def _locomote(char, from_x, to_x, duration, ground_y, gait, *,
     # the offsets the other way round, so both feet SWAPPED SIDES
     # (126 px each, sliding along the ground) during anticipation.
     off_l, off_r = step, 0.0
-    # standing foot positions (feet together under the hips)
-    stand_fl = (from_x - direction * _s(char, 45), ground_y)
-    stand_fr = (from_x + direction * _s(char, 45), ground_y)
+    # standing foot positions: the split stance the cycle starts in
+    # (right foot +step/2 ahead, left foot -step/2 behind -- exactly
+    # the standing split, so the anticipation->travel boundary does
+    # not slide the feet). This MUST track step/2: the old fixed
+    # +/-45 px spread only matched the v5 step (0.16*H); with the v6
+    # step (0.25*H) it would jump the feet ~35 px at travel start.
+    stand_fl = (from_x - direction * step / 2.0, ground_y)
+    stand_fr = (from_x + direction * step / 2.0, ground_y)
     # Travel-end arm/bob values, so anticipation and settle can lerp
     # TO/FROM them instead of snapping (the first v5 draft set the
     # arms to 0.0 at the settle start -- both hands teleported to the
@@ -153,6 +186,9 @@ def _locomote(char, from_x, to_x, duration, ground_y, gait, *,
 
     def fn(t):
         u = min(1.0, max(0.0, t / max(duration, 0.01)))
+        if _turn["start_facing"] is None:
+            _turn["start_facing"] = char.pose.get("facing", direction)
+            _turn["needed"] = _turn["start_facing"] != direction
         if t < t_ant:
             # anticipation: crouch slightly, lean in, arms swing up
             # from their standing hang to the travel-start swing.
@@ -160,13 +196,27 @@ def _locomote(char, from_x, to_x, duration, ground_y, gait, *,
             # cycle's starting split within half a pixel) -- moving
             # them here only made them slide along the ground.
             a = smoothstep(t / max(t_ant, 0.01))
+            # Arms: CONTRALATERAL with the legs (v6 fix -- the v5
+            # walk swung each arm with the SAME-side leg, 37/51 frames
+            # ipsilateral, which reads as walking backwards). At the
+            # travel start the right foot strikes first, so the LEFT
+            # arm is forward: arm_l=+amp, arm_r=-amp. Elbows bend more
+            # on the forward swing.
+            if _turn["needed"]:
+                turn_u = a
+                facing_now = (direction if turn_u >= 0.5
+                              else _turn["start_facing"])
+            else:
+                turn_u = 0.0
+                facing_now = direction
             _pose(char, root_x=from_x, root_y=lerp(stand_root_y, walk_root_y, a),
-                  facing=direction, torso_lean=gait["lean"] * a,
+                  facing=facing_now, turn_u=turn_u,
+                  torso_lean=gait["lean"] * a,
                   bob=-_s(char, 6) * math.sin(math.pi * a),
-                  arm_l=lerp(0.08, -arm_amp, a),
-                  arm_r=lerp(0.08, arm_amp, a),
-                  elbow_l=lerp(0.15, 0.25, a),
-                  elbow_r=lerp(0.15, 0.50, a),
+                  arm_l=lerp(0.08, arm_amp, a),
+                  arm_r=lerp(0.08, -arm_amp, a),
+                  elbow_l=lerp(0.15, 0.50, a),
+                  elbow_r=lerp(0.15, 0.25, a),
                   head_look=0.0)
             char.foot_target_l = stand_fl
             char.foot_target_r = stand_fr
@@ -183,12 +233,13 @@ def _locomote(char, from_x, to_x, duration, ground_y, gait, *,
             # blends from here (see apply_snapshot).
             b = smoothstep((t - (duration - t_set)) / max(t_set, 0.01))
             _pose(char, root_x=to_x, root_y=lerp(walk_root_y, stand_root_y, b),
-                  facing=direction, torso_lean=gait["lean"] * (1.0 - b),
+                  facing=direction, turn_u=0.0,
+                  torso_lean=gait["lean"] * (1.0 - b),
                   bob=bob_end * (1.0 - b),
-                  arm_l=lerp(-arm_amp * cyc_end, 0.08, b),
-                  arm_r=lerp(arm_amp * cyc_end, 0.08, b),
-                  elbow_l=lerp(0.25 + 0.25 * max(0.0, -cyc_end), 0.15, b),
-                  elbow_r=lerp(0.25 + 0.25 * max(0.0, cyc_end), 0.15, b),
+                  arm_l=lerp(arm_amp * cyc_end, 0.08, b),
+                  arm_r=lerp(-arm_amp * cyc_end, 0.08, b),
+                  elbow_l=lerp(0.25 + 0.25 * max(0.0, cyc_end), 0.15, b),
+                  elbow_r=lerp(0.25 + 0.25 * max(0.0, -cyc_end), 0.15, b),
                   head_look=0.0)
             char.hand_target_l = None
             char.hand_target_r = None
@@ -211,13 +262,15 @@ def _locomote(char, from_x, to_x, duration, ground_y, gait, *,
             if f_end > f_start:
                 q = min(1.0, max(0.0, (s - f_start) / (f_end - f_start)))
                 bob += flight_amp * math.sin(math.pi * q)
-        # arms anti-phase with the legs, elbows bend on the forward swing.
+        # arms CONTRALATERAL with the legs (v6 fix -- see anticipation
+        # above): when the right foot is forward, the LEFT arm is
+        # forward. Elbows bend more on the forward swing.
         cyc = math.cos(math.pi * s / step)
         _pose(char, root_x=root_x, root_y=walk_root_y,
-              facing=direction, torso_lean=gait["lean"], bob=bob,
-              arm_l=-arm_amp * cyc, arm_r=arm_amp * cyc,
-              elbow_l=0.25 + 0.25 * max(0.0, -cyc),
-              elbow_r=0.25 + 0.25 * max(0.0, cyc),
+              facing=direction, turn_u=0.0, torso_lean=gait["lean"], bob=bob,
+              arm_l=arm_amp * cyc, arm_r=-arm_amp * cyc,
+              elbow_l=0.25 + 0.25 * max(0.0, cyc),
+              elbow_r=0.25 + 0.25 * max(0.0, -cyc),
               head_look=0.0)
         char.foot_target_l = (fl_x, fl_y)
         char.foot_target_r = (fr_x, fr_y)
@@ -237,7 +290,6 @@ def walk_to(char, from_x, to_x, duration, ground_y, height=560):
     crouch at the start and a settle (feet together) at the end.
     """
     gait = dict(GAIT_DEFAULT)
-    gait.update(getattr(char, "gait", {}) or {})
     return _locomote(char, from_x, to_x, duration, ground_y, gait,
                      phase_name="walk")
 
@@ -248,14 +300,44 @@ def run_to(char, from_x, to_x, duration, ground_y):
     off the ground ~30% of each step). The old run was just a walk with
     torso_lean 0.22 and zero airborne frames."""
     gait = dict(GAIT_RUN)
-    base = dict(GAIT_DEFAULT)
-    base.update(getattr(char, "gait", {}) or {})
-    # a run keeps the character's own lean/arm habits, but the stride,
-    # flight and lift are the run's, not the walk's.
-    gait["lean"] = max(GAIT_RUN["lean"], base["lean"])
-    gait["arm_amp"] = max(GAIT_RUN["arm_amp"], base["arm_amp"])
     return _locomote(char, from_x, to_x, duration, ground_y, gait,
                      phase_name="run")
+
+
+def turn_to(char, new_facing, duration=0.35):
+    """Turn the character to face ``new_facing`` (+1 right / -1 left)
+    as a VISIBLE rotation, not an instant flip.
+
+    v6 (backwards-walk audit 2026-11-11): facing used to flip in a
+    single frame whenever a walk started the other way -- the viewer
+    sees the character mirror instantly, which reads as a glitch (and
+    hides which way the body is actually turning). Here the turn takes
+    ``duration`` seconds: ``turn_u`` eases 0 -> 1, the facing flips at
+    the midpoint, and the renderer draws the character front-on at the
+    midpoint (see character_art.resolve_view) -- profile -> 3/4 ->
+    front -> 3/4 -> profile. A small dip + lean into the turn sells
+    the weight shift. ``new_facing`` must be +1 or -1.
+    """
+    if new_facing not in (1, -1):
+        raise ValueError(f"turn_to: new_facing must be +1 or -1, "
+                         f"got {new_facing!r}")
+    _start = {}
+
+    def fn(t):
+        if "facing" not in _start:
+            _start["facing"] = char.pose.get("facing", new_facing)
+        old = _start["facing"]
+        if old == new_facing:
+            char.set_pose(turn_u=0.0, facing=new_facing)
+            return char
+        u = smoothstep(t / max(duration, 0.01))
+        char.set_pose(turn_u=u,
+                      facing=new_facing if u >= 0.5 else old,
+                      bob=-_s(char, 8) * math.sin(math.pi * u),
+                      torso_lean=0.10 * math.sin(math.pi * u)
+                      * (1 if new_facing > old else -1))
+        return char
+    return fn
 
 
 def look_at(char, angle_keys, duration):
@@ -280,9 +362,18 @@ def point_at(char, target, duration):
         u = smoothstep(t / max(duration, 0.01))
         if "hand" not in _start:
             _start["hand"] = char.joints()["hand_r"]
+            _start["last"] = None
+        elif (_start["last"] is not None and t < 0.25
+                and _start_moved(char, "hand_r", _start["last"])):
+            # stale pre-warm capture: another segment moved the hand
+            # since this primitive was warmed -- re-capture (see
+            # _start_moved). Gated to the first 0.25 s: later the hand
+            # moves because THIS primitive moves it.
+            _start["hand"] = char.joints()["hand_r"]
         sx, sy = _start["hand"]
         tx, ty = target
         char.hand_target_r = (lerp(sx, tx, u), lerp(sy, ty, u))
+        _start["last"] = char.hand_target_r
         char.set_pose(head_look=-0.35 * u, torso_lean=-0.06 * u)
         return char
     return fn
@@ -297,8 +388,9 @@ def wave(char, duration, freq=1.8):
     shoulder height, then sways side to side in X (+/-22 px) at
     ~1.5-2 Hz while the elbow stays bent so the forearm rotates. The
     hand also starts from its current position (no teleport). The
-    rise takes 0.5 s: a 0.35 s rise stacked on top of the 0.2 s
-    segment blend made the elbow swing 116 px in a single frame.
+    rise takes 0.7 s (v6: was 0.5 s -- the elbow swung 87.8 px in a
+    single frame on the rise; the longer rise keeps the elbow under
+    ~60 px/frame while still leaving sway time in a 1.1 s wave).
     """
     _start = {}
 
@@ -306,14 +398,20 @@ def wave(char, duration, freq=1.8):
         hx, hy = char.pose["root_x"], char.pose["root_y"]
         if "hand" not in _start:
             _start["hand"] = char.joints()["hand_r"]
+            _start["last"] = None
+        elif (_start["last"] is not None and t < 0.25
+                and _start_moved(char, "hand_r", _start["last"])):
+            # stale pre-warm capture -- re-capture (see _start_moved)
+            _start["hand"] = char.joints()["hand_r"]
         sx, sy = _start["hand"]
-        rise = smoothstep(min(1.0, t / 0.5))
-        sway = math.sin(2 * math.pi * freq * max(0.0, t - 0.5))
+        rise = smoothstep(min(1.0, t / 0.7))
+        sway = math.sin(2 * math.pi * freq * max(0.0, t - 0.7))
         tx = hx + _s(char, 80)
         ty = hy - _s(char, 225)
         x = lerp(sx, tx, rise) + _s(char, 22) * sway * rise
         y = lerp(sy, ty, rise)
         char.hand_target_r = (x, y)
+        _start["last"] = char.hand_target_r
         char.set_pose(elbow_r=0.6, torso_lean=-0.05 * rise,
                       head_look=-0.10 * rise)
         return char
@@ -330,13 +428,20 @@ def reach_to(char, target, duration, hand="r"):
         key = "hand_" + hand
         if key not in _start:
             _start[key] = char.joints()[key]
+            _start["last"] = None
+        elif (_start["last"] is not None and t < 0.25
+                and _start_moved(char, key, _start["last"])):
+            # stale pre-warm capture -- re-capture (see _start_moved)
+            _start[key] = char.joints()[key]
         sx, sy = _start[key]
         if hand == "r":
             char.hand_target_r = (lerp(sx, target[0], u),
                                   lerp(sy, target[1], u))
+            _start["last"] = char.hand_target_r
         else:
             char.hand_target_l = (lerp(sx, target[0], u),
                                   lerp(sy, target[1], u))
+            _start["last"] = char.hand_target_l
         return char
     return fn
 
@@ -358,6 +463,16 @@ def give_to(giver, receiver, prop, duration):
         if "giver" not in _start:
             _start["giver"] = giver.joints()["hand_r"]
             _start["receiver"] = receiver.joints()["hand_l"]
+            _start["last_g"] = None
+            _start["last_r"] = None
+        elif t < 0.25:
+            # stale pre-warm capture -- re-capture (see _start_moved)
+            if (_start["last_g"] is not None and _start_moved(
+                    giver, "hand_r", _start["last_g"])):
+                _start["giver"] = giver.joints()["hand_r"]
+            if (_start["last_r"] is not None and _start_moved(
+                    receiver, "hand_l", _start["last_r"])):
+                _start["receiver"] = receiver.joints()["hand_l"]
         gx, gy = giver.pose["root_x"], giver.pose["root_y"]
         rx, ry = receiver.pose["root_x"], receiver.pose["root_y"]
         mid_x = (gx + rx) / 2
@@ -366,6 +481,8 @@ def give_to(giver, receiver, prop, duration):
         rsx, rsy = _start["receiver"]
         giver.hand_target_r = (lerp(gsx, mid_x, u), lerp(gsy, mid_y, u))
         receiver.hand_target_l = (lerp(rsx, mid_x, u), lerp(rsy, mid_y, u))
+        _start["last_g"] = giver.hand_target_r
+        _start["last_r"] = receiver.hand_target_l
         giver.set_pose(head_look=0.25 * u, torso_lean=0.06 * u)
         receiver.set_pose(head_look=-0.25 * u, torso_lean=-0.06 * u)
         prop["x"], prop["y"] = mid_x, mid_y + _s(giver, 10)
@@ -446,6 +563,108 @@ def bend_pick(char, target, duration, ground_y, hand="r"):
             d = 1.0 - smoothstep((u - 0.65) / 0.35)
         root_y = ground_y - leg * (0.93 - 0.50 * d)
         lean = 1.35 * d
+        # hand: reach the target by the end of the descend, hold it,
+        # then lift it ~60 px as the body rises.
+        reach = smoothstep(min(1.0, u / 0.50))
+        rise = smoothstep(max(0.0, (u - 0.65) / 0.35))
+        sx, sy = _start["hand"]
+        tx, ty = target
+        hx = lerp(sx, tx, reach)
+        hy = lerp(sy, ty, reach) - _s(char, 60) * rise
+        char.set_pose(root_y=root_y, torso_lean=lean)
+        # head tracks the prop (clamped by head_track)
+        head_track(char, (tx, ty))
+        if hand == "r":
+            char.hand_target_r = (hx, hy)
+        else:
+            char.hand_target_l = (hx, hy)
+        return char
+    return fn
+
+
+def kneel_pick(char, target, duration, ground_y, hand="r"):
+    """Pick up a prop at ``target`` (x, y) on the ground by KNEELING on
+    one knee -- the v6 alternative to bend_pick's 77 deg stoop, which
+    reads as lying flat (the rig's arm is only 0.283*H, so a standing
+    stoop must fold nearly horizontal to reach the ground).
+
+    A kneel is geometrically honest for this rig: the hip drops to a
+    deep lunge-kneel (0.72 * thigh-length above the ground), the BACK
+    knee lands ON the ground (back foot tucks just behind the hip,
+    shin flat on the ground), the FRONT foot plants ahead, and the
+    torso leans ~63 deg -- so the shoulder is low enough for the hand
+    to reach the prop without folding the body in half. (A textbook
+    kneel -- hip one thigh-length up, knee under the hip -- still
+    needs a ~83 deg lean to reach a ground prop with this rig's
+    0.283*H arm; the deep lunge-kneel is what actually reaches at
+    63 deg. The numbers are verified by the IK clamp in the tests,
+    not assumed.) The reaching hand is on the same side as the
+    planted front foot (the stable side); the kneeling knee is the
+    opposite leg.
+
+    Phases: anticipate (0-15%, crouch + weight shift), descend to
+    kneel (15-50%), hold (50-65%, hand on the prop), rise (65-100%,
+    standing back up carrying the prop). Feet start from their CURRENT
+    positions (no teleport); the rise returns them to the walk's
+    starting split (+/-step/2 around the root) so the next walk
+    segment starts without a blend slide. The hand reaches the target
+    by 50%.
+    """
+    _start = {}
+    leg = char.u_leg + char.l_leg
+    u_leg = char.u_leg
+    l_leg = char.l_leg
+    step = GAIT_DEFAULT["stride_frac"] * float(char.H)
+
+    def fn(t):
+        u = min(1.0, max(0.0, t / max(duration, 0.01)))
+        if "hand" not in _start:
+            _start["hand"] = char.joints()["hand_" + hand]
+            _start["root_y"] = char.pose["root_y"]
+            _start["root_x"] = char.pose["root_x"]
+            _start["foot_l"] = char.joints()["foot_l"]
+            _start["foot_r"] = char.joints()["foot_r"]
+            _start["facing"] = char.pose.get("facing", 1)
+        f = _start["facing"]
+        rx = _start["root_x"]
+        # depth profile: 0 = standing, 1 = fully kneeled
+        if u < 0.15:
+            d = 0.15 * smoothstep(u / 0.15)
+        elif u < 0.50:
+            d = 0.15 + 0.85 * smoothstep((u - 0.15) / 0.35)
+        elif u < 0.65:
+            d = 1.0
+        else:
+            d = 1.0 - smoothstep((u - 0.65) / 0.35)
+        # hip: standing (leg * 0.93 above ground) -> deep lunge-kneel
+        # (0.72 * thigh-length above ground, so the back knee touches
+        # down without sinking below the ground plane).
+        root_y = ground_y - (leg * 0.93 - (leg * 0.93 - u_leg * 0.72) * d)
+        lean = 1.10 * d  # ~63 deg at full kneel (vs 77 deg stoop)
+        # feet: front foot (same side as the reaching hand) plants
+        # ahead; back foot (opposite side) tucks just behind the hip
+        # so its knee lands on the ground forward of the hip (deep
+        # lunge-kneel geometry -- see the module docstring for why a
+        # textbook kneel cannot reach a ground prop with this rig).
+        # The rise returns both feet to the walk's starting split so
+        # the next walk starts without a blend slide.
+        front_side = "r" if hand == "r" else "l"
+        back_side = "l" if hand == "r" else "r"
+        front_tx = rx + f * 0.55 * leg
+        back_tx = rx - f * l_leg * 0.30
+        stand_tx = {front_side: rx + f * step / 2.0,
+                    back_side: rx - f * step / 2.0}
+        for side, tx in ((front_side, front_tx), (back_side, back_tx)):
+            sx, sy = _start["foot_" + side]
+            if u < 0.65:
+                tgt = (lerp(sx, tx, d), lerp(sy, ground_y, d))
+            else:
+                tgt = (lerp(tx, stand_tx[side], 1.0 - d),
+                       ground_y)
+            if side == "l":
+                char.foot_target_l = tgt
+            else:
+                char.foot_target_r = tgt
         # hand: reach the target by the end of the descend, hold it,
         # then lift it ~60 px as the body rises.
         reach = smoothstep(min(1.0, u / 0.50))
@@ -571,11 +790,12 @@ def stand_up(char, duration, ground_y):
 
 
 PRIMITIVES = {
-    "walk_to": walk_to, "run_to": run_to, "look_at": look_at,
+    "walk_to": walk_to, "run_to": run_to, "turn_to": turn_to,
+    "look_at": look_at,
     "point_at": point_at, "wave": wave, "reach_to": reach_to,
     "give_to": give_to, "shrug": shrug, "cover_face": cover_face,
     "nod": nod, "sit_down": sit_down, "stand_up": stand_up,
-    "idle": idle, "bend_pick": bend_pick,
+    "idle": idle, "bend_pick": bend_pick, "kneel_pick": kneel_pick,
 }
 
 
@@ -610,6 +830,10 @@ def compile_actions(action_list, chars, fps=24):
             c = chars[a["char"]]
             fn = PRIMITIVES[ptype](c, tuple(a["target"]), dur)
             compiled.append((start, dur, lambda t, fn=fn: fn(t)))
+        elif ptype == "turn_to":
+            c = chars[a["char"]]
+            fn = turn_to(c, a["facing"], dur)
+            compiled.append((start, dur, lambda t, fn=fn: fn(t)))
         elif ptype in ("wave", "shrug", "cover_face", "nod"):
             c = chars[a["char"]]
             kw = {k: v for k, v in a.items()
@@ -628,6 +852,11 @@ def compile_actions(action_list, chars, fps=24):
             c = chars[a["char"]]
             fn = bend_pick(c, tuple(a["target"]), dur, a["ground_y"],
                            hand=a.get("hand", "r"))
+            compiled.append((start, dur, lambda t, fn=fn: fn(t)))
+        elif ptype == "kneel_pick":
+            c = chars[a["char"]]
+            fn = kneel_pick(c, tuple(a["target"]), dur, a["ground_y"],
+                            hand=a.get("hand", "r"))
             compiled.append((start, dur, lambda t, fn=fn: fn(t)))
     total = max((s + d for s, d, _ in compiled), default=0.0)
     timeline = {}

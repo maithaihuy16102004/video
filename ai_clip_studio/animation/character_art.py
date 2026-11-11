@@ -603,6 +603,29 @@ def _draw_hair(draw, char, hx, hy, view, ink, part="cap"):
                       fill=ink, width=max(3, int(0.006 * float(char.H))))
 
 
+def resolve_view(char, default="profile"):
+    """View for ``draw_character_v4`` from a character's pose.
+
+    Normally the caller passes "profile" (or "front" / "three_quarter"
+    / "back") explicitly. During a turn (pose ``turn_u`` in (0, 1),
+    set by ``turn_to`` or by ``_locomote`` when a walk starts facing
+    the wrong way) the character visibly rotates: profile at the ends
+    of the turn, front-on at the midpoint, 3/4 in between. A turn is
+    a rotation the viewer can see, never an instant mirror flip.
+    """
+    if default not in VIEWS:
+        default = "profile"
+    u = float(char.pose.get("turn_u", 0.0) or 0.0)
+    if u <= 0.0 or u >= 1.0:
+        return default
+    d = abs(u - 0.5) * 2.0  # 1 at the ends, 0 at the midpoint
+    if d >= 0.75:
+        return default
+    if d >= 0.30:
+        return "three_quarter"
+    return "front"
+
+
 def draw_character_v4(draw, char, expression="neutral", view="profile",
                       palette=None, expression_blend=None):
     """Draw a PREMIUM_STICKMAN v4 character from ``char.joints()``.
