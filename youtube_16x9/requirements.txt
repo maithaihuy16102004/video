@@ -1,0 +1,3 @@
+# Python 3.10+ — no third-party dependencies for the core pipeline.
+# FFmpeg (with ffprobe) is required for rendering and video checks.
+# Node 20+ is required only for the full V5 Motion Canvas / Three.js render.

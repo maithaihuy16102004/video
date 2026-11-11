@@ -1,0 +1,57 @@
+--- a/pipeline/studio_api.py
++++ b/pipeline/studio_api.py
+@@ -1971,6 +1971,23 @@
+     v5_pkg = director.analyze_script(str(payload.get("script", "")))
+     runner_pkg = director.compile_to_runner_package(v5_pkg, variant=variant)
+     effective_duration = min(15.0 if mode == "preview" else 30.0, max(5.0, duration))
++    # Fit the timeline to the real voice instead of cutting its last line.
++    # Callers pass duration = voice_duration(voice), so honour it when it
++    # exceeds the preview/final cap; also measure a WAV voice file directly
++    # (wave is already imported) as a safety net. Never speed up speech.
++    if voice_path is not None:
++        try:
++            _voice_dur = float(duration)
++        except Exception:
++            _voice_dur = 0.0
++        try:
++            if Path(voice_path).suffix.lower() == ".wav" and Path(voice_path).exists():
++                with wave.open(str(voice_path), "rb") as _wf:
++                    _voice_dur = max(_voice_dur, _wf.getnframes() / float(_wf.getframerate()))
++        except Exception:
++            pass
++        if _voice_dur:
++            effective_duration = max(effective_duration, _voice_dur + 0.5)
+     runner_pkg["total_sequence_duration_seconds"] = effective_duration
+     
+     pkg_file = out_path.parent / f"v5_package_{out_path.stem}.json"
+--- a/pipeline/universal/v5_audio_director.py
++++ b/pipeline/universal/v5_audio_director.py
+@@ -174,7 +174,13 @@
+         # 1. Load pre-synthesized voice or synthesize lines
+         if voice_wav_path and Path(voice_wav_path).exists():
+             v_data = self._load_wav(Path(voice_wav_path), sr)
+-            n_copy = min(n_total_samples, len(v_data))
++            if len(v_data) > n_total_samples:
++                raise ValueError(
++                    f"Voice audio ({len(v_data) / sr:.2f}s) is longer than "
++                    f"the planned timeline ({total_duration_sec:.2f}s). "
++                    "Extend total_duration_sec instead of truncating the final line."
++                )
++            n_copy = len(v_data)
+             voice_track = np.zeros((n_total_samples, 2), dtype=np.float32)
+             voice_track[:n_copy] = v_data[:n_copy]
+             dialogue_track[:n_copy] = v_data[:n_copy]
+@@ -205,6 +211,13 @@
+                 # Load into appropriate voice track
+                 s_start = int(current_voice_t * sr)
+                 s_end = min(n_total_samples, s_start + int(line_dur * sr))
++                if s_start + int(line_dur * sr) > n_total_samples:
++                    raise ValueError(
++                        f"Line {line.line_id} ({line_dur:.2f}s, starting at "
++                        f"{current_voice_t:.2f}s) overflows the "
++                        f"{total_duration_sec:.2f}s timeline. Extend the timeline "
++                        "or shorten the line - do not cut it."
++                    )
+                 if line_wav.exists() and s_start < n_total_samples:
+                     line_data = self._load_wav(line_wav, sr)
+                     n_copy = min(s_end - s_start, len(line_data))

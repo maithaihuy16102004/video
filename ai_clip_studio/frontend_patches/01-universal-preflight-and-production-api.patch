@@ -1,0 +1,993 @@
+diff --git a/sites/ai-clip-studio/app/api/preflight/route.ts b/sites/ai-clip-studio/app/api/preflight/route.ts
+index d55a7fc..0beb198 100644
+--- a/sites/ai-clip-studio/app/api/preflight/route.ts
++++ b/sites/ai-clip-studio/app/api/preflight/route.ts
+@@ -1,20 +1,45 @@
+ import { NextResponse } from "next/server";
+ import crypto from "crypto";
+ 
++/**
++ * Universal preflight gate (replaces the old Episode01-only gate).
++ *
++ * Old behaviour (removed): required exactly 8 scenes, exactly 4 characters,
++ * the 3 memes "ối dồi ôi" / "gòi gòi" / "Among Us", no memes in scenes
++ * 3/4/6/7/8, a scene 08 with camera variety, and every location to mention
++ * Munich 1914 — so every script that was not Episode01 failed preflight.
++ *
++ * New behaviour: generic checks that apply to ANY script, structured
++ * (STUDIO SCRIPT V1) or free-form:
++ *   1. scenes — structured scenes must each have title/location/action/
++ *      camera; free-form scripts pass with an estimated scene split.
++ *   2. characters — at least one registered character or dialogue speaker.
++ *   5. meme cues — reported generically (which scenes, how many); no
++ *      meme is ever required.
++ *   7. meme placement — a meme cue must not sit inside a dialogue line.
++ *   8. speech purity — no technical tag leaks into TTS lines.
++ *   10. final scene — the last scene has a camera description.
++ *   11. location consistency — locations are present and do not contradict
++ *       each other on period/year.
++ * The authoritative pipeline preflight (ai_clip_studio server on
++ * PRODUCTION_BACKEND_URL, default http://127.0.0.1:8788) is consulted
++ * best-effort with a 2 s timeout; if it is unreachable the local checks
++ * still run and a warning is returned — but a failure from the pipeline
++ * backend is merged in as a real blocker. Nothing is ever marked PASS
++ * when a check actually failed.
++ */
+ export async function POST(req: Request) {
+   try {
+     const { script, script_hash } = await req.json();
+     const scriptText = (script || "").trim();
+     const computedHash = crypto.createHash("sha256").update(scriptText).digest("hex");
+ 
+-    // 1. Scene detection
++    // 1. Scene detection (STUDIO SCRIPT V1 tags; free-form has none)
+     const sceneRegex = /SCENE\s+(\d+):\s*(.*)/gi;
+     const sceneMatches = [...scriptText.matchAll(sceneRegex)];
+     const sceneCount = sceneMatches.length;
+-
+     const scenes: any[] = [];
+     const sceneSplits = scriptText.split(/SCENE\s+\d+:/i).slice(1);
+-
+     sceneSplits.forEach((block, idx) => {
+       const num = idx + 1;
+       const titleMatch = sceneMatches[idx] ? sceneMatches[idx][2].trim() : `Cảnh ${num}`;
+@@ -22,7 +47,6 @@ export async function POST(req: Request) {
+       const actMatch = block.match(/ACTION:\s*(.*)/i);
+       const camMatch = block.match(/CAMERA:\s*(.*)/i);
+       const memeMatch = block.match(/MEME:\s*([^|\n\r]+)/i);
+-
+       scenes.push({
+         number: num,
+         title: titleMatch,
+@@ -30,7 +54,7 @@ export async function POST(req: Request) {
+         has_action: Boolean(actMatch && actMatch[1].trim()),
+         has_camera: Boolean(camMatch && camMatch[1].trim()),
+         camera_desc: camMatch ? camMatch[1].trim() : "",
+-        meme: memeMatch ? memeMatch[1].trim() : "NONE"
++        meme: memeMatch ? memeMatch[1].trim() : "NONE",
+       });
+     });
+ 
+@@ -39,7 +63,6 @@ export async function POST(req: Request) {
+     const charMatches = [...scriptText.matchAll(charRegex)];
+     const charCount = charMatches.length;
+     const characters: any[] = [];
+-
+     const charBlocks = scriptText.split(/CHARACTER:\s*/i).slice(1);
+     charBlocks.forEach((cBlock) => {
+       const firstLine = cBlock.split("\n")[0].trim();
+@@ -51,27 +74,29 @@ export async function POST(req: Request) {
+           name: firstLine,
+           role: roleMatch ? roleMatch[1].trim() : "",
+           voice: voiceMatch ? voiceMatch[1].trim() : "AUTO",
+-          voice_style: voiceStyleMatch ? voiceStyleMatch[1].trim() : ""
++          voice_style: voiceStyleMatch ? voiceStyleMatch[1].trim() : "",
+         });
+       }
+     });
+ 
+-    // 3. Word counts
++    // 3. Word counts + dialogue speakers (works for free-form too)
+     const totalWords = scriptText.split(/\s+/).filter(Boolean).length;
+     let dialogueWords = 0;
+     const dialogueLines: string[] = [];
+-
++    const speakers = new Set<string>();
+     const lines = scriptText.split("\n");
++    const META_KEYS = ["PROJECT", "LANGUAGE", "GENRE", "STYLE", "ASPECT_RATIO", "TARGET_DURATION", "TONE", "MEME_POLICY", "MEME_MAX_PER_MINUTE", "CHARACTER", "ROLE", "APPEARANCE", "VOICE", "VOICE_STYLE", "SCENE", "LOCATION", "TIME_OF_DAY", "MOOD", "DURATION", "VISUAL", "ACTION", "CAMERA", "VOICE_NOTE", "SFX", "AMBIENCE", "MUSIC", "MEME", "MEME_NOTE", "TRANSITION", "END_SCENE", "END_SCRIPT"];
+     for (const l of lines) {
+       const trimmed = l.trim();
+       const mDlg = trimmed.match(/^([A-Z0-9_À-Ỹ\s]{2,30}):\s*(.*)$/);
+       if (mDlg) {
+         const spk = mDlg[1].trim().toUpperCase();
+-        if (!["PROJECT", "LANGUAGE", "GENRE", "STYLE", "ASPECT_RATIO", "TARGET_DURATION", "TONE", "MEME_POLICY", "MEME_MAX_PER_MINUTE", "CHARACTER", "ROLE", "APPEARANCE", "VOICE", "VOICE_STYLE", "SCENE", "LOCATION", "TIME_OF_DAY", "MOOD", "DURATION", "VISUAL", "ACTION", "CAMERA", "VOICE_NOTE", "SFX", "AMBIENCE", "MUSIC", "MEME", "MEME_NOTE", "TRANSITION", "END_SCENE", "END_SCRIPT"].includes(spk)) {
++        if (!META_KEYS.includes(spk)) {
+           const txt = mDlg[2].trim();
+           if (txt) {
+             dialogueWords += txt.split(/\s+/).filter(Boolean).length;
+             dialogueLines.push(txt);
++            speakers.add(spk);
+           }
+         }
+       }
+@@ -82,36 +107,28 @@ export async function POST(req: Request) {
+     const sceneDurations = scenes.map((s, i) => {
+       const block = sceneSplits[i] || "";
+       const bWords = block.split(/\s+/).filter(Boolean).length;
+-      const speechEst = Math.round(Math.max(4.0, (bWords * 0.18) + 1.5) * 10) / 10;
++      const speechEst = Math.round(Math.max(4.0, bWords * 0.18 + 1.5) * 10) / 10;
+       return { scene: s.number, duration: speechEst };
+     });
+-    const totalDuration = sceneDurations.reduce((acc, s) => acc + s.duration, 0);
++    const totalDuration =
++      sceneDurations.length > 0
++        ? sceneDurations.reduce((acc, s) => acc + s.duration, 0)
++        : Math.round(Math.max(5, dialogueWords * 0.18) * 10) / 10;
+ 
+-    // 5. Meme Cues
++    // 5. Meme cues — detected generically, never required
+     const memesFound: Record<number, string> = {};
+     scenes.forEach((s) => {
+       if (s.meme && !["NONE", "NULL", ""].includes(s.meme.toUpperCase())) {
+         memesFound[s.number] = s.meme;
+       }
+     });
+-
+-    const hasMeme1 = Boolean(memesFound[1] && memesFound[1].toLowerCase().includes("ối dồi ôi"));
+-    const hasMeme2 = Boolean(memesFound[2] && memesFound[2].toLowerCase().includes("gòi gòi"));
+-    const hasMeme5 = Boolean(memesFound[5] && memesFound[5].toLowerCase().includes("among us"));
+     const memeCount = Object.keys(memesFound).length;
+-    const rule5Pass = hasMeme1 && hasMeme2 && hasMeme5 && memeCount === 3;
+ 
+-    // 6. Local asset resolution
+-    const localAssets = [
+-      { name: "ối dồi ôi", file: "oi_doi_oi.mp3", bytes: 16228, exists: true },
+-      { name: "Gòi gòi tới công chuyện", file: "goi_goi_toi_cong_chuyen.mp3", bytes: 37335, exists: true },
+-      { name: "Among Us Role Reveal", file: "among_us_role_reveal_sound.mp3", bytes: 99894, exists: true }
+-    ];
+-
+-    // 7. No memes in 03, 04, 06, 07, 08
+-    const cleanScenes = [3, 4, 6, 7, 8];
+-    const cleanViolations = cleanScenes.filter((n) => memesFound[n]);
+-    const rule7Pass = cleanViolations.length === 0 && sceneCount === 8;
++    // 7. Meme placement — a meme cue must not sit inside a dialogue line
++    const memeInDialogue = dialogueLines.filter((l) =>
++      /MEME\s*:/i.test(l),
++    );
++    const rule7Pass = memeInDialogue.length === 0;
+ 
+     // 8. Speech purity
+     let rule8Pass = true;
+@@ -135,45 +152,105 @@ export async function POST(req: Request) {
+         duration: dur,
+         speech_end_sec: speechEnd,
+         meme_start_sec: memeStart,
+-        has_overlap: false
++        has_overlap: false,
+       };
+     });
+ 
+-    // 10. Scene 08 integrity
+-    const sc8 = scenes.find((s) => s.number === 8);
+-    const sc8Variety = Boolean(sc8 && sc8.camera_desc && sc8.camera_desc.includes(","));
+-    const sc8Serious = Boolean(sc8 && (!sc8.meme || ["NONE", "NULL", ""].includes(sc8.meme.toUpperCase())));
+-    const rule10Pass = sc8Variety && sc8Serious && sceneCount === 8;
++    // 10. Final-scene integrity (generic — was "scene 08" only)
++    const lastScene = scenes.length > 0 ? scenes[scenes.length - 1] : null;
++    const lastHasVariety = Boolean(
++      lastScene && lastScene.camera_desc && lastScene.camera_desc.includes(","),
++    );
++    const lastIsSerious = Boolean(
++      !lastScene || !lastScene.meme || ["NONE", "NULL", ""].includes(lastScene.meme.toUpperCase()),
++    );
++    const rule10Pass = scenes.length === 0 || (lastHasVariety && lastIsSerious);
+ 
+-    // 11. Historical Fidelity: Munich 1914 vs Vienna / pre-1914 check
+-    const munichViolations: string[] = [];
++    // 11. Location consistency (generic — was "Munich 1914" only)
++    const years = new Set<string>();
+     scenes.forEach((sc) => {
+-      const locLower = (sc.location || "").toLowerCase();
+-      if (locLower.includes("vienna") || locLower.includes("viên") || locLower.includes("1908") || locLower.includes("1910") || locLower.includes("1911")) {
+-        munichViolations.append ? munichViolations.push(`Cảnh ${sc.number} chứa địa danh Vienna/pre-1914 không hợp lệ: ${sc.location}`) : munichViolations.push(`Cảnh ${sc.number} chứa địa danh Vienna/pre-1914 không hợp lệ: ${sc.location}`);
+-      }
+-      if (!locLower.includes("munich") && !locLower.includes("münchen")) {
+-        munichViolations.push(`Cảnh ${sc.number} thiếu định danh Munich: ${sc.location}`);
++      const m = (sc.location || "").match(/\b(1[89]\d\d|20\d\d)\b/g);
++      if (m) m.forEach((y: string) => years.add(y));
++    });
++    const locationViolations: string[] = [];
++    scenes.forEach((sc) => {
++      if (!sc.location) {
++        locationViolations.push(`Cảnh ${sc.number} thiếu LOCATION`);
+       }
+     });
+-    const rule11Pass = munichViolations.length === 0 && sceneCount === 8;
++    if (years.size > 1) {
++      locationViolations.push(
++        `Bối cảnh mâu thuẫn về niên đại: ${[...years].join(", ")}`,
++      );
++    }
++    const rule11Pass = locationViolations.length === 0;
++
++    // Generic rules 1 + 2
++    const structuredOk =
++      sceneCount > 0 &&
++      scenes.every((s) => s.title && s.location && s.has_action && s.has_camera);
++    const freeFormOk = sceneCount === 0 && totalWords >= 20;
++    const rule1Pass = structuredOk || freeFormOk;
++    const rule2Pass = charCount >= 1 || speakers.size >= 1;
+ 
+     // Hash check
+     const hashMatches = !script_hash || script_hash === computedHash;
+ 
+-    // Rules evaluation
+-    const rule1Pass = sceneCount === 8 && scenes.every((s) => s.title && s.location && s.has_action && s.has_camera);
+-    const rule2Pass = charCount === 4;
+-
+     const blockers: string[] = [];
+-    if (!rule1Pass) blockers.push(`Rule 1: Yêu cầu đủ 8 cảnh chi tiết (hiện tại: ${sceneCount} cảnh)`);
+-    if (!rule2Pass) blockers.push(`Rule 2: Yêu cầu chính xác 4 nhân vật có thoại được đăng ký (hiện tại: ${charCount} nhân vật)`);
+-    if (!rule5Pass) blockers.push(`Rule 5: Thiếu hoặc sai 3 cue meme yêu cầu ("ối dồi ôi", "Gòi gòi tới công chuyện", "Among Us Role Reveal")`);
+-    if (!rule7Pass) blockers.push(`Rule 7: Xuất hiện meme không hợp lệ ở các cảnh nghiêm túc hoặc thiếu cảnh`);
+-    if (!rule8Pass) blockers.push(`Rule 8: Phát hiện rò rỉ metadata kỹ thuật vào lời đọc TTS`);
+-    if (!rule10Pass) blockers.push(`Rule 10: Cảnh 08 thiếu đa dạng góc máy hoặc không bảo toàn tính trang nghiêm`);
+-    if (!rule11Pass) blockers.push(`Rule 11: Lỗi lịch sử: ${munichViolations.join("; ")}`);
+-    if (!hashMatches) blockers.push(`Hash Mismatch: script_hash (${script_hash}) không khớp với computed SHA-256 (${computedHash})`);
++    if (!rule1Pass)
++      blockers.push(
++        sceneCount === 0
++          ? `Rule 1: Kịch bản quá ngắn hoặc không có cảnh nào (hiện tại: ${totalWords} từ)`
++          : `Rule 1: Có cảnh thiếu tiêu đề, LOCATION, ACTION hoặc CAMERA (hiện tại: ${sceneCount} cảnh)`,
++      );
++    if (!rule2Pass)
++      blockers.push(`Rule 2: Không tìm thấy nhân vật hoặc người thoại nào`);
++    if (!rule7Pass)
++      blockers.push(`Rule 7: Meme cue nằm trong lời thoại ở ${memeInDialogue.length} dòng`);
++    if (!rule8Pass)
++      blockers.push(`Rule 8: Phát hiện rò rỉ metadata kỹ thuật vào lời đọc TTS`);
++    if (!rule10Pass)
++      blockers.push(`Rule 10: Cảnh cuối thiếu đa dạng góc máy hoặc không bảo toàn tính trang nghiêm`);
++    if (!rule11Pass)
++      blockers.push(`Rule 11: Lỗi nhất quán bối cảnh: ${locationViolations.join("; ")}`);
++    if (!hashMatches)
++      blockers.push(`Hash Mismatch: script_hash (${script_hash}) không khớp với computed SHA-256 (${computedHash})`);
++
++    // Merge the authoritative pipeline preflight (8788) best-effort.
++    // Unreachable backend => warning only, never a fabricated PASS/FAIL.
++    const warnings: string[] = [];
++    const pipelineBase =
++      process.env.PRODUCTION_BACKEND_URL || "http://127.0.0.1:8788";
++    try {
++      const ctrl = new AbortController();
++      const timer = setTimeout(() => ctrl.abort(), 2000);
++      const pr = await fetch(`${pipelineBase}/api/production/preflight`, {
++        method: "POST",
++        headers: { "content-type": "application/json" },
++        body: JSON.stringify({
++          script: scriptText,
++          available_voices: characters.map((c) => c.voice).filter(Boolean),
++          allow_estimated_timeline: true,
++        }),
++        signal: ctrl.signal,
++      });
++      clearTimeout(timer);
++      if (pr.ok) {
++        const pd = await pr.json();
++        if (pd && pd.passed === false) {
++          const fails = (pd.checks || [])
++            .filter((c: any) => !c.passed)
++            .map((c: any) => `Pipeline preflight: ${c.name} — ${c.detail || ""}`);
++          blockers.push(...fails);
++        }
++      } else {
++        warnings.push(`Pipeline preflight trả HTTP ${pr.status} — chỉ dùng kiểm tra cục bộ`);
++      }
++    } catch {
++      warnings.push(
++        `Không kết nối được pipeline backend ${pipelineBase} — chỉ dùng kiểm tra cục bộ (chạy python -m ai_clip_studio.server để bật kiểm tra đầy đủ)`,
++      );
++    }
+ 
+     const overallPassed = blockers.length === 0;
+ 
+@@ -183,66 +260,67 @@ export async function POST(req: Request) {
+       script_hash: computedHash,
+       hash_matches: hashMatches,
+       blockers,
++      warnings,
+       checks: {
+         rule_1_scenes: {
+           passed: rule1Pass,
+           count: sceneCount,
+-          expected: 8,
+-          scenes
++          expected: null,
++          scenes,
++          free_form: sceneCount === 0,
+         },
+         rule_2_characters: {
+           passed: rule2Pass,
+-          count: charCount,
+-          expected: 4,
+-          characters
++          count: Math.max(charCount, speakers.size),
++          expected: null,
++          characters,
++          speakers: [...speakers],
+         },
+         rule_3_word_counts: {
+           total_words: totalWords,
+           dialogue_words: dialogueWords,
+           metadata_words: metadataWords,
+-          dialogue_ratio: totalWords > 0 ? Math.round((dialogueWords / totalWords) * 100) : 0
++          dialogue_ratio: totalWords > 0 ? Math.round((dialogueWords / totalWords) * 100) : 0,
+         },
+         rule_4_timing: {
+           passed: true,
+           total_duration_sec: Math.round(totalDuration * 10) / 10,
+-          scene_durations: sceneDurations
++          scene_durations: sceneDurations,
+         },
+         rule_5_meme_cues: {
+-          passed: rule5Pass,
++          passed: true,
+           detected: memesFound,
+-          has_meme_scene_1: hasMeme1,
+-          has_meme_scene_2: hasMeme2,
+-          has_meme_scene_5: hasMeme5
++          count: memeCount,
+         },
+         rule_6_local_assets: {
+           passed: true,
+-          assets: localAssets
++          assets: Object.values(memesFound).map((m) => ({ meme: m })),
+         },
+         rule_7_clean_scenes: {
+           passed: rule7Pass,
+-          clean_scenes: cleanScenes,
+-          violations: cleanViolations
++          clean_scenes: scenes.filter((s) => !memesFound[s.number]).map((s) => s.number),
++          violations: memeInDialogue,
+         },
+         rule_8_speech_purity: {
+           passed: rule8Pass,
+-          leaks: speechLeaks
++          leaks: speechLeaks,
+         },
+         rule_9_audio_collision: {
+           passed: true,
+           events: audioEvents,
+-          policy: "Meme offset +0.3s after dialogue end, Gain -12dB"
++          policy: "Meme offset +0.3s after dialogue end, Gain -12dB",
+         },
+         rule_10_scene_8_integrity: {
+           passed: rule10Pass,
+-          has_variety: sc8Variety,
+-          is_serious: sc8Serious
++          has_variety: lastHasVariety,
++          is_serious: lastIsSerious,
+         },
+         rule_11_munich_1914_fidelity: {
+           passed: rule11Pass,
+-          historical_period: "Munich, Germany (May - August 1914)",
+-          violations: munichViolations
+-        }
+-      }
++          historical_period: years.size > 0 ? [...years].join(", ") : "không khai báo",
++          violations: locationViolations,
++        },
++      },
+     });
+   } catch (err: any) {
+     return NextResponse.json({ error: err.message }, { status: 500 });
+diff --git a/sites/ai-clip-studio/app/api/production/approve-master/route.ts b/sites/ai-clip-studio/app/api/production/approve-master/route.ts
+new file mode 100644
+index 0000000..4fef5b2
+--- /dev/null
++++ b/sites/ai-clip-studio/app/api/production/approve-master/route.ts
+@@ -0,0 +1,33 @@
++import { NextResponse } from "next/server";
++
++// Human approval gate: only a draft in END_TO_END_DRAFT_READY_FOR_REVIEW
++// may become a Master. The pipeline server enforces this (409 otherwise);
++// this route only proxies. No auto-approval: a numeric QA score alone
++// never approves a Master.
++const backend = () =>
++  process.env.PRODUCTION_BACKEND_URL || "http://127.0.0.1:8788";
++
++export async function POST(request: Request) {
++  try {
++    const { job_id } = await request.json();
++    if (!job_id) {
++      return NextResponse.json({ error: "job_id is required" }, { status: 400 });
++    }
++    const r = await fetch(
++      `${backend()}/api/production/jobs/${encodeURIComponent(job_id)}/approve-master`,
++      { method: "POST" },
++    );
++    return new NextResponse(await r.text(), {
++      status: r.status,
++      headers: { "content-type": "application/json" },
++    });
++  } catch {
++    return NextResponse.json(
++      {
++        error:
++          "Production backend chưa chạy (8788). Chạy: python -m ai_clip_studio.server",
++      },
++      { status: 503 },
++    );
++  }
++}
+diff --git a/sites/ai-clip-studio/app/api/production/draft/route.ts b/sites/ai-clip-studio/app/api/production/draft/route.ts
+new file mode 100644
+index 0000000..b7ee647
+--- /dev/null
++++ b/sites/ai-clip-studio/app/api/production/draft/route.ts
+@@ -0,0 +1,32 @@
++import { NextResponse } from "next/server";
++
++// Proxy to the unified production pipeline (ai_clip_studio server, 8788).
++// POST {script, language?, aspect_ratio?} -> {job_id, status: "queued", script_hash}
++// The job runs in a background thread on 8788; poll
++// GET /api/production/jobs/{job_id} for progress. Never returns SUCCESS
++// before the render + upload actually complete.
++const backend = () =>
++  process.env.PRODUCTION_BACKEND_URL || "http://127.0.0.1:8788";
++
++export async function POST(request: Request) {
++  try {
++    const body = await request.text();
++    const r = await fetch(`${backend()}/api/production/draft`, {
++      method: "POST",
++      headers: { "content-type": "application/json" },
++      body,
++    });
++    return new NextResponse(await r.text(), {
++      status: r.status,
++      headers: { "content-type": "application/json" },
++    });
++  } catch {
++    return NextResponse.json(
++      {
++        error:
++          "Production backend chưa chạy (8788). Chạy: python -m ai_clip_studio.server",
++      },
++      { status: 503 },
++    );
++  }
++}
+diff --git a/sites/ai-clip-studio/app/api/production/jobs/[jobId]/route.ts b/sites/ai-clip-studio/app/api/production/jobs/[jobId]/route.ts
+new file mode 100644
+index 0000000..eebb350
+--- /dev/null
++++ b/sites/ai-clip-studio/app/api/production/jobs/[jobId]/route.ts
+@@ -0,0 +1,40 @@
++import { NextResponse } from "next/server";
++
++// Proxy to the unified production pipeline (ai_clip_studio server, 8788).
++// GET /api/production/jobs/{job_id} -> job status + per-stage results.
++// Flattens drive_links / drive_url out of the RETURN_DRIVE_LINKS stage
++// so the page can show a clickable Drive link without digging into stages.
++const backend = () =>
++  process.env.PRODUCTION_BACKEND_URL || "http://127.0.0.1:8788";
++
++export async function GET(
++  _request: Request,
++  { params }: { params: Promise<{ jobId: string }> },
++) {
++  const { jobId } = await params;
++  try {
++    const r = await fetch(
++      `${backend()}/api/production/jobs/${encodeURIComponent(jobId)}`,
++      { cache: "no-store" },
++    );
++    const d = await r.json();
++    if (r.ok && Array.isArray(d.stages)) {
++      const linksStage = d.stages.find(
++        (s: any) => s.stage === "RETURN_DRIVE_LINKS",
++      );
++      const links: string[] = linksStage?.data?.drive_links || [];
++      d.drive_links = links;
++      d.drive_url = links[0] || null;
++      const uploadStage = d.stages.find(
++        (s: any) => s.stage === "UPLOAD_ARTIFACTS_TO_GOOGLE_DRIVE",
++      );
++      d.drive_uploads = uploadStage?.data || null;
++    }
++    return NextResponse.json(d, { status: r.status });
++  } catch {
++    return NextResponse.json(
++      { status: "failed", message: "Mất kết nối production backend (8788)" },
++      { status: 503 },
++    );
++  }
++}
+diff --git a/sites/ai-clip-studio/app/api/production/retry-upload/route.ts b/sites/ai-clip-studio/app/api/production/retry-upload/route.ts
+new file mode 100644
+index 0000000..b1c6f4c
+--- /dev/null
++++ b/sites/ai-clip-studio/app/api/production/retry-upload/route.ts
+@@ -0,0 +1,33 @@
++import { NextResponse } from "next/server";
++
++// Retry the Drive upload for a finished job WITHOUT re-rendering.
++// The pipeline server currently returns 501 for this (not implemented
++// yet — see ai_clip_studio/STATUS.md); this route passes that through
++// honestly instead of faking a successful retry.
++const backend = () =>
++  process.env.PRODUCTION_BACKEND_URL || "http://127.0.0.1:8788";
++
++export async function POST(request: Request) {
++  try {
++    const { job_id } = await request.json();
++    if (!job_id) {
++      return NextResponse.json({ error: "job_id is required" }, { status: 400 });
++    }
++    const r = await fetch(
++      `${backend()}/api/production/jobs/${encodeURIComponent(job_id)}/retry-upload`,
++      { method: "POST" },
++    );
++    return new NextResponse(await r.text(), {
++      status: r.status,
++      headers: { "content-type": "application/json" },
++    });
++  } catch {
++    return NextResponse.json(
++      {
++        error:
++          "Production backend chưa chạy (8788). Chạy: python -m ai_clip_studio.server",
++      },
++      { status: 503 },
++    );
++  }
++}
+diff --git a/sites/ai-clip-studio/app/page.tsx b/sites/ai-clip-studio/app/page.tsx
+index 2d33e78..7baa797 100644
+--- a/sites/ai-clip-studio/app/page.tsx
++++ b/sites/ai-clip-studio/app/page.tsx
+@@ -411,7 +411,17 @@ export default function Home() {
+     [variants, setVariants] = useState<Variant[]>([]),
+     [jobId, setJobId] = useState("52d57a1cf6"),
+     [selectedWinner, setSelectedWinner] = useState<number | null>(null),
+-    [reviewerKey, setReviewerKey] = useState("");
++    [reviewerKey, setReviewerKey] = useState(""),
++    // Generic preflight verdict from PreflightPanel (replaces the old
++    // hardcoded "script must contain SCENE 08" gate for Master rendering).
++    [preflightPassed, setPreflightPassed] = useState(false),
++    // Unified-pipeline draft (ai_clip_studio server on 8788): separate
++    // from the legacy 3-variant render flow on 8787.
++    [prodJobId, setProdJobId] = useState(""),
++    [prodStatus, setProdStatus] = useState(""),
++    [prodDriveUrl, setProdDriveUrl] = useState(""),
++    [prodBusy, setProdBusy] = useState(false),
++    [prodApproved, setProdApproved] = useState(false);
+ 
+   const words = useMemo(
+     () => script.trim().split(/\s+/).filter(Boolean).length,
+@@ -568,6 +578,79 @@ export default function Home() {
+     }
+   }
+ 
++  // Unified pipeline draft: POST /api/production/draft (ai_clip_studio
++  // server on 8788) -> job_id, then poll the real job status until the
++  // draft is rendered, validated and uploaded to Google Drive.
++  async function renderProductionDraft() {
++    if (!script.trim()) return;
++    setProdBusy(true);
++    setProdDriveUrl("");
++    setProdApproved(false);
++    setProdStatus("queued");
++    setMessage("Đang tạo Draft qua Unified Pipeline (19 stage)...");
++    try {
++      const r = await fetch("/api/production/draft", {
++        method: "POST",
++        headers: { "content-type": "application/json" },
++        body: JSON.stringify({
++          script,
++          language: "vi-VN",
++          aspect_ratio: "16:9",
++        }),
++      });
++      const d = await r.json();
++      if (!r.ok) throw new Error(d.error || "Không thể tạo production job");
++      setProdJobId(d.job_id);
++      const timer = setInterval(async () => {
++        const s = await fetch(`/api/production/jobs/${d.job_id}`).then((x) => x.json());
++        setProdStatus(s.status || "");
++        if (s.drive_url) setProdDriveUrl(s.drive_url);
++        const last = s.stages?.[s.stages.length - 1];
++        setMessage(
++          last ? `${s.status} · ${last.stage}: ${last.detail}` : `${s.status}`,
++        );
++        if (
++          s.status === "END_TO_END_DRAFT_READY_FOR_REVIEW" ||
++          s.status === "BLOCKED_WITH_EXPLICIT_REASON" ||
++          s.status === "MASTER_APPROVED_AND_UPLOADED"
++        ) {
++          clearInterval(timer);
++          setProdBusy(false);
++          if (s.status === "BLOCKED_WITH_EXPLICIT_REASON") {
++            setMessage(`Draft bị chặn: ${s.blocked_reason || "xem chi tiết job"}`);
++          }
++        }
++      }, 2000);
++    } catch (e) {
++      setProdBusy(false);
++      setProdStatus("");
++      setMessage(e instanceof Error ? e.message : "Không thể tạo production job");
++    }
++  }
++
++  // Human approval gate for the unified-pipeline draft. The backend
++  // returns 409 unless the draft is END_TO_END_DRAFT_READY_FOR_REVIEW.
++  async function approveProductionMaster() {
++    if (!prodJobId) return;
++    setProdBusy(true);
++    try {
++      const r = await fetch("/api/production/approve-master", {
++        method: "POST",
++        headers: { "content-type": "application/json" },
++        body: JSON.stringify({ job_id: prodJobId }),
++      });
++      const d = await r.json();
++      if (!r.ok) throw new Error(d.error || "Không thể duyệt Master");
++      setProdApproved(true);
++      setProdStatus(d.status);
++      setMessage("Đã duyệt Master · Master đã sẵn sàng trên Google Drive");
++    } catch (e) {
++      setMessage(e instanceof Error ? e.message : "Không thể duyệt Master");
++    } finally {
++      setProdBusy(false);
++    }
++  }
++
+   async function chooseWinner(index: number) {
+     if (!jobId || busy) return;
+     setBusy(true);
+@@ -647,6 +730,7 @@ export default function Home() {
+               setMessage("Đã nạp STUDIO SCRIPT V1 Episode 01 Chuẩn (8 cảnh · 4 nhân vật · 3 meme cues)");
+             }}
+             onAllowDraftRender={render}
++            onReport={(ok) => setPreflightPassed(ok)}
+           />
+           <div>
+             <div className="mb-3 flex items-end justify-between">
+@@ -1087,6 +1171,50 @@ export default function Home() {
+               >
+                 <Play fill="currentColor" /> Render mới 3 Draft 16:9 & Chọn bản Master
+               </button>
++              {/* Unified Pipeline (ai_clip_studio, backend 8788): one job
++                  through all 19 stages, draft -> Drive link -> Approve Master.
++                  Separate from the legacy 3-variant render above. */}
++              <div className="rounded-2xl border-2 border-dashed border-white/40 p-3 text-white">
++                <div className="mb-2 text-xs font-black uppercase tracking-widest text-[#ffd34e]">
++                  Unified Pipeline · 19 stage · Backend 8788
++                </div>
++                <button
++                  onClick={renderProductionDraft}
++                  disabled={prodBusy || words < 5}
++                  className="flex w-full items-center justify-center gap-2 rounded-xl border-[3px] border-white bg-[#47bd75] px-5 py-3 font-black text-white disabled:opacity-50"
++                >
++                  <Play fill="currentColor" /> Tạo Draft qua Unified Pipeline
++                </button>
++                {prodJobId && (
++                  <div className="mt-2 space-y-1 text-xs font-bold">
++                    <div>Job: <span className="font-mono">{prodJobId}</span></div>
++                    <div>Trạng thái: {prodStatus || "…"}</div>
++                    {prodDriveUrl && (
++                      <a
++                        href={prodDriveUrl}
++                        target="_blank"
++                        rel="noreferrer"
++                        className="block text-center text-[#51d8e5] underline"
++                      >
++                        Mở Draft trên Google Drive ↗
++                      </a>
++                    )}
++                    <button
++                      onClick={approveProductionMaster}
++                      disabled={
++                        prodBusy ||
++                        prodApproved ||
++                        prodStatus !== "END_TO_END_DRAFT_READY_FOR_REVIEW"
++                      }
++                      className="mt-1 w-full rounded-lg bg-[#ffd34e] px-3 py-2 text-xs font-black text-[#172033] disabled:opacity-40"
++                    >
++                      {prodApproved
++                        ? "✓ Đã duyệt Master"
++                        : "Duyệt Master (chỉ khi Draft đã sẵn sàng)"}
++                    </button>
++                  </div>
++                )}
++              </div>
+               {variants.length > 0 && (
+                 <div className="grid grid-cols-2 gap-2">
+                   {variants.map((v) => (
+@@ -1128,18 +1256,18 @@ export default function Home() {
+                       <button
+                         type="button"
+                         onClick={() => {
+-                          if (!script.includes("STUDIO SCRIPT V1") || !script.includes("SCENE 08")) {
+-                            alert("🛑 MASTER RENDERING BLOCKED: Kịch bản hiện tại chưa vượt qua Preflight Gate (Yêu cầu đủ 8 cảnh, 4 nhân vật, 3 meme chuẩn và kiểm định âm thanh).");
++                          if (!preflightPassed) {
++                            alert("🛑 MASTER RENDERING BLOCKED: Kịch bản hiện tại chưa vượt qua Preflight Gate.");
+                             return;
+                           }
+                           chooseWinner(v.index);
+                         }}
+-                        disabled={busy || selectedWinner !== null || !script.includes("STUDIO SCRIPT V1")}
++                        disabled={busy || selectedWinner !== null || !preflightPassed}
+                         className="mt-2 w-full rounded-lg bg-[#51d8e5] px-3 py-2 text-xs font-black text-[#172033] disabled:opacity-40"
+                       >
+                         {selectedWinner === v.index
+                           ? "Đang render Master..."
+-                          : (!script.includes("STUDIO SCRIPT V1") ? "🛑 Master Bị Khóa (Preflight Failed)" : "Chọn bản này · Render Full HD")}
++                          : (!preflightPassed ? "🛑 Master Bị Khóa (Preflight Failed)" : "Chọn bản này · Render Full HD")}
+                       </button>
+                     </div>
+                   ))}
+diff --git a/sites/ai-clip-studio/components/PreflightPanel.tsx b/sites/ai-clip-studio/components/PreflightPanel.tsx
+index 24541b9..6760b57 100644
+--- a/sites/ai-clip-studio/components/PreflightPanel.tsx
++++ b/sites/ai-clip-studio/components/PreflightPanel.tsx
+@@ -20,18 +20,19 @@ export interface PreflightReport {
+   overall_passed: boolean;
+   status: string;
+   blockers: string[];
++  warnings?: string[];
+   checks: {
+-    rule_1_scenes: { passed: boolean; count: number; expected: number; scenes: any[] };
+-    rule_2_characters: { passed: boolean; count: number; expected: number; characters: any[] };
++    rule_1_scenes: { passed: boolean; count: number; expected: number | null; scenes: any[]; free_form?: boolean };
++    rule_2_characters: { passed: boolean; count: number; expected: number | null; characters: any[]; speakers?: string[] };
+     rule_3_word_counts: { total_words: number; dialogue_words: number; metadata_words: number; dialogue_ratio: number };
+     rule_4_timing: { passed: boolean; total_duration_sec: number; scene_durations: any[] };
+-    rule_5_meme_cues: { passed: boolean; detected: Record<number, string>; has_meme_scene_1: boolean; has_meme_scene_2: boolean; has_meme_scene_5: boolean };
++    rule_5_meme_cues: { passed: boolean; detected: Record<number, string>; count?: number; has_meme_scene_1?: boolean; has_meme_scene_2?: boolean; has_meme_scene_5?: boolean };
+     rule_6_local_assets: { passed: boolean; assets: any[] };
+-    rule_7_clean_scenes: { passed: boolean; clean_scenes: number[]; violations: number[] };
++    rule_7_clean_scenes: { passed: boolean; clean_scenes: number[]; violations: any[] };
+     rule_8_speech_purity: { passed: boolean; leaks: string[] };
+     rule_9_audio_collision: { passed: boolean; events: any[]; policy: string };
+     rule_10_scene_8_integrity: { passed: boolean; has_variety: boolean; is_serious: boolean };
+-    rule_11_munich_1914_fidelity?: { passed: boolean; historical_period: string; found_forbidden_vienna: string[]; missing_required_munich: string[] };
++    rule_11_munich_1914_fidelity?: { passed: boolean; historical_period: string; found_forbidden_vienna?: string[]; missing_required_munich?: string[]; violations?: string[] };
+   };
+ }
+ 
+@@ -40,13 +41,17 @@ interface PreflightPanelProps {
+   scriptHash?: string;
+   onLoadCompliantScript: () => void;
+   onAllowDraftRender?: () => void;
++  // Called with the generic preflight verdict so the parent page can gate
++  // Master rendering on the real result instead of a hardcoded script check.
++  onReport?: (passed: boolean) => void;
+ }
+ 
+ export const PreflightPanel: React.FC<PreflightPanelProps> = ({
+   script,
+   scriptHash,
+   onLoadCompliantScript,
+-  onAllowDraftRender
++  onAllowDraftRender,
++  onReport,
+ }) => {
+   const [report, setReport] = useState<PreflightReport | null>(null);
+   const [loading, setLoading] = useState(false);
+@@ -62,6 +67,7 @@ export const PreflightPanel: React.FC<PreflightPanelProps> = ({
+       });
+       const data = await res.json();
+       setReport(data);
++      if (onReport) onReport(Boolean(data.overall_passed));
+     } catch (err) {
+       console.error("Preflight audit error:", err);
+     } finally {
+@@ -76,6 +82,16 @@ export const PreflightPanel: React.FC<PreflightPanelProps> = ({
+   if (!report) return null;
+ 
+   const ch = report.checks;
++  // Dynamic pass count — the old panel hardcoded "11/11" and "8 scenes /
++  // 4 characters / Munich 1914". Checks are generic now: count what passed.
++  const checkEntries = Object.values(ch).filter(
++    (c: any) => c && typeof c.passed === "boolean",
++  );
++  const passedCount = checkEntries.filter((c: any) => c.passed).length;
++  const totalCount = checkEntries.length;
++  const memeList = Object.entries(ch.rule_5_meme_cues.detected || {}).map(
++    ([scene, meme]) => `Cảnh ${scene}: ${meme}`,
++  );
+ 
+   return (
+     <div className="rounded-[28px] border-[3px] border-[#172033] bg-white p-6 shadow-[8px_8px_0_#172033] mb-6">
+@@ -99,7 +115,10 @@ export const PreflightPanel: React.FC<PreflightPanelProps> = ({
+                   report.overall_passed ? "bg-[#47bd75] text-white" : "bg-[#e44d46] text-white"
+                 }`}
+               >
+-                {report.overall_passed ? "PASSED (11/11)" : "REJECTED / BLOCKED"}
++                {report.overall_passed ? "PASSED" : "REJECTED / BLOCKED"}
++              </span>
++              <span className="rounded-full bg-white px-2.5 py-0.5 text-xs font-black text-[#172033]">
++                {passedCount}/{totalCount} checks
+               </span>
+             </div>
+             <h3 className="text-xl font-black mt-1">
+@@ -153,14 +172,14 @@ export const PreflightPanel: React.FC<PreflightPanelProps> = ({
+               </ul>
+               <div className="mt-3 flex items-center gap-3">
+                 <span className="text-xs font-semibold text-[#172033]">
+-                  Bạn có thể xem chi tiết audit 10 mục bên dưới hoặc nạp kịch bản Episode 01 chuẩn:
++                  Bạn có thể xem chi tiết audit bên dưới hoặc nạp kịch bản mẫu Episode 01:
+                 </span>
+                 <button
+                   type="button"
+                   onClick={onLoadCompliantScript}
+                   className="rounded-xl border-2 border-[#172033] bg-[#51d8e5] px-3 py-1.5 text-xs font-black text-[#172033] shadow-[2px_2px_0_#172033] hover:bg-white"
+                 >
+-                  ⚡ Nạp STUDIO SCRIPT V1 Episode 01 Chuẩn
++                  ⚡ Nạp kịch bản mẫu Episode 01
+                 </button>
+               </div>
+             </div>
+@@ -172,31 +191,31 @@ export const PreflightPanel: React.FC<PreflightPanelProps> = ({
+       {expanded && (
+         <div className="mt-5 space-y-3">
+           <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-5">
+-            {/* 1. Scenes */}
++            {/* 1. Scenes — generic count, no fixed "8" */}
+             <div className={`rounded-xl border-2 p-3 ${ch.rule_1_scenes.passed ? "border-[#47bd75] bg-[#f2faf5]" : "border-[#e44d46] bg-[#fff5f5]"}`}>
+               <div className="flex items-center justify-between text-xs font-black">
+-                <span>1. Đủ 8 Cảnh</span>
++                <span>1. Cảnh</span>
+                 {ch.rule_1_scenes.passed ? <CheckCircle2 size={16} className="text-[#47bd75]" /> : <XCircle size={16} className="text-[#e44d46]" />}
+               </div>
+               <div className="mt-1 text-sm font-black">
+-                {ch.rule_1_scenes.count} / 8 cảnh
++                {ch.rule_1_scenes.count} cảnh{ch.rule_1_scenes.free_form ? " (free-form)" : ""}
+               </div>
+               <div className="text-[11px] opacity-70">
+                 {ch.rule_1_scenes.passed ? "Đủ tiêu đề, bối cảnh, action, camera" : "Thiếu cảnh hoặc tag"}
+               </div>
+             </div>
+ 
+-            {/* 2. Characters */}
++            {/* 2. Characters — generic count, no fixed "4" */}
+             <div className={`rounded-xl border-2 p-3 ${ch.rule_2_characters.passed ? "border-[#47bd75] bg-[#f2faf5]" : "border-[#e44d46] bg-[#fff5f5]"}`}>
+               <div className="flex items-center justify-between text-xs font-black">
+-                <span>2. Đủ 4 Nhân Vật</span>
++                <span>2. Nhân Vật</span>
+                 {ch.rule_2_characters.passed ? <CheckCircle2 size={16} className="text-[#47bd75]" /> : <XCircle size={16} className="text-[#e44d46]" />}
+               </div>
+               <div className="mt-1 text-sm font-black">
+-                {ch.rule_2_characters.count} / 4 nhân vật
++                {ch.rule_2_characters.count} nhân vật
+               </div>
+               <div className="text-[11px] opacity-70">
+-                {ch.rule_2_characters.passed ? "Đã gán giọng VieNeu đúng" : "Chưa đủ 4 nhân vật"}
++                {ch.rule_2_characters.passed ? "Đã gán giọng VieNeu đúng" : "Chưa có nhân vật / người thoại"}
+               </div>
+             </div>
+ 
+@@ -228,44 +247,46 @@ export const PreflightPanel: React.FC<PreflightPanelProps> = ({
+               </div>
+             </div>
+ 
+-            {/* 5. 3 Memes */}
++            {/* 5. Meme cues — generic: detected list, never required */}
+             <div className={`rounded-xl border-2 p-3 ${ch.rule_5_meme_cues.passed ? "border-[#47bd75] bg-[#f2faf5]" : "border-[#e44d46] bg-[#fff5f5]"}`}>
+               <div className="flex items-center justify-between text-xs font-black">
+-                <span>5. Đúng 3 Cue Meme</span>
++                <span>5. Meme Cues</span>
+                 {ch.rule_5_meme_cues.passed ? <CheckCircle2 size={16} className="text-[#47bd75]" /> : <XCircle size={16} className="text-[#e44d46]" />}
+               </div>
+               <div className="mt-1 text-sm font-black">
+-                Cảnh 1, 2, 5
++                {memeList.length > 0 ? `${memeList.length} cue` : "Không có meme"}
+               </div>
+               <div className="text-[11px] opacity-70">
+-                ối dồi ôi · gòi gòi · among us
++                {memeList.length > 0 ? memeList.join(" · ") : "Meme không bắt buộc"}
+               </div>
+             </div>
+           </div>
+ 
+           {/* Extended Checks */}
+           <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-5 text-xs">
+-            {/* 6. Local Asset Resolution */}
++            {/* 6. Local Asset Resolution — dynamic, was hardcoded "3/3 MP3" */}
+             <div className="rounded-xl border border-[#172033]/20 bg-[#f9f8f4] p-2.5">
+               <div className="flex items-center justify-between font-bold">
+                 <span>6. File Meme Cục Bộ</span>
+-                <span className="text-[#47bd75] font-black">3/3 MP3</span>
++                <span className="text-[#47bd75] font-black">{ch.rule_6_local_assets.assets.length} meme</span>
+               </div>
+               <div className="mt-1 text-[11px] opacity-75">
+-                oi_doi_oi, goi_goi, among_us sẵn sàng trên đĩa.
++                {ch.rule_6_local_assets.assets.length > 0
++                  ? ch.rule_6_local_assets.assets.map((a: any) => a.meme).join(", ")
++                  : "Không có meme cần resolve."}
+               </div>
+             </div>
+ 
+-            {/* 7. Clean Scenes */}
++            {/* 7. Meme placement — generic, was "Cảnh 03,04,06,07,08" */}
+             <div className={`rounded-xl border p-2.5 ${ch.rule_7_clean_scenes.passed ? "border-[#47bd75]/40 bg-[#f2faf5]" : "border-[#e44d46]/40 bg-[#fff5f5]"}`}>
+               <div className="flex items-center justify-between font-bold">
+-                <span>7. Cảnh 03,04,06,07,08</span>
++                <span>7. Meme Đúng Vị Trí</span>
+                 <span className={ch.rule_7_clean_scenes.passed ? "text-[#47bd75]" : "text-[#e44d46]"}>
+-                  {ch.rule_7_clean_scenes.passed ? "Sạch meme" : "Vi phạm"}
++                  {ch.rule_7_clean_scenes.passed ? "Đúng vị trí" : "Vi phạm"}
+                 </span>
+               </div>
+               <div className="mt-1 text-[11px] opacity-75">
+-                Không có meme ở các cảnh trang nghiêm.
++                Meme cue không nằm trong lời thoại.
+               </div>
+             </div>
+ 
+@@ -291,29 +312,33 @@ export const PreflightPanel: React.FC<PreflightPanelProps> = ({
+               </div>
+             </div>
+ 
+-            {/* 10. Scene 08 Integrity */}
++            {/* 10. Final-scene integrity — generic, was "Cảnh 08" only */}
+             <div className={`rounded-xl border p-2.5 ${ch.rule_10_scene_8_integrity.passed ? "border-[#47bd75]/40 bg-[#f2faf5]" : "border-[#e44d46]/40 bg-[#fff5f5]"}`}>
+               <div className="flex items-center justify-between font-bold">
+-                <span>10. Cảnh 08 Trang Nghiêm</span>
++                <span>10. Cảnh Cuối</span>
+                 <span className={ch.rule_10_scene_8_integrity.passed ? "text-[#47bd75]" : "text-[#e44d46]"}>
+                   {ch.rule_10_scene_8_integrity.passed ? "Đạt chuẩn" : "Chưa đạt"}
+                 </span>
+               </div>
+               <div className="mt-1 text-[11px] opacity-75">
+-                Đổi góc máy đa dạng, tự sự lịch sử trang trọng.
++                Đổi góc máy đa dạng, giữ tính trang nghiêm của cảnh cuối.
+               </div>
+             </div>
+ 
+-            {/* 11. Munich 1914 Historical Fidelity */}
++            {/* 11. Location consistency — generic, was "Munich 1914" only */}
+             <div className={`col-span-full rounded-xl border p-2.5 ${!ch.rule_11_munich_1914_fidelity || ch.rule_11_munich_1914_fidelity.passed ? "border-[#47bd75]/40 bg-[#f2faf5]" : "border-[#e44d46]/40 bg-[#fff5f5]"}`}>
+               <div className="flex items-center justify-between font-bold">
+-                <span>11. Độ Chính Xác Lịch Sử (Munich 1914 Fidelity)</span>
++                <span>11. Nhất Quán Bối Cảnh</span>
+                 <span className={!ch.rule_11_munich_1914_fidelity || ch.rule_11_munich_1914_fidelity.passed ? "text-[#47bd75]" : "text-[#e44d46]"}>
+-                  {!ch.rule_11_munich_1914_fidelity || ch.rule_11_munich_1914_fidelity.passed ? "Chuẩn Munich 1914" : "Lệch bối cảnh (Vienna)"}
++                  {!ch.rule_11_munich_1914_fidelity || ch.rule_11_munich_1914_fidelity.passed ? "Nhất quán" : "Mâu thuẫn bối cảnh"}
+                 </span>
+               </div>
+               <div className="mt-1 text-[11px] opacity-75">
+-                Bảo đảm đúng bối cảnh Munich 1914 (Schleißheimer, Frauenkirche, Odeonsplatz). Tuyệt đối loại trừ Vienna.
++                Bối cảnh các cảnh nhất quán về địa điểm và niên đại
++                {ch.rule_11_munich_1914_fidelity?.historical_period
++                  ? ` (${ch.rule_11_munich_1914_fidelity.historical_period})`
++                  : ""}
++                . Không hardcode theo một câu chuyện cụ thể.
+               </div>
+             </div>
+           </div>
+@@ -323,13 +348,20 @@ export const PreflightPanel: React.FC<PreflightPanelProps> = ({
+             <div className="text-xs font-semibold text-[#172033]/70">
+               {report.overall_passed ? (
+                 <span className="text-[#2f9e5b] font-bold">
+-                  ✓ Toàn bộ 10 tiêu chuẩn Preflight đã thông qua. Bạn có thể xuất bản Audiovisual Draft để kiểm duyệt trực quan.
++                  ✓ {passedCount}/{totalCount} tiêu chuẩn Preflight đã thông qua. Bạn có thể xuất bản Audiovisual Draft để kiểm duyệt trực quan.
+                 </span>
+               ) : (
+                 <span className="text-[#e44d46] font-bold">
+-                  ⚠️ Render Master bị khóa cho đến khi toàn bộ 10 điều kiện Preflight được đáp ứng.
++                  ⚠️ Render Master bị khóa cho đến khi toàn bộ điều kiện Preflight được đáp ứng.
+                 </span>
+               )}
++              {report.warnings && report.warnings.length > 0 && (
++                <div className="mt-1 text-[11px] font-semibold text-[#b87400]">
++                  {report.warnings.map((w, i) => (
++                    <div key={i}>⚠ {w}</div>
++                  ))}
++                </div>
++              )}
+             </div>
+ 
+             <div className="flex items-center gap-2">

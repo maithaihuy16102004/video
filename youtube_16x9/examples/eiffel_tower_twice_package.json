@@ -1,0 +1,151 @@
+{
+  "title": "He sold the Eiffel Tower. Twice.",
+  "slug": "he-sold-the-eiffel-tower-twice",
+  "aspect_ratio": "16:9",
+  "width": 1920,
+  "height": 1080,
+  "fps": 24,
+  "hook": "He sold the Eiffel Tower twice, and nobody stopped him.",
+  "twist": "Nobody reported the crime, because the victim was too embarrassed.",
+  "payoff": "So Lustig came back to Paris and tried to sell the tower a second time.",
+  "shots": [
+    {
+      "shot_id": "SH01",
+      "shot_number": 1,
+      "shot_type": "HOOK_CLOSEUP",
+      "duration_sec": 4.5,
+      "purpose": "HOOK",
+      "story_beat_id": "BEAT_01_HOOK",
+      "script_line": "He sold the Eiffel Tower twice, and nobody stopped him.",
+      "camera_is_pov": false,
+      "location_id": "LOC_GENERIC",
+      "visible_state": "",
+      "staging": {
+        "action_description": "He sold the Eiffel Tower twice, and nobody stopped him.",
+        "ideas_per_shot": 1,
+        "caption": "He sold the Eiffel Tower twice, and nobody stopped him."
+      }
+    },
+    {
+      "shot_id": "SH02",
+      "shot_number": 2,
+      "shot_type": "MEDIUM_ACTION",
+      "duration_sec": 4.5,
+      "purpose": "ESCALATION",
+      "story_beat_id": "BEAT_02_ESCALATION",
+      "script_line": "In 1925, Victor Lustig read that Paris could not afford the tower.",
+      "camera_is_pov": false,
+      "location_id": "LOC_GENERIC",
+      "visible_state": "",
+      "staging": {
+        "action_description": "In 1925, Victor Lustig read that Paris could not afford the tower.",
+        "ideas_per_shot": 1,
+        "caption": "In 1925, Victor Lustig read that Paris could not afford the tower."
+      }
+    },
+    {
+      "shot_id": "SH03",
+      "shot_number": 3,
+      "shot_type": "MEDIUM_ACTION",
+      "duration_sec": 4.5,
+      "purpose": "ESCALATION",
+      "story_beat_id": "BEAT_03_ESCALATION",
+      "script_line": "He invited five scrap dealers to a secret meeting in a luxury hotel.",
+      "camera_is_pov": false,
+      "location_id": "LOC_GENERIC",
+      "visible_state": "",
+      "staging": {
+        "action_description": "He invited five scrap dealers to a secret meeting in a luxury hotel.",
+        "ideas_per_shot": 1,
+        "caption": "He invited five scrap dealers to a secret meeting in a luxury hotel."
+      }
+    },
+    {
+      "shot_id": "SH04",
+      "shot_number": 4,
+      "shot_type": "MEDIUM_ACTION",
+      "duration_sec": 4.5,
+      "purpose": "ESCALATION",
+      "story_beat_id": "BEAT_04_ESCALATION",
+      "script_line": "He told them the government wanted to sell the tower for scrap.",
+      "camera_is_pov": false,
+      "location_id": "LOC_GENERIC",
+      "visible_state": "",
+      "staging": {
+        "action_description": "He told them the government wanted to sell the tower for scrap.",
+        "ideas_per_shot": 1,
+        "caption": "He told them the government wanted to sell the tower for scrap."
+      }
+    },
+    {
+      "shot_id": "SH05",
+      "shot_number": 5,
+      "shot_type": "MEDIUM_ACTION",
+      "duration_sec": 4.5,
+      "purpose": "ESCALATION",
+      "story_beat_id": "BEAT_05_ESCALATION",
+      "script_line": "One dealer believed him, paid the bribe, and handed over the money.",
+      "camera_is_pov": false,
+      "location_id": "LOC_GENERIC",
+      "visible_state": "",
+      "staging": {
+        "action_description": "One dealer believed him, paid the bribe, and handed over the money.",
+        "ideas_per_shot": 1,
+        "caption": "One dealer believed him, paid the bribe, and handed over the money."
+      }
+    },
+    {
+      "shot_id": "SH06",
+      "shot_number": 6,
+      "shot_type": "MEDIUM_ACTION",
+      "duration_sec": 4.5,
+      "purpose": "ESCALATION",
+      "story_beat_id": "BEAT_06_ESCALATION",
+      "script_line": "Lustig took the cash and left Paris on the very next train.",
+      "camera_is_pov": false,
+      "location_id": "LOC_GENERIC",
+      "visible_state": "",
+      "staging": {
+        "action_description": "Lustig took the cash and left Paris on the very next train.",
+        "ideas_per_shot": 1,
+        "caption": "Lustig took the cash and left Paris on the very next train."
+      }
+    },
+    {
+      "shot_id": "SH07",
+      "shot_number": 7,
+      "shot_type": "TWIST_REVEAL",
+      "duration_sec": 4.5,
+      "purpose": "TWIST",
+      "story_beat_id": "BEAT_07_TWIST",
+      "script_line": "Nobody reported the crime, because the victim was too embarrassed.",
+      "camera_is_pov": false,
+      "location_id": "LOC_GENERIC",
+      "visible_state": "",
+      "staging": {
+        "action_description": "Nobody reported the crime, because the victim was too embarrassed.",
+        "ideas_per_shot": 1,
+        "caption": "Nobody reported the crime, because the victim was too embarrassed."
+      }
+    },
+    {
+      "shot_id": "SH08",
+      "shot_number": 8,
+      "shot_type": "PAYOFF_WIDE",
+      "duration_sec": 4.5,
+      "purpose": "PAYOFF",
+      "story_beat_id": "BEAT_08_PAYOFF",
+      "script_line": "So Lustig came back to Paris and tried to sell the tower a second time.",
+      "camera_is_pov": false,
+      "location_id": "LOC_GENERIC",
+      "visible_state": "",
+      "staging": {
+        "action_description": "So Lustig came back to Paris and tried to sell the tower a second time.",
+        "ideas_per_shot": 1,
+        "caption": "So Lustig came back to Paris and tried to sell the tower a second time."
+      }
+    }
+  ],
+  "total_duration_sec": 36.0,
+  "script_sha256": "29863d4cd0618391d596eb78cc7f33a2585cc394f9188df9b2ef0c5c69ee348a"
+}

@@ -1,0 +1,49 @@
+# AUDIT — Master Prompt §1–17 đối chiếu code thật V5.1
+
+- Upstream: `~/workspace/video-upstream/`, head `c4832c8`, ~2.090 file.
+- Ngày audit: 2026-11-11. Mọi đường dẫn dưới đây đều đã kiểm tra bằng
+  `grep`/`python3 -c import` trên bản clone này, không đoán.
+- Trạng thái dùng 5 mức: **WORKING** (chạy được ở đây) /
+  **PARTIALLY WORKING** (có nhưng thiếu hoặc sai) / **BROKEN** (có code
+  nhưng lỗi khi chạy) / **DISCONNECTED** (có nhưng không nối vào luồng) /
+  **MISSING** (không có).
+
+## Bảng 5 trạng thái — component thật
+
+| Component | Trạng thái | Bằng chứng |
+|---|---|---|
+| `pipeline/studio_api.py` — backend HTTP | PARTIALLY WORKING | Stdlib `ThreadingHTTPServer`, `127.0.0.1:8787` (dòng 2712–2715). Endpoints thật: `POST /api/v3/story-director`, `/api/v1/studio-script`, `/api/story-world`, `/api/v42|v5/test-submission`, `/api/settings/gemini`, `/api/settings/openrouter`, `/api/review-content`, `/api/review`, `/api/render`, `GET /health`, `/api/health`, `/api/memes`, `/api/memes/audio/*`, `/api/status?id=`, `/videos/{id}/{file}`. `/api/render` kiểm tra `script_hash` (sha256, dòng ~2614), trả `{id, status: queued}` 202, chạy worker thread (`worker`/`variants_worker`/`final_worker`). Chưa có endpoint production mới `/api/production/*` — đó là phần `ai_clip_studio/server.py` thêm vào. |
+| `pipeline/studio_script_v1_parser.py` | WORKING | `StudioScriptV1Parser.parse()` (dòng 152), `validate_production_rules()` (478). Đã import + parse thật trên VM này: 1 scene từ script test. |
+| `pipeline/meme_resolver.py` + `assets/memes/catalog.json` | WORKING | `MemeSoundResolver.resolve()` (dòng 88). Catalog 188 meme, 188 file mp3 có thật. Đã resolve thật: `VINE BOOM SOUND` → `meme_001`, `exists=True`. Lưu ý: không truyền `catalog_path` thì resolver dùng đường dẫn Windows `D:\Agent` và báo `MISSING_ASSET` — orchestrator luôn truyền đường dẫn thật. |
+| `pipeline/universal/v5_story_director.py` (Gemini) | BROKEN (ở VM này) | `V5UniversalStoryDirector(model_name="gemini-flash-lite-latest")`, key từ `GEMINI_API_KEY` (dòng 90–91), hash script sha256 16 ký tự (101–102), fallback `_autonomous_semantic_extraction` (265). Import thất bại ở đây: `ModuleNotFoundError: No module named 'pydantic'`, và `GEMINI_API_KEY` chưa set. Trên máy Windows của Mai (đủ deps + key) thì component này là WORKING. |
+| `pipeline/universal/` — story intelligence, sfx, voice, world | PARTIALLY WORKING | `sfx/` có `sound_director.py`, `sound_registry.py`, `opportunity_detector.py`, `semantic_tagger.py`, `repetition_guard.py`; `voice/` có `vietneu_adapter.py`, `timeline_planner.py` (`VoiceLedTimelinePlanner`), `casting_director.py`, `speaker_registry.py`; `world_engine/` có `universal_world_renderer.py`; `character_engine/` có rig/IK. Nhưng nhiều module import `pydantic`/`vieneu` nên không chạy được trên VM này. |
+| Motion Canvas projects | PARTIALLY WORKING | `motioncanvas/contract/` (`CharacterDNA.ts`, `ProductionScenePackage.ts`, `VisualStyleBible.ts`), `motioncanvas/three/` (`EdoBridgeWorld.ts`, `EdoHouseWorld.ts`, `ModernLabWorld.ts`, `UniversalWorldEngine.ts`, `ThreeWorldAdapter.ts`), `motioncanvas/scenes/` (chỉ có scene Odeonsplatz/Episode01). Không có project Motion Canvas dùng chung cho mọi kịch bản — mỗi episode có package riêng. |
+| Three.js modules | PARTIALLY WORKING | Có 3 world thật (Edo bridge/house, Modern lab) + adapter. Chưa đủ 10 environment như tài liệu nói, và việc chọn world theo script chưa được kiểm chứng end-to-end ở đây. |
+| VieNeu-TTS integration | BROKEN (ở VM này) | `pipeline/universal/voice/vietneu_adapter.py:20` — `from vieneu import Vieneu`, `OnnxV3LiteEngine`, mode `v3nano`, validate WAV + speed ratio. Package `vieneu` **không có** trên VM này (`ModuleNotFoundError`). Ngoài ra `pipeline/studio_api.py` có fallback `_edge_tts_save` (edge_tts, giọng mặc định `vi-VN-NamMinhNeural`) và `_generate_fallback_audio` (tone tổng hợp) — đây là đường fallback tiếng Anh/tone, vi phạm §6 nếu dùng lặng lẽ. Orchestrator KHÔNG dùng fallback này: thiếu VieNeu thì stage 9 FAIL. |
+| `pipeline/drive_sync.py` | PARTIALLY WORKING | Upload tới đúng root `1HFOuxsP6ir_vLiMFX0o7VMyuersAYVSm` (dòng 12), nhưng dùng CLI `gdrive` (không có trên VM này), cấu trúc phẳng (không có 01..06), không verify kích thước, không dedup. `ai_clip_studio/drive_uploader.py` thay bằng `hatch_gws_cli` + cấu trúc 01..06 + verify + dedup. |
+| `upload_all_to_drive.py` | DISCONNECTED | Upload tới các folder khác (`10CkwvKY…`, `1YBE5h894…`, `1DyW0_hGND…`), chỉ dùng cho test Gemini scene, không nối vào pipeline sản xuất. Không dùng nữa. |
+| Frontend Vite/Next.js `sites/ai-clip-studio/` | PARTIALLY WORKING | Đây là **Next.js 16** (không phải Vite dev server 5173 — xem FRONTEND_WIRING.md), `app/page.tsx` 1154 dòng, `app/api/*/route.ts` proxy sang `RENDER_BACKEND_URL` mặc định `http://127.0.0.1:8787`. `components/PreflightPanel.tsx` 350 dòng. Chưa chạy được trên VM này (cần `node >=22.13`, `pnpm`/wrangler). |
+| Render workers / job infra | PARTIALLY WORKING | `studio_api.py`: `STATE` dict in-memory, `JOBS = output/studio-jobs`, `RENDER_LOCK`/`TTS_LOCK`, `worker`/`final_worker`/`variants_worker` thread. `scripts/production_render_service.mjs:137` hard-code Chrome Windows `C:\Program Files\Google\Chrome\Application\chrome.exe` — **không chạy được trên Linux**. Job state không persistent (mất khi restart server) — orchestrator lưu `status.json` trên đĩa để sửa điểm này. |
+| `pipeline/universal/v5_audio_director.py` | PARTIALLY WORKING | `V5UniversalAudioDirector.compose_scene_audio` (dòng 146), stems, ducking. Nhưng có bug cắt lặng lẽ (đã có patch 02, chưa áp dụng — cần Mai duyệt). |
+| `pipeline/video_quality_gate.py` | WORKING | `probe()` bằng ffprobe, `run()` — đã dùng trong vòng tự đánh giá Eiffel. |
+| `V5_GENERALIZATION_TEST_REPORT.md` | DISCONNECTED (bằng chứng cũ) | Báo cáo 2026-11-08: 3 script chưa thấy (Thượng Hải 1930, Chợ Rẫy ER, Sahara 2050) đều PASS trên máy Windows, engine đóng băng ở commit `a536fae58`. Đây là bằng chứng lịch sử, không phải test chạy lại được ở đây. |
+
+## Đối chiếu 17 mục Master Prompt
+
+1. **Universal Script Input** — PARTIALLY WORKING. Free-form: `v5_story_director.analyze_script()` + fallback semantic; STUDIO SCRIPT V1: parser thật (WORKING). Chưa có `ProductionRequest` bất biến — **đã thêm** `ai_clip_studio/production_request.py` (sha256 đầy đủ 64 ký tự, hash chain 6 stage).
+2. **Gemini Universal Story Director** — BROKEN ở VM này (pydantic + key thiếu); WORKING trên máy Mai nếu đủ deps. Orchestrator gọi thật qua `upstream.gemini_story_plan()`, thiếu thì FAIL.
+3. **Universal Character System** — PARTIALLY WORKING. Rig 2-bone IK, 5 archetype, `CharacterDNA.ts` có thật; nhưng `headRatio` có 3 giá trị mâu thuẫn (schema 0.20–0.35, archetype 0.142–0.155, `compile_v2` mặc định 0.42) — patch 01 đã sửa, chưa áp dụng, cần Mai duyệt.
+4. **Universal Environment System** — PARTIALLY WORKING. 3 world Three.js thật + `UniversalWorldEngine.ts`; chưa chứng minh chọn đúng environment cho mọi script ở đây.
+5. **Real Cinematic Rendering** — BROKEN ở VM này (Chrome Windows). Motion Canvas + Three.js là renderer được duyệt; Python/FFmpeg chỉ orchestrate/encode. Không slideshow thay thế — orchestrator FAIL ở stage 14 khi không có renderer.
+6. **Vietnamese Voice Pipeline** — BROKEN ở VM này (`vieneu` thiếu). Có registry 25+ giọng VieNeu trong `studio_api.py:50-60`, emotion tags, `VietNeuTTSAdapter` validate WAV. Fallback edge_tts/tone tồn tại nhưng orchestrator không dùng.
+7. **Universal Audio Event Engine** — PARTIALLY WORKING. Meme resolver + sfx director/registry có thật; **đã thêm** `ai_clip_studio/audio_events.py` (map event→SFX, luật meme, stems, ducking −14 dB) để có một chỗ kiểm chứng được.
+8. **Dynamic Timeline Engine** — BROKEN trong code gốc (khóa 15s/30s, cắt lặng lẽ — `studio_api.py:1973`). Patch 02 đã sửa, chưa áp dụng. **Đã thêm** `ai_clip_studio/timeline.py` (đo WAV thật, không cap, không tăng tốc, guard cắt → raise).
+9. **Frontend Preview and Control Panel** — PARTIALLY WORKING. Next.js app có đủ control (script, analyze, render, status, review, preflight panel); nhưng `PreflightPanel`/`app/api/preflight/route.ts` hardcode luật Episode01 (đúng 8 scene, đúng 4 nhân vật, Munich 1914, 3 meme cố định) — **không dùng chung được cho mọi kịch bản**, cần sửa (xem FRONTEND_WIRING.md §4).
+10. **Immutable Script Snapshot** — MISSING trong code gốc (chỉ có hash check ở `/api/render`, không có chain 6 stage). **Đã thêm** `production_request.py` + snapshot file trong orchestrator stage 2.
+11. **Automatic Draft Production** — PARTIALLY WORKING. `/api/render` + worker đã làm gần đủ các bước trên máy Windows; chưa có orchestrator 19 stage thống nhất — **đã thêm** `ai_clip_studio/orchestrator.py`.
+12. **Google Drive Auto-Upload** — PARTIALLY WORKING. `drive_sync.py` upload phẳng tới đúng root; chưa có cấu trúc 01..06, verify, dedup, retry — **đã thêm** `ai_clip_studio/drive_uploader.py`.
+13. **Human Approval Before Master** — MISSING trong code gốc (không có endpoint approve-master). **Đã thêm** `POST /api/production/jobs/{id}/approve-master` trong `server.py`; master chỉ được upload khi `allow_master=True`.
+14. **Quality Gates** — PARTIALLY WORKING. `video_quality_gate.py` + `youtube_16x9/pipeline/evaluate_16x9.py` + rubric 8.0/10 có thật; chưa nối thành gate chặn render trong backend gốc.
+15. **Generalization Tests** — PARTIALLY WORKING (bằng chứng cũ 2026-11-08, 3 script PASS trên Windows). **Đã chạy lại** trên VM này: xem `GENERALIZATION_TESTS.md` (mode A fail thật ở Gemini, mode B 19/19 stage với test doubles).
+16. **Implementation Strategy** — Đang làm theo đúng hướng này: audit trước, giữ code cũ, thêm module mới, không push khi chưa có quyền.
+17. **Required Final Acceptance Test** — CHƯA CHẠY ĐƯỢC end-to-end ở đây (kẹt ở Gemini → TTS → render). Trạng thái cuối xem `STATUS.md`.

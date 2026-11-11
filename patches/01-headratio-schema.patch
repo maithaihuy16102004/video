@@ -1,0 +1,31 @@
+--- a/V5_PRODUCTION_SCENE_SCHEMA.json
++++ b/V5_PRODUCTION_SCENE_SCHEMA.json
+@@ -48,7 +48,7 @@
+             "type": "object",
+             "required": ["headRatio", "standingHeightPx", "shoulderWidthPx", "limbThicknessPx"],
+             "properties": {
+-              "headRatio": { "type": "number", "minimum": 0.20, "maximum": 0.35 },
++              "headRatio": { "type": "number", "minimum": 0.142, "maximum": 0.155 },
+               "standingHeightPx": { "type": "number", "minimum": 200, "maximum": 320 },
+               "shoulderWidthPx": { "type": "number", "minimum": 35, "maximum": 75 },
+               "limbThicknessPx": { "type": "number", "minimum": 7, "maximum": 16 }
+--- a/pipeline/universal/v5_story_director.py
++++ b/pipeline/universal/v5_story_director.py
+@@ -1513,7 +1513,7 @@
+         char_id = lead_actor.get("actor_id") or lead_actor.get("id") or "haru"
+         char_dna = lead_actor.get("dna", {})
+         char_name = char_dna.get("name") or lead_actor.get("name") or "Haru"
+-        head_ratio = char_dna.get("proportions", {}).get("headRatio", 0.42)
++        head_ratio = char_dna.get("proportions", {}).get("headRatio", 0.15)
+         held_prop = char_dna.get("heldProps", {}).get("rightHand", "letter_envelope")
+ 
+         scene_world = pkg.get("scene_world", {})
+@@ -1665,7 +1665,7 @@
+                 "B. CHARACTER REFERENCE PROMPT (Stickman 2D Rig):\n"
+                 f"Archetype: Documentary Blob-Head ({char_name}).\n"
+                 "Identity Specification:\n"
+-                f"- Head-to-body ratio: 40–45% of total height (oversized round head, headRatio: {head_ratio:.2f}, standing height 300px, 44px shoulders, 8.5px thin simplified limbs).\n"
++                f"- Head-to-body ratio: 14–16% of total height (V51 standard, headRatio: {head_ratio:.2f}, 6.5–7.0 heads tall, never chibi).\n"
+                 "- Face: Minimalist vector aesthetic. Two small dot eyes with specular white catchlights, consistent spacing and size.\n"
+                 "- Nose: Deliberately omitted (NO NOSE).\n"
+                 "- Eyebrows: Single thin line with emotional angle modulation (10 canonical expressions: neutral, curious, happy, sad, angry, shocked, afraid, confused, determined, exhausted).\n"
