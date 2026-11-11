@@ -80,3 +80,4 @@ pip install edge-tts              # giọng đọc tiếng Việt (mặc định
 - Muốn clone giọng cụ thể: `pip install coqui-tts` (cần GPU thì mượt hơn).
 - Sinh kịch bản bằng LLM là **tùy chọn**: đặt `DEEPSEEK_API_KEY` /
   `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`; không có key vẫn chạy bằng template.
+# video
