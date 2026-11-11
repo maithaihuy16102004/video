@@ -24,6 +24,13 @@ def _pose(char, **kw):
     return char
 
 
+def _s(char, px):
+    """Scale a pixel offset written for the reference height (560 px) to
+    this character's height, so primitives work for a 400 px child as
+    well as a 560 px adult (PREMIUM_STICKMAN v3: one proportion system)."""
+    return px * float(char.H) / 560.0
+
+
 def walk_to(char, from_x, to_x, duration, ground_y, height=560):
     """Walk from from_x to to_x over `duration` seconds. Returns f(t)->char."""
     def fn(t):
@@ -36,10 +43,10 @@ def walk_to(char, from_x, to_x, duration, ground_y, height=560):
         pose["facing"] = 1 if to_x >= from_x else -1
         _pose(char, **pose)
         ph = phase
-        char.foot_target_l = (x + 65 * math.sin(ph),
-                              ground_y - 45 * max(0, math.cos(ph)))
-        char.foot_target_r = (x - 65 * math.sin(ph),
-                              ground_y - 45 * max(0, -math.cos(ph)))
+        char.foot_target_l = (x + _s(char, 65) * math.sin(ph),
+                              ground_y - _s(char, 45) * max(0, math.cos(ph)))
+        char.foot_target_r = (x - _s(char, 65) * math.sin(ph),
+                              ground_y - _s(char, 45) * max(0, -math.cos(ph)))
         char.hand_target_l = None
         char.hand_target_r = None
         return char
@@ -71,7 +78,8 @@ def point_at(char, target, duration):
         u = smoothstep(t / max(duration, 0.01))
         hx, hy = char.pose["root_x"], char.pose["root_y"]
         tx, ty = target
-        char.hand_target_r = (lerp(hx + 60, tx, u), lerp(hy - 140, ty, u))
+        char.hand_target_r = (lerp(hx + _s(char, 60), tx, u),
+                              lerp(hy - _s(char, 140), ty, u))
         char.set_pose(head_look=-0.35 * u, torso_lean=-0.06 * u)
         return char
     return fn
@@ -81,7 +89,9 @@ def wave(char, duration, freq=3.0):
     """Wave the right hand side to side."""
     def fn(t):
         hx, hy = char.pose["root_x"], char.pose["root_y"]
-        char.hand_target_r = (hx + 90, hy - 260 + 25 * math.sin(t * 2 * math.pi * freq / duration * 2))
+        char.hand_target_r = (hx + _s(char, 90),
+                              hy - _s(char, 260)
+                              + _s(char, 25) * math.sin(t * 2 * math.pi * freq / duration * 2))
         return char
     return fn
 
@@ -91,7 +101,7 @@ def reach_to(char, target, duration, hand="r"):
     def fn(t):
         u = smoothstep(t / max(duration, 0.01))
         hx, hy = char.pose["root_x"], char.pose["root_y"]
-        sx, sy = hx + 60, hy - 140
+        sx, sy = hx + _s(char, 60), hy - _s(char, 140)
         if hand == "r":
             char.hand_target_r = (lerp(sx, target[0], u), lerp(sy, target[1], u))
         else:
@@ -108,10 +118,10 @@ def give_to(giver, receiver, prop, duration):
         gx, gy = giver.pose["root_x"], giver.pose["root_y"]
         rx, ry = receiver.pose["root_x"], receiver.pose["root_y"]
         mid_x = (gx + rx) / 2
-        mid_y = gy - 180 - 40 * math.sin(u * math.pi)
-        giver.hand_target_r = (lerp(gx + 60, mid_x, u), mid_y)
-        receiver.hand_target_l = (lerp(rx - 60, mid_x, u), mid_y)
-        prop["x"], prop["y"] = mid_x, mid_y + 10
+        mid_y = gy - _s(giver, 180) - _s(giver, 40) * math.sin(u * math.pi)
+        giver.hand_target_r = (lerp(gx + _s(giver, 60), mid_x, u), mid_y)
+        receiver.hand_target_l = (lerp(rx - _s(receiver, 60), mid_x, u), mid_y)
+        prop["x"], prop["y"] = mid_x, mid_y + _s(giver, 10)
         return giver, receiver, prop
     return fn
 
@@ -132,10 +142,11 @@ def cover_face(char, duration):
     """Both hands to the face (embarrassment / grief)."""
     def fn(t):
         u = smoothstep(t / max(duration, 0.01))
-        hx, hy = char.pose["root_x"], char.pose["root_y"]
-        head_y = hy - 180 - 60
-        char.hand_target_l = (hx - 30, head_y - 40 * u)
-        char.hand_target_r = (hx + 30, head_y - 40 * u)
+        head_x, head_y = char.joints()["head"]
+        char.hand_target_l = (head_x - _s(char, 30),
+                              head_y - _s(char, 40) * u)
+        char.hand_target_r = (head_x + _s(char, 30),
+                              head_y - _s(char, 40) * u)
         char.set_pose(head_look=0.15 * u, torso_lean=0.18 * u)
         return char
     return fn
@@ -153,7 +164,8 @@ def sit_down(char, duration, ground_y):
     """Lower the root and bend the knees into a seated pose."""
     def fn(t):
         u = smoothstep(t / max(duration, 0.01))
-        char.set_pose(root_y=lerp(char.pose["root_y"], ground_y - 150, u),
+        char.set_pose(root_y=lerp(char.pose["root_y"],
+                                  ground_y - _s(char, 150), u),
                       thigh_l=lerp(0.0, 1.4, u), thigh_r=lerp(0.0, 1.4, u),
                       knee_l=lerp(0.1, 1.5, u), knee_r=lerp(0.1, 1.5, u))
         return char

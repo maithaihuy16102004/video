@@ -17,6 +17,8 @@ import math
 
 # --- V51 proportions (fractions of total height) ---
 HEAD_RATIO = 0.146
+HEAD_RATIO_MIN = 0.142  # V51 standard range; the schema allows 0.20-0.35
+HEAD_RATIO_MAX = 0.155  # but the rig locks to 0.142-0.155 (see STYLE_LOCK)
 TORSO_FRAC = 0.32
 UPPER_LEG_FRAC = 0.23
 LOWER_LEG_FRAC = 0.23
@@ -25,16 +27,25 @@ LOWER_ARM_FRAC = 0.19
 SHOULDER_HALF_FRAC = 0.09   # half shoulder width
 HIP_HALF_FRAC = 0.06
 
+# Body-variant width scale. ONE scale multiplies torso width AND limb
+# width together, so a sturdy character is uniformly thicker, never a
+# thin arm on a wide torso (PREMIUM_STICKMAN v3 line rule).
+BODY_WIDTH_SCALE = {"slim": 0.9, "standard": 1.0, "sturdy": 1.15}
+
 
 def ik_2bone(ax, ay, tx, ty, l1, l2, bend=+1):
     """Two-bone IK: anchor (ax,ay), target (tx,ty), lengths l1,l2.
     bend=+1 puts the middle joint on one side of the anchor->target line,
     bend=-1 on the other. Returns (mx,my) middle joint, clamped to reach."""
     dx, dy = tx - ax, ty - ay
-    d = math.hypot(dx, dy)
-    d = max(1.0, min(d, l1 + l2 - 0.5))
+    raw_d = math.hypot(dx, dy)
+    if raw_d < 1e-6:
+        # Target on the anchor: no direction to bend toward. Put the
+        # middle joint straight down at l1 so bone lengths stay exact.
+        return ax, ay + l1
+    d = max(1.0, min(raw_d, l1 + l2 - 0.5))
     # unit vector anchor->target
-    ux, uy = dx / math.hypot(dx, dy), dy / math.hypot(dx, dy)
+    ux, uy = dx / raw_d, dy / raw_d
     # distance from anchor to the middle joint projected on the line
     a = (l1 * l1 - l2 * l2 + d * d) / (2 * d)
     h = math.sqrt(max(0.0, l1 * l1 - a * a))
@@ -70,7 +81,10 @@ class Stickman:
     """A V51 stickman. Pose is set per frame via `pose` dict, then `joints()`."""
 
     def __init__(self, height=560, suit="#172033", skin="#F3F0E8",
-                 hat="bowler", moustache=True, name="lustig"):
+                 hat="bowler", moustache=True, name="lustig",
+                 template="male", body_variant="standard",
+                 hair_style=None, glasses=False, cane=False,
+                 costume="none"):
         self.H = height
         self.head_r = HEAD_RATIO * height / 2
         self.torso = TORSO_FRAC * height
@@ -85,6 +99,19 @@ class Stickman:
         self.hat = hat
         self.moustache = moustache
         self.name = name
+        # PREMIUM_STICKMAN v3 identity (see animation/character_art.py).
+        # template: male | female | child | elderly. body_variant scales
+        # torso/limb widths TOGETHER (slim 0.9 / standard 1.0 / sturdy
+        # 1.15) so line thickness stays uniform within one character.
+        self.template = template
+        self.body_variant = body_variant
+        self.width_scale = BODY_WIDTH_SCALE.get(body_variant, 1.0)
+        # hair_style: None (use template default) | short | long | tuft.
+        self.hair_style = hair_style
+        self.glasses = glasses
+        self.cane = cane
+        # costume: "none" | "dress" (dress extends the torso A-line).
+        self.costume = costume
         # pose defaults (angles in radians; + = forward / toward facing)
         self.pose = {
             "root_x": 960.0, "root_y": 900.0, "facing": 1,
@@ -115,6 +142,8 @@ class Stickman:
             solution never stretches a bone (V51 bone-length invariant)."""
             dx, dy = tx - ax, ty - ay
             d = math.hypot(dx, dy)
+            if d < 1e-6:
+                return ax, ay
             limit = reach * 0.98
             if d > limit:
                 return ax + dx / d * limit, ay + dy / d * limit
@@ -194,3 +223,147 @@ def walk_pose(phase, stride=0.55, amp=0.5):
         "bob": 10.0 * abs(c),
         "torso_lean": 0.08,
     }
+
+
+# ---------------------------------------------------------------------------
+# Rig validation helpers (PREMIUM_STICKMAN v3, §3).
+#
+# These are pure checks on a joint map: they never move a joint, so a
+# test can assert them on every frame of a timeline. A violation is a
+# string; an empty list means the frame is clean.
+# ---------------------------------------------------------------------------
+
+def _dist(a, b):
+    return math.hypot(b[0] - a[0], b[1] - a[1])
+
+
+def bone_lengths(joints):
+    """Bone lengths of a joint map: torso, both legs, both arms."""
+    return {
+        "torso": _dist(joints["hip"], joints["shoulder"]),
+        "upper_leg_l": _dist(joints["hip"], joints["knee_l"]),
+        "lower_leg_l": _dist(joints["knee_l"], joints["foot_l"]),
+        "upper_leg_r": _dist(joints["hip"], joints["knee_r"]),
+        "lower_leg_r": _dist(joints["knee_r"], joints["foot_r"]),
+        "upper_arm_l": _dist(joints["shoulder"], joints["elbow_l"]),
+        "lower_arm_l": _dist(joints["elbow_l"], joints["hand_l"]),
+        "upper_arm_r": _dist(joints["shoulder"], joints["elbow_r"]),
+        "lower_arm_r": _dist(joints["elbow_r"], joints["hand_r"]),
+    }
+
+
+def expected_bone_lengths(char):
+    """Bone lengths a character of this height must have (from the rig)."""
+    return {
+        "torso": char.torso,
+        "upper_leg_l": char.u_leg, "lower_leg_l": char.l_leg,
+        "upper_leg_r": char.u_leg, "lower_leg_r": char.l_leg,
+        "upper_arm_l": char.u_arm, "lower_arm_l": char.l_arm,
+        "upper_arm_r": char.u_arm, "lower_arm_r": char.l_arm,
+    }
+
+
+def check_bone_lengths(joints, char, tol=2.0):
+    """Every bone must keep its rig length (no stretching between frames)."""
+    got = bone_lengths(joints)
+    want = expected_bone_lengths(char)
+    return [f"bone {k} is {v:.1f}, expected {want[k]:.1f}"
+            for k, v in got.items() if abs(v - want[k]) > tol]
+
+
+def check_foot_contact(joints, ground_y, tol=3.0, stance=("l", "r")):
+    """Each stance foot must sit ON the ground line (not float, not sink).
+
+    A foot in the air is only legal mid-stride; callers pass the stance
+    foot/feet for the frame they check (e.g. the foot at phase 0 / pi).
+    """
+    bad = []
+    for side in stance:
+        fy = joints[f"foot_{side}"][1]
+        if fy < ground_y - tol:
+            bad.append(f"foot_{side} floats {ground_y - fy:.1f}px above ground")
+        elif fy > ground_y + tol:
+            bad.append(f"foot_{side} sinks {fy - ground_y:.1f}px below ground")
+    return bad
+
+
+def check_hand_contact(joints, hand, target, tol=3.0):
+    """A hand that must touch a prop (hold / give / take) must be at the
+    prop position within tolerance. ``hand`` is 'l' or 'r'."""
+    got = joints[f"hand_{hand}"]
+    d = _dist(got, target)
+    if d > tol:
+        return [f"hand_{hand} is {d:.1f}px from prop at {target}, "
+                f"expected within {tol}px"]
+    return []
+
+
+def validate_joints(joints, char, ground_y=None, tol=2.0):
+    """All rig invariants for one frame: bone lengths, and (when a ground
+    line is given) both feet planted. Returns a list of violations."""
+    bad = check_bone_lengths(joints, char, tol=tol)
+    if ground_y is not None:
+        bad += check_foot_contact(joints, ground_y, tol=max(tol, 3.0))
+    return bad
+
+
+def plant_feet(char, ground_y, stance="both"):
+    """Pin the stance foot/feet exactly onto ``ground_y`` via IK targets,
+    under the character's current root_x. ``stance``: 'both' | 'l' | 'r'.
+
+    Call this after set_pose for any standing pose: it guarantees the
+    feet touch the ground instead of floating a few px above it (the
+    old failure mode when root_y was rounded or bob was applied).
+    """
+    x = char.pose["root_x"]
+    spread = 0.06 * char.H
+    if stance in ("both", "l"):
+        char.foot_target_l = (x - spread, ground_y)
+    if stance in ("both", "r"):
+        char.foot_target_r = (x + spread, ground_y)
+    return char
+
+
+def head_track(char, target, max_angle=0.6):
+    """Turn the head toward ``target`` (x, y): set head_look to the angle
+    between the head and the target, clamped to +/-max_angle so the head
+    never snaps past its neck. Returns the applied angle."""
+    J = char.joints()
+    hx, hy = J["head"]
+    dx, dy = target[0] - hx, target[1] - hy
+    angle = math.atan2(dx, -dy)  # 0 = straight ahead/up, + = toward facing
+    angle = max(-max_angle, min(max_angle, angle))
+    char.set_pose(head_look=angle)
+    return angle
+
+
+def interp_pose(pose_a, pose_b, u):
+    """Smoothstep-interpolated pose between two pose dicts.
+
+    Numeric values are lerped; ``facing`` flips at the midpoint (a head
+    never half-turns). Keys present in only one pose keep their value.
+    """
+    u = smoothstep(u)
+    out = dict(pose_a)
+    for key, vb in pose_b.items():
+        va = pose_a.get(key, vb)
+        if key == "facing":
+            out[key] = vb if u >= 0.5 else va
+        elif isinstance(va, (int, float)) and isinstance(vb, (int, float)):
+            out[key] = lerp(va, vb, u)
+        else:
+            out[key] = vb if u >= 0.5 else va
+    return out
+
+
+def pose_at(keyframes, t):
+    """Pose at time ``t`` from ``[(time, pose_dict), ...]`` keyframes,
+    smoothstep-interpolated between the bracketing keyframes."""
+    if t <= keyframes[0][0]:
+        return dict(keyframes[0][1])
+    if t >= keyframes[-1][0]:
+        return dict(keyframes[-1][1])
+    for (t0, p0), (t1, p1) in zip(keyframes, keyframes[1:]):
+        if t0 <= t <= t1:
+            return interp_pose(p0, p1, (t - t0) / (t1 - t0))
+    return dict(keyframes[-1][1])

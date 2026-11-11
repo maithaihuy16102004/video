@@ -303,3 +303,320 @@ def apply_camera(img, shot, focus_xy=None):
 
 def shot_diversity_report(shots):
     return CameraPlanner.shot_diversity_report(shots)
+
+
+# ---------------------------------------------------------------------------
+# Shot Director (§4) — staging that explains with images, not illustration.
+#
+# CameraPlanner picks shot TYPES from action cues. ShotDirector takes
+# those exact shots (1:1 — it NEVER adds shots to inflate a formal
+# camera score) and directs each one: what the audience must notice,
+# the main action, the emotion, the angle, the size, where the
+# characters stand, the lighting, how the camera moves, and the exact
+# cut point. All of it is driven by data — the segment plus an optional
+# scene package (location / time of day / mood / characters / props) —
+# never by a story, scene or character name.
+#
+# A shot's direction is a dict with exactly these 9 keys:
+#   attention_target, main_action, emotion, angle, shot_size,
+#   character_positions, lighting, camera_move, cut_point
+# ``camera_move`` also carries a ``camera_path`` (from/to camera
+# position+target in world units) so the 2.5D renderer can execute the
+# move with PerspectiveCamera.interpolate() — it is not a label.
+# ---------------------------------------------------------------------------
+ANGLES = (
+    "eye_level", "low_angle", "high_angle", "dutch",
+    "over_shoulder", "birds_eye",
+)
+
+CAMERA_MOVES = (
+    "static", "pan", "tilt", "dolly_in", "dolly_out",
+    "tracking", "crane_up", "arc",
+)
+
+EMOTIONS = (
+    "neutral", "tension", "relief", "surprise", "sadness",
+    "joy", "fear", "determination",
+)
+
+# angle per shot type (a look/search looks UP from low; an object insert
+# looks DOWN at the object; a reaction stays at eye level with the face)
+_ANGLE_BY_SHOT = {
+    "establishing": "high_angle",
+    "medium": "eye_level",
+    "close_up": "eye_level",
+    "extreme_close_up": "eye_level",
+    "over_the_shoulder": "over_shoulder",
+    "reaction": "eye_level",
+    "object_insert": "high_angle",
+    "tracking": "eye_level",
+    "shot_reverse_shot": "eye_level",
+}
+
+# size label per shot type
+_SIZE_BY_SHOT = {
+    "establishing": "wide",
+    "medium": "medium",
+    "close_up": "close_up",
+    "extreme_close_up": "extreme_close_up",
+    "over_the_shoulder": "medium",
+    "reaction": "close_up",
+    "object_insert": "close_up",
+    "tracking": "medium",
+    "shot_reverse_shot": "medium",
+}
+
+# default move per shot type; action/emotion can override it below
+_MOVE_BY_SHOT = {
+    "establishing": "dolly_in",
+    "medium": "static",
+    "close_up": "dolly_in",
+    "extreme_close_up": "static",
+    "over_the_shoulder": "static",
+    "reaction": "static",
+    "object_insert": "tilt",
+    "tracking": "tracking",
+    "shot_reverse_shot": "static",
+}
+
+_CUE_EMOTION_MAP = (
+    (("relief", "smile", "laugh", "happy", "joy", "nod"), "relief"),
+    (("surprise", "surprised"), "surprise"),
+    (("cry", "sad"), "sadness"),
+    (("fear", "worried", "scared"), "fear"),
+    (("emotion",), "tension"),
+)
+
+# lighting presets by time of day / mood — generic, from the scene
+# package, not from any story.
+_LIGHTING_PRESETS = {
+    ("night", "cold"): {"key": "cool_moon", "fill": "warm_lamp",
+                        "source": "street lamp + moonlight",
+                        "mood": "cold night, warm pools of lamp light"},
+    ("night", "warm"): {"key": "warm_lamp", "fill": "cool_moon",
+                        "source": "street lamp",
+                        "mood": "warm night, soft shadows"},
+    ("day", "cold"): {"key": "overcast_sun", "fill": "cool_sky",
+                      "source": "overcast daylight",
+                      "mood": "flat cool daylight"},
+    ("day", "warm"): {"key": "warm_sun", "fill": "cool_sky",
+                      "source": "low warm sun",
+                      "mood": "warm daylight, long shadows"},
+    ("interior", "warm"): {"key": "warm_lamp", "fill": "soft_window",
+                           "source": "lamps + window light",
+                           "mood": "warm interior"},
+    ("interior", "cold"): {"key": "cool_window", "fill": "warm_lamp",
+                           "source": "window light",
+                           "mood": "cool interior"},
+}
+
+# Default camera for camera_path (world units; matches renderer25d).
+_DEFAULT_CAM_POS = (0.0, 2.4, 12.0)
+_DEFAULT_CAM_TARGET = (0.0, 1.5, 0.0)
+
+
+def _emotion_for_segment(segment):
+    cues = _norm_cues(segment.get("action_cues"))
+    for keywords, emotion in _CUE_EMOTION_MAP:
+        if _has(cues, keywords):
+            return emotion
+    return "neutral"
+
+
+def _attention_for(shot, segment):
+    focus = shot.get("focus_target", "")
+    subject = shot.get("subject", "speaker")
+    if focus == "object":
+        return {"target": "object", "why": "the object is what the line "
+                "is about — the audience must see it, not the speaker"}
+    if focus == "subject_head":
+        return {"target": subject, "why": "the face carries the beat — "
+                "emotion is read from the eyes, not the words"}
+    if focus == "two_shot_center":
+        return {"target": "two_shot", "why": "the space between the two "
+                "characters is the story of this shot"}
+    return {"target": subject, "why": "the speaking character in their "
+            "environment"}
+
+
+def _positions_for(shot, scene_package):
+    """Generic staging positions, by role (speaker/receiver/object/
+    scene), never by character name. If the scene package gives world
+    positions for its characters, they are passed through as anchors."""
+    subject = shot.get("subject", "speaker")
+    shot_type = shot.get("shot_type", "medium")
+    positions = {}
+    if subject in ("two_shot", "receiver"):
+        positions = {"speaker": "left_third", "receiver": "right_third",
+                     "gap": "visible space between them"}
+    elif subject == "object":
+        positions = {"object": "centre_frame", "speaker": "soft_background"}
+    elif subject == "scene":
+        positions = {"scene": "full_frame"}
+    else:
+        positions = {subject: "rule_of_thirds_side"}
+    pkg_chars = (scene_package or {}).get("characters") or []
+    anchors = {}
+    for ch in pkg_chars:
+        if isinstance(ch, dict) and "world_pos" in ch:
+            anchors[ch.get("role", ch.get("name", "character"))] = \
+                ch["world_pos"]
+    if anchors:
+        positions["world_anchors"] = anchors
+    if shot_type in ("close_up", "reaction", "extreme_close_up"):
+        positions["headroom"] = "small"
+    return positions
+
+
+def _lighting_for(scene_package):
+    pkg = scene_package or {}
+    time_of_day = str(pkg.get("time_of_day", "day")).lower()
+    mood = str(pkg.get("mood", "warm")).lower()
+    preset = _LIGHTING_PRESETS.get((time_of_day, mood))
+    if preset is None:
+        preset = _LIGHTING_PRESETS.get(("day", mood)
+                                       ) or _LIGHTING_PRESETS[("day", "warm")]
+    out = dict(preset)
+    if pkg.get("weather"):
+        out["weather"] = str(pkg["weather"])
+    return out
+
+
+def _camera_path_for(move, shot):
+    """from/to camera position+target for the move, in world units.
+
+    Dolly-in moves the camera 15% closer along its forward axis;
+    tracking slides it sideways 1.5 units; crane rises 1.2 units;
+    arc orbits 1.5 units sideways while keeping the same target.
+    Static / pan / tilt keep the position and move only the target.
+    """
+    pos = list(_DEFAULT_CAM_POS)
+    tgt = list(_DEFAULT_CAM_TARGET)
+    to_pos, to_tgt = list(pos), list(tgt)
+    if move == "dolly_in":
+        for i in range(3):
+            to_pos[i] = pos[i] + (tgt[i] - pos[i]) * 0.15
+    elif move == "dolly_out":
+        for i in range(3):
+            to_pos[i] = pos[i] - (tgt[i] - pos[i]) * 0.15
+    elif move in ("tracking", "arc"):
+        to_pos[0] += 1.5
+        to_tgt[0] += 1.5
+    elif move == "crane_up":
+        to_pos[1] += 1.2
+    elif move == "pan":
+        to_tgt[0] += 2.0
+    elif move == "tilt":
+        to_tgt[1] += 1.0
+    return {"move": move, "from": {"position": pos, "target": tgt},
+            "to": {"position": to_pos, "target": to_tgt}}
+
+
+def _cut_point_for(shot, segment):
+    """When to cut, and why — the cut is motivated, not arbitrary."""
+    purpose = (shot.get("narrative_purpose") or "").lower()
+    cues = _norm_cues(segment.get("action_cues"))
+    if "exchange" in purpose or "changes hands" in purpose:
+        return {"at": "action_peak",
+                "reason": "cut the instant the object changes hands"}
+    if "reaction" in purpose or "emotional beat" in purpose:
+        return {"at": "reaction_beat",
+                "reason": "cut after the face has registered the emotion"}
+    if _has(cues, _CUE_MOVE):
+        return {"at": "action_peak",
+                "reason": "cut mid-movement, on the strongest stride"}
+    if _has(cues, _CUE_PICK):
+        return {"at": "action_peak",
+                "reason": "cut as the hand closes on the object"}
+    if "reveal" in purpose or "twist" in purpose:
+        return {"at": "reaction_beat",
+                "reason": "hold, then cut on the reveal landing"}
+    return {"at": "line_end",
+            "reason": "cut at the end of the spoken line"}
+
+
+class ShotDirector:
+    """Direct planned shots: staging, light, camera move, cut point.
+
+    ``direct(segments, scene_package)`` returns the SAME shots
+    ``CameraPlanner.plan()`` returns (same count, same durations,
+    same order), each enriched with a ``direction`` dict of 9 keys.
+    ``validate_direction()`` checks the contract; a shot without a
+    complete direction is not directable and must not render.
+    """
+
+    @staticmethod
+    def direct(segments, scene_package=None):
+        shots = CameraPlanner.plan(segments)
+        for shot, seg in zip(shots, _segments_per_shot(segments, shots)):
+            shot_type = shot.get("shot_type", "medium")
+            emotion = _emotion_for_segment(seg)
+            move = _MOVE_BY_SHOT.get(shot_type, "static")
+            cues = _norm_cues(seg.get("action_cues"))
+            if _has(cues, _CUE_MOVE) and shot_type in ("medium", "tracking"):
+                move = "tracking"
+            if emotion in ("surprise", "fear") and shot_type == "reaction":
+                move = "dolly_in"  # push in on the shock
+            shot["direction"] = {
+                "attention_target": _attention_for(shot, seg),
+                "main_action": (cues[0] if cues else
+                                ("speaking" if seg.get("speaker") else
+                                 "narration")),
+                "emotion": emotion,
+                "angle": _ANGLE_BY_SHOT.get(shot_type, "eye_level"),
+                "shot_size": _SIZE_BY_SHOT.get(shot_type, "medium"),
+                "character_positions": _positions_for(shot, scene_package),
+                "lighting": _lighting_for(scene_package),
+                "camera_move": _camera_path_for(move, shot),
+                "cut_point": _cut_point_for(shot, seg),
+            }
+        return shots
+
+    @staticmethod
+    def validate_direction(shots):
+        """Check every shot carries a complete, in-vocabulary direction.
+        Returns a list of problems (empty = all directable)."""
+        problems = []
+        required = ("attention_target", "main_action", "emotion", "angle",
+                    "shot_size", "character_positions", "lighting",
+                    "camera_move", "cut_point")
+        for i, shot in enumerate(shots or []):
+            d = shot.get("direction")
+            if not isinstance(d, dict):
+                problems.append(f"shot {i}: no direction")
+                continue
+            for key in required:
+                if key not in d:
+                    problems.append(f"shot {i}: missing direction.{key}")
+            if d.get("angle") not in ANGLES:
+                problems.append(f"shot {i}: bad angle {d.get('angle')!r}")
+            if d.get("emotion") not in EMOTIONS:
+                problems.append(f"shot {i}: bad emotion {d.get('emotion')!r}")
+            move = (d.get("camera_move") or {}).get("move")
+            if move not in CAMERA_MOVES:
+                problems.append(f"shot {i}: bad camera move {move!r}")
+            if d.get("shot_size") not in set(_SIZE_BY_SHOT.values()):
+                problems.append(f"shot {i}: bad size {d.get('shot_size')!r}")
+            if (d.get("cut_point") or {}).get("at") not in (
+                    "action_peak", "reaction_beat", "line_end"):
+                problems.append(f"shot {i}: bad cut point "
+                                f"{(d.get('cut_point') or {}).get('at')!r}")
+        return problems
+
+
+def _segments_per_shot(segments, shots):
+    """Map each planned shot back to its source segment (shots keep
+    their segment order, so a per-segment shot count walk suffices)."""
+    per_seg = []
+    for seg in segments or []:
+        n = len(_shots_for_segment(seg))
+        per_seg.extend([seg] * n)
+    return per_seg[:len(shots)]
+
+
+def direct(segments, scene_package=None):
+    return ShotDirector.direct(segments, scene_package)
+
+
+def validate_direction(shots):
+    return ShotDirector.validate_direction(shots)

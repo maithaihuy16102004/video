@@ -1,0 +1,6 @@
+{"file": "v4_original_line03_MAI_01", "expected": "Bên trong chiếc ví có một tấm ảnh đã cũ. Đúng lúc ấy, một cô gái hốt hoảng chạy tới.", "transcription_small": "Vên trong chiếc vĩ có một tấm ảnh đả củ, đúng lúc ấy một cô gái hốt khoảng chạy tới.", "wer_small": 0.25}
+{"file": "v4_original_line09_ronan", "expected": "May quá. Tôi cũng đang tìm người đánh rơi nó.", "transcription_small": "Mày quá, tôi cũng đang tìm người đánh rơi nó.", "wer_small": 0.1}
+{"file": "retake_line03_MAI_01", "expected": "Bên trong chiếc ví có một tấm ảnh đã cũ. Đúng lúc ấy, một cô gái hốt hoảng chạy tới.", "transcription_small": "Bên trong chiếc vĩ có một tấm ảnh đả cũ, đúng lúc ấy, một cô gái hốt khoảng chạy tới.", "wer_small": 0.15}
+{"file": "retake_line03_MAI_03", "expected": "Bên trong chiếc ví có một tấm ảnh đã cũ. Đúng lúc ấy, một cô gái hốt hoảng chạy tới.", "transcription_small": "Bên tròng chiếc vĩ có một tấm ảnh đả cụ đúng lúc ấy một cô gái hút khoảng chạy tới.", "wer_small": 0.3}
+{"file": "retake_line09_ronan", "expected": "May quá. Tôi cũng đang tìm người đánh rơi nó.", "transcription_small": "Mày quá, tôi cũng đang tìm người đánh rơi nó.", "wer_small": 0.1}
+{"file": "retake_line09_MAI_03", "expected": "May quá. Tôi cũng đang tìm người đánh rơi nó.", "transcription_small": "Mày quá, tôi cũng đang tìm người đánh rơi nó.", "wer_small": 0.1}

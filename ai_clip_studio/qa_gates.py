@@ -112,12 +112,18 @@ __all__ = [
     "CREATIVE_WEIGHTS",
     "CREATIVE_PASS_TOTAL",
     "CREATIVE_PASS_MIN",
+    "CHARACTER_ART_CRITERIA",
+    "CHARACTER_ART_WEIGHTS",
+    "CHARACTER_ART_PASS_TOTAL",
+    "CHARACTER_ART_PASS_MIN",
     "VOICE_UNVERIFIED_CAP",
     "CheckResult",
     "TechnicalGateResult",
     "CreativeGateResult",
+    "CharacterArtGateResult",
     "TechnicalGate",
     "CreativeGate",
+    "CharacterArtGate",
     "combine",
     "rescore_old",
     "probe_video",
@@ -165,6 +171,44 @@ CREATIVE_WEIGHTS = {
     "audio_experience": 0.07,
     "subtitle_readability": 0.05,
 }
+
+# ---------------------------------------------------------------------------
+# Character Art Gate (PREMIUM_STICKMAN v3, independent of Technical QA).
+#
+# The creative criterion "character_art" above is a single 0-10 score
+# inside the creative gate; this gate judges the CHARACTER DESIGN
+# itself, from the design sheet, on 8 sub-criteria. It is independent:
+# a technical PASS can never compensate for a bad character design, and
+# a video can never reach DRAFT_PASSED_QA while this gate is not
+# CHARACTER_ART_PASS. Until Mai (the human reviewer) approves the
+# design sheet, the status is CHARACTER_ART_REVIEW_REQUIRED -- the gate
+# never invents a PASS from scores alone.
+# ---------------------------------------------------------------------------
+
+CHARACTER_ART_CRITERIA = (
+    "silhouette",
+    "proportion",
+    "line_quality",
+    "joint_quality",
+    "expression",
+    "style_consistency",
+    "small_size_readability",
+    "animation_compatibility",
+)
+
+CHARACTER_ART_WEIGHTS = {
+    "silhouette": 0.18,
+    "proportion": 0.18,
+    "line_quality": 0.14,
+    "joint_quality": 0.14,
+    "expression": 0.12,
+    "style_consistency": 0.10,
+    "small_size_readability": 0.07,
+    "animation_compatibility": 0.07,
+}
+
+CHARACTER_ART_PASS_TOTAL = 8.0
+CHARACTER_ART_PASS_MIN = 7.0
 
 # Evidence that is FORBIDDEN for cinematography / art criteria (rule b).
 # These measure the container or the signal, never the art. If any of
@@ -272,6 +316,38 @@ class CreativeGateResult:
             "weighted_total": self.weighted_total,
             "reasons": self.reasons,
             "capped": self.capped,
+        }
+
+
+@dataclass
+class CharacterArtGateResult:
+    """Result of the independent Character Art Gate.
+
+    status: CHARACTER_ART_PASS | CHARACTER_ART_FAIL |
+        CHARACTER_ART_REVIEW_REQUIRED.
+    ``human_approved`` records whether Mai approved the design sheet;
+    without it the gate can never PASS, whatever the scores say.
+    """
+    status: str
+    # sub-criterion -> score 0..10, or None when evidence is missing.
+    scores: dict[str, float | None] = field(default_factory=dict)
+    weighted_total: float | None = None
+    reasons: dict[str, str] = field(default_factory=dict)
+    design_sheet: dict = field(default_factory=dict)
+    human_approved: bool = False
+
+    @property
+    def passed(self) -> bool:
+        return self.status == "CHARACTER_ART_PASS"
+
+    def to_dict(self) -> dict:
+        return {
+            "status": self.status,
+            "scores": self.scores,
+            "weighted_total": self.weighted_total,
+            "reasons": self.reasons,
+            "design_sheet": self.design_sheet,
+            "human_approved": self.human_approved,
         }
 
 
@@ -848,9 +924,129 @@ class CreativeGate:
 # ---------------------------------------------------------------------------
 
 
+def _validate_character_art_evidence(evidence: dict) -> tuple[bool, str, dict]:
+    """Evidence for the Character Art Gate: the design sheet (Drive file
+    id or local path) plus one inspection note per scored sub-criterion.
+
+    Returns (ok, reason, design_sheet_dict)."""
+    if not isinstance(evidence, dict) or not evidence:
+        return False, "no evidence supplied", {}
+    sheet = evidence.get("design_sheet")
+    if not isinstance(sheet, dict) or not sheet:
+        return False, "no design_sheet supplied (need drive_file_id or path)", {}
+    if not sheet.get("drive_file_id") and not sheet.get("path"):
+        return False, ("design_sheet has neither drive_file_id nor path — "
+                       "the sheet must be a real file, not a claim"), {}
+    notes = evidence.get("notes") or evidence.get("inspections") or {}
+    if not isinstance(notes, dict):
+        return False, "notes/inspections must be a dict criterion -> note", sheet
+    return True, "design sheet + notes present", sheet
+
+
+class CharacterArtGate:
+    """Independent gate for the character DESIGN (not the video).
+
+    ``evaluate(scores, evidence, human_approved=False)``:
+
+    * no design sheet / missing notes / missing scores ->
+      CHARACTER_ART_REVIEW_REQUIRED (never invent a PASS);
+    * ``human_approved`` False -> CHARACTER_ART_REVIEW_REQUIRED even
+      with perfect scores (Mai must approve the sheet herself);
+    * approved + every sub-criterion >= 7.0 and weighted total >= 8.0
+      -> CHARACTER_ART_PASS, otherwise CHARACTER_ART_FAIL.
+
+    Technical QA scores are never consulted here: a technical PASS
+    cannot compensate for a bad character design.
+    """
+
+    def evaluate(
+        self,
+        scores: dict[str, float | None],
+        evidence: dict,
+        human_approved: bool = False,
+    ) -> CharacterArtGateResult:
+        ok, reason, sheet = _validate_character_art_evidence(evidence)
+        notes = (evidence.get("notes") or evidence.get("inspections") or {}
+                 if isinstance(evidence, dict) else {})
+        final: dict[str, float | None] = {}
+        reasons: dict[str, str] = {}
+        if not ok:
+            for criterion in CHARACTER_ART_CRITERIA:
+                final[criterion] = None
+            reasons["_gate"] = f"evidence insufficient: {reason}"
+            return CharacterArtGateResult(
+                status="CHARACTER_ART_REVIEW_REQUIRED",
+                scores=final, weighted_total=None, reasons=reasons,
+                design_sheet=sheet, human_approved=bool(human_approved),
+            )
+        for criterion in CHARACTER_ART_CRITERIA:
+            note = notes.get(criterion) if isinstance(notes, dict) else None
+            if not str(note or "").strip():
+                final[criterion] = None
+                reasons[criterion] = ("no inspection note for this "
+                                      "sub-criterion")
+                continue
+            raw = scores.get(criterion)
+            if raw is None:
+                final[criterion] = None
+                reasons[criterion] = "no score supplied for this criterion"
+                continue
+            try:
+                value = float(raw)
+            except (TypeError, ValueError):
+                final[criterion] = None
+                reasons[criterion] = f"score {raw!r} is not a number"
+                continue
+            if not (0.0 <= value <= 10.0):
+                final[criterion] = None
+                reasons[criterion] = f"score {value} out of range 0-10"
+                continue
+            final[criterion] = value
+            reasons.setdefault(criterion, reason)
+        missing = [c for c, s in final.items() if s is None]
+        if missing:
+            return CharacterArtGateResult(
+                status="CHARACTER_ART_REVIEW_REQUIRED",
+                scores=final, weighted_total=None,
+                reasons={**reasons,
+                         "_gate": "evidence missing for: " + ", ".join(missing)
+                         + " — human character-art review required"},
+                design_sheet=sheet, human_approved=bool(human_approved),
+            )
+        total = round(sum(final[c] * CHARACTER_ART_WEIGHTS[c]
+                          for c in CHARACTER_ART_CRITERIA), 2)
+        below_min = [c for c in CHARACTER_ART_CRITERIA
+                     if final[c] < CHARACTER_ART_PASS_MIN]
+        if not human_approved:
+            return CharacterArtGateResult(
+                status="CHARACTER_ART_REVIEW_REQUIRED",
+                scores=final, weighted_total=total,
+                reasons={**reasons,
+                         "_gate": "scores computed (total "
+                         f"{total}) but the design sheet has not been "
+                         "approved by Mai yet — status stays "
+                         "CHARACTER_ART_REVIEW_REQUIRED"},
+                design_sheet=sheet, human_approved=False,
+            )
+        if total >= CHARACTER_ART_PASS_TOTAL and not below_min:
+            status = "CHARACTER_ART_PASS"
+        else:
+            status = "CHARACTER_ART_FAIL"
+            reasons["_gate"] = (
+                f"weighted total {total} (need >= {CHARACTER_ART_PASS_TOTAL})"
+                + (f"; below minimum {CHARACTER_ART_PASS_MIN}: "
+                   + ", ".join(below_min) if below_min else "")
+            )
+        return CharacterArtGateResult(
+            status=status, scores=final, weighted_total=total,
+            reasons=reasons, design_sheet=sheet, human_approved=True,
+        )
+
+
 def combine(
     technical: TechnicalGateResult | dict,
     creative: CreativeGateResult | dict,
+    character_art: CharacterArtGateResult | dict | None = None,
 ) -> dict:
     """Produce the single final verdict from the two independent gates.
 
@@ -858,6 +1054,13 @@ def combine(
     * technical PASS, creative evidence missing -> CREATIVE_REVIEW_REQUIRED
     * technical PASS + creative PASS          -> DRAFT_PASSED_QA
     * technical PASS + creative FAIL          -> TECHNICAL_PASS_CREATIVE_FAIL
+
+    When a Character Art Gate result is supplied (third argument), it is
+    a third independent gate: DRAFT_PASSED_QA additionally requires
+    CHARACTER_ART_PASS. An unapproved design sheet gives
+    CHARACTER_ART_REVIEW_REQUIRED; an approved-but-failing design gives
+    CHARACTER_ART_FAIL. Technical scores never compensate for it.
+    Omitting it preserves the old two-gate behaviour.
     """
     t_status = technical.status if hasattr(technical, "status") else technical.get("status")
     c_status = creative.status if hasattr(creative, "status") else creative.get("status")
@@ -871,10 +1074,22 @@ def combine(
         verdict = "TECHNICAL_PASS_CREATIVE_FAIL"
     else:  # unknown creative status — fail closed, never invent a PASS
         verdict = "CREATIVE_REVIEW_REQUIRED"
+    ca_status = None
+    if character_art is not None:
+        ca_status = (character_art.status if hasattr(character_art, "status")
+                     else character_art.get("status"))
+        if verdict == "DRAFT_PASSED_QA":
+            if ca_status == "CHARACTER_ART_PASS":
+                pass  # all three gates pass
+            elif ca_status == "CHARACTER_ART_FAIL":
+                verdict = "CHARACTER_ART_FAIL"
+            else:  # REVIEW_REQUIRED or unknown — fail closed
+                verdict = "CHARACTER_ART_REVIEW_REQUIRED"
     return {
         "verdict": verdict,
         "technical_status": t_status,
         "creative_status": c_status,
+        "character_art_status": ca_status,
         "draft_passed_qa": verdict == "DRAFT_PASSED_QA",
     }
 
