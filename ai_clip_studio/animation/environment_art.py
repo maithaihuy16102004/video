@@ -28,6 +28,43 @@ from PIL import Image, ImageDraw, ImageFilter
 KINDS = ("night_street", "shelter", "interior", "station", "park")
 MOODS = ("cold", "warm")
 
+# Location signatures (audit 2026-11-11): every kind of place must
+# carry its own identifying marks -- a bus stop is not a street with
+# a different colour. Each kind lists the props that make it
+# recognisable at a glance; the renderer draws them, and the tests
+# assert every kind has at least three. Generic place labels only
+# (a real bus-stop sign says where it is); a scene package may pass
+# its own sign_text to override the default.
+LOCATION_SIGNATURES = {
+    "night_street": ("lit-window buildings", "street lamp", "kerb line",
+                     "shop awning"),
+    "shelter": ("shelter roof + posts", "glass back panel", "bench",
+                "bus-stop sign with text"),
+    "interior": ("window onto the night sky", "framed picture",
+                 "table + chairs", "hanging lamp", "rug"),
+    "station": ("platform edge", "columns", "distant train",
+                "station sign with text"),
+    "park": ("path", "trees", "bench", "lamp"),
+}
+
+# Default sign text per kind (generic Vietnamese place labels).
+SIGN_TEXT = {
+    "shelter": "TRẠM XE BUÝT",
+    "station": "SÂN GA",
+    "park": "CÔNG VIÊN",
+}
+
+
+def _sign_font(size):
+    """A bold font for sign text; falls back to PIL's default."""
+    try:
+        from PIL import ImageFont
+        return ImageFont.truetype(
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", size)
+    except Exception:
+        from PIL import ImageFont
+        return ImageFont.load_default()
+
 # V51 palette.
 YELLOW = (255, 211, 78)
 CREAM = (243, 240, 232)
@@ -104,26 +141,69 @@ def _bench(d, x0, ground_y, w=420):
                ground_y + 10], fill=(0, 0, 0, 60))
 
 
-def _sign_board(d, x0, y0, w=150, h=80):
+def _sign_board(d, x0, y0, w=150, h=80, text=None):
+    """A sign board. v5 (audit 2026-11-11): the old board was BLANK --
+    two yellow/cream bars that said nothing, so the bus stop in Chiếc
+    Ví v4 had no readable identity. A real sign carries text; ``text``
+    is drawn centred in the board (shrunk to fit)."""
     d.rectangle([x0, y0, x0 + w, y0 + h], fill=DARK)
     d.rectangle([x0, y0, x0 + w, y0 + h], outline=YELLOW, width=4)
-    d.rectangle([x0 + 18, y0 + 18, x0 + w - 18, y0 + 30], fill=YELLOW)
-    d.rectangle([x0 + 18, y0 + 42, x0 + w - 60, y0 + 54], fill=CREAM)
+    if text:
+        size = max(10, int(h * 0.42))
+        font = _sign_font(size)
+        # shrink until the text fits the board
+        while size > 10:
+            tw = d.textlength(text, font=font)
+            if tw <= w - 16:
+                break
+            size -= 2
+            font = _sign_font(size)
+        tw = d.textlength(text, font=font)
+        th = size
+        d.text((x0 + (w - tw) / 2, y0 + (h - th) / 2), text,
+               fill=YELLOW, font=font)
+    else:
+        d.rectangle([x0 + 18, y0 + 18, x0 + w - 18, y0 + 30], fill=YELLOW)
+        d.rectangle([x0 + 18, y0 + 42, x0 + w - 60, y0 + 54], fill=CREAM)
+
+
+def _shop_awning(d, x0, ground_y, w=420, h=90):
+    """Striped shop awning over a lit shopfront -- the night_street
+    signature that tells a street apart from a shelter or a station."""
+    d.rectangle([x0, ground_y - 330, x0 + w, ground_y - 150],
+                fill=(210, 190, 120))
+    d.rectangle([x0, ground_y - 330, x0 + w, ground_y - 150],
+                outline=DARK, width=4)
+    for i in range(6):
+        d.rectangle([x0 + i * (w // 6), ground_y - 330,
+                     x0 + (i + 1) * (w // 6) - 6, ground_y - 240],
+                    fill=RED if i % 2 == 0 else CREAM)
+    d.polygon([(x0, ground_y - 240), (x0 + w, ground_y - 240),
+               (x0 + w - 30, ground_y - 200), (x0 + 30, ground_y - 200)],
+              fill=(160, 40, 30))
+    d.rectangle([x0 + 30, ground_y - 200, x0 + w - 30, ground_y - 150],
+                fill=(24, 40, 66))
+    d.ellipse([x0 + w // 2 - 60, ground_y - 12, x0 + w // 2 + 60,
+               ground_y + 8], fill=(0, 0, 0, 60))
 
 
 def draw_layered_background(kind="night_street", width=1920, height=1080,
-                            mood="cold"):
+                            mood="cold", sign_text=None):
     """Return a PIL RGB image with background / midground / foreground
     depth layers, key + fill light and ground shadows.
 
     kind: 'night_street' | 'shelter' | 'interior' | 'station' | 'park'.
     mood: 'cold' (blue night) | 'warm' (amber dusk).
+    sign_text: text for the kind's sign board (default: the kind's
+    generic label from SIGN_TEXT; pass "" for a blank board).
     Unknown kind/mood fall back to night_street / cold.
     """
     if kind not in KINDS:
         kind = "night_street"
     if mood not in MOODS:
         mood = "cold"
+    if sign_text is None:
+        sign_text = SIGN_TEXT.get(kind)
     w, h = int(width), int(height)
     horizon_y = int(h * 0.52)
     ground_y = int(h * 0.85)
@@ -183,6 +263,7 @@ def draw_layered_background(kind="night_street", width=1920, height=1080,
                       fill=(38, 56, 82))
         lamp_pos = _lamp(d, 180, ground_y)
         _lamp(d, 1740, ground_y)
+        _shop_awning(d, 1200, ground_y)
         # kerb line for perspective
         d.line([(0, ground_y - 60), (w, ground_y - 20)],
                fill=(52, 70, 100), width=4)
@@ -194,7 +275,7 @@ def draw_layered_background(kind="night_street", width=1920, height=1080,
         d.rectangle([1780, 330, 1820, ground_y], fill=(40, 44, 54))
         d.rectangle([1090, 340, 1780, ground_y], fill=(24, 44, 70, 180))
         _bench(d, 1150, ground_y)
-        _sign_board(d, 1010, 360)
+        _sign_board(d, 1010, 360, w=300, h=80, text=sign_text)
         lamp_pos = _lamp(d, 180, ground_y)
     elif kind == "station":
         # platform edge + columns + sign + bench + distant train
@@ -211,7 +292,7 @@ def draw_layered_background(kind="night_street", width=1920, height=1080,
                          200 + i * 230, horizon_y - 90],
                         fill=(210, 228, 240))
         _bench(d, 1150, ground_y)
-        _sign_board(d, 620, horizon_y - 260, w=220, h=90)
+        _sign_board(d, 620, horizon_y - 260, w=220, h=90, text=sign_text)
         lamp_pos = _lamp(d, 180, ground_y)
     elif kind == "park":
         # path + trees + bench + lamp

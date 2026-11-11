@@ -90,6 +90,43 @@ def interp_keys(keys, t):
     return keys[-1][1]
 
 
+# Gait parameters (audit 2026-11-11 vs RicksClips): every template walks
+# differently -- these are DATA on the template, never hardcoded per
+# story and never a character name inside the animation code.
+#   stride_frac: step length as a fraction of total height H
+#     (natural walk ~0.35-0.45 x leg length = ~0.15-0.19 H; the old
+#     walk used 55 px steps = 0.10 H at 267 steps/min -- a shuffle).
+#   arm_amp: arm-swing amplitude in radians (anti-phase with the legs).
+#   lean: forward torso lean in radians while walking.
+#   bob_frac: vertical COM excursion as a fraction of leg length
+#     (real ~0.04-0.05; the old bob was 10 px = 0.013 H and INVERTED:
+#     highest at foot strike, lowest at mid-stance).
+#   lift_frac: max foot lift during swing, fraction of H.
+#   overlap: fraction of a step the old foot stays planted AFTER the
+#     other foot strikes (+0.20 = 20% double support, a walk;
+#     negative = flight phase, a run).
+GAIT_DEFAULT = {
+    "stride_frac": 0.16,
+    "arm_amp": 0.45,
+    "lean": 0.08,
+    "bob_frac": 0.04,
+    "lift_frac": 0.08,
+    "overlap": 0.20,
+}
+
+# Run gait: longer stride, real flight phase (overlap < 0), more lean,
+# bigger arm pump. A run is NOT a fast walk.
+GAIT_RUN = {
+    "stride_frac": 0.22,
+    "arm_amp": 0.60,
+    "lean": 0.22,
+    "bob_frac": 0.05,
+    "lift_frac": 0.10,
+    "overlap": -0.30,
+    "flight_lift_frac": 0.03,
+}
+
+
 class Stickman:
     """A V51 stickman. Pose is set per frame via `pose` dict, then `joints()`."""
 
@@ -97,7 +134,7 @@ class Stickman:
                  hat="bowler", moustache=True, name="lustig",
                  template="male", body_variant="standard",
                  hair_style=None, glasses=False, cane=False,
-                 costume="none"):
+                 costume="none", gait=None):
         self.H = height
         self.head_r = HEAD_RATIO * height / 2
         self.torso = TORSO_FRAC * height
@@ -125,6 +162,13 @@ class Stickman:
         self.cane = cane
         # costume: "none" | "dress" (dress extends the torso A-line).
         self.costume = costume
+        # gait: per-template walk parameters (see GAIT_DEFAULT). A
+        # character's walk is part of its identity -- Minh strides,
+        # Lan steps shorter, an elder shuffles -- and it lives here,
+        # on the character, not in a per-story animation routine.
+        self.gait = dict(GAIT_DEFAULT)
+        if gait:
+            self.gait.update(gait)
         # pose defaults (angles in radians; + = forward / toward facing)
         self.pose = {
             "root_x": 960.0, "root_y": 900.0, "facing": 1,
@@ -224,7 +268,14 @@ class Stickman:
 def walk_pose(phase, stride=0.55, amp=0.5):
     """Walk-cycle joint angles. phase in radians; one full cycle = 2 steps.
     Returns dict of thigh/knee/arm angles + bob. Foot contacts happen at
-    phase 0 and pi (each foot in turn)."""
+    phase 0 and pi (each foot in turn).
+
+    Bob phase (fixed by the 2026-11-11 animation audit): the body is
+    LOWEST at foot contact / double support (phase 0, pi) and HIGHEST
+    at mid-stance (phase pi/2, 3pi/2) -- Richard Williams' walk cycle
+    (Contact, Down, Passing, Up). The old bob ``10*abs(cos)`` peaked
+    exactly at foot strike, i.e. the walk was upside-down.
+    """
     s = math.sin(phase)
     c = math.cos(phase)
     return {
@@ -237,7 +288,7 @@ def walk_pose(phase, stride=0.55, amp=0.5):
         "arm_r": 0.45 * s,
         "elbow_l": 0.25,
         "elbow_r": 0.25,
-        "bob": 10.0 * abs(c),
+        "bob": 10.0 * abs(s),
         "torso_lean": 0.08,
     }
 
@@ -359,14 +410,28 @@ def plant_feet(char, ground_y, stance="both"):
 def head_track(char, target, max_angle=0.6):
     """Turn the head toward ``target`` (x, y): set head_look to the angle
     between the head and the target, clamped to +/-max_angle so the head
-    never snaps past its neck. Returns the applied angle."""
+    never snaps past its neck. Returns the applied angle.
+
+    v5 (animation audit 2026-11-11): the old code returned the raw
+    target angle as head_look, but the head's direction is
+    ``lean + head_look`` (see joints()), so the look must be the
+    target angle RELATIVE to the lean -- and wrapped to [-pi, pi].
+    Without the wrap, a target BELOW the head (a wallet on the ground)
+    gives an angle near +/-pi, and the sign flips every time the head
+    crosses the target's vertical line: head_look jumped +0.6 / -0.6
+    frame to frame and the head oscillated +/-60 px while the body
+    stood up from the bend. With the wrap, both sides give the same
+    look-down value and the head moves smoothly.
+    """
     J = char.joints()
     hx, hy = J["head"]
     dx, dy = target[0] - hx, target[1] - hy
-    angle = math.atan2(dx, -dy)  # 0 = straight ahead/up, + = toward facing
-    angle = max(-max_angle, min(max_angle, angle))
-    char.set_pose(head_look=angle)
-    return angle
+    angle = math.atan2(dx, -dy)  # direction to target, 0 = straight up
+    lean = char.pose.get("torso_lean", 0.0)
+    diff = (angle - lean + math.pi) % (2 * math.pi) - math.pi
+    diff = max(-max_angle, min(max_angle, diff))
+    char.set_pose(head_look=diff)
+    return diff
 
 
 def interp_pose(pose_a, pose_b, u):

@@ -7,6 +7,7 @@ so the v4 evidence remains reproducible). New work should import from here.
 from .rig import (  # noqa: F401
     Stickman, walk_pose, interp_keys, smoothstep, lerp,
     HEAD_RATIO, HEAD_RATIO_MIN, HEAD_RATIO_MAX, BODY_WIDTH_SCALE,
+    GAIT_DEFAULT, GAIT_RUN,
     bone_lengths, check_bone_lengths, check_foot_contact,
     check_hand_contact, validate_joints, plant_feet, head_track,
     interp_pose, pose_at,
@@ -24,7 +25,7 @@ from .character_art import (  # noqa: F401
 
 __all__ = ["Stickman", "walk_pose", "interp_keys", "smoothstep", "lerp",
            "HEAD_RATIO", "HEAD_RATIO_MIN", "HEAD_RATIO_MAX",
-           "BODY_WIDTH_SCALE",
+           "BODY_WIDTH_SCALE", "GAIT_DEFAULT", "GAIT_RUN",
            "bone_lengths", "check_bone_lengths", "check_foot_contact",
            "check_hand_contact", "validate_joints", "plant_feet",
            "head_track", "interp_pose", "pose_at",

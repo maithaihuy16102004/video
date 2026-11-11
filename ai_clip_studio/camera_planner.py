@@ -271,6 +271,77 @@ class CameraPlanner:
         return img.crop(box).resize((w, h), Image.LANCZOS)
 
     @staticmethod
+    def validate_framing(shot, focus_xy, subjects, frame_w=1920,
+                         frame_h=1080):
+        """Check a shot's crop keeps every subject whole in frame, and
+        return a corrected focus point.
+
+        Audit 2026-11-11 (Chiếc Ví v4 + Eiffel v5, real frames): the
+        crop-by-scale camera cut Lan half out of the right edge, cut
+        Minh's head off in an object_insert, and left a reaction shot
+        dominated by an empty brown wall -- because ``apply_camera``
+        only clamps the crop box inside the frame, it never checks
+        whether the SUBJECT survives inside the crop. A shot that
+        cuts its subject is not a shot; it is a framing bug.
+
+        shot: shot dict (scale from ``camera.scale`` or SHOT_SCALE).
+        focus_xy: (x, y) the crop is centred on, full-frame coords.
+        subjects: list of {"cx", "head_y", "foot_y", "half_w"} in
+        full-frame coords -- the people/objects the shot must keep.
+        Returns (issues, corrected_focus_xy): issues is a list of
+        strings (empty = framing is safe); the corrected focus shifts
+        the crop so every subject fits with headroom, where that is
+        possible. A subject WIDER than the crop cannot be fixed by
+        shifting -- it is reported as a zoom-out issue and the focus
+        is left unchanged.
+        """
+        scale = float((shot or {}).get("camera", {}).get("scale")
+                      or SHOT_SCALE.get((shot or {}).get("shot_type",
+                                                        "medium"), 1.6))
+        scale = max(1.0, scale)
+        cw, ch = frame_w / scale, frame_h / scale
+        cx, cy = focus_xy if focus_xy is not None else (frame_w / 2.0,
+                                                        frame_h / 2.0)
+        left = min(max(cx - cw / 2.0, 0.0), frame_w - cw)
+        top = min(max(cy - ch / 2.0, 0.0), frame_h - ch)
+        right, bottom = left + cw, top + ch
+        issues = []
+        if not subjects:
+            return issues, (cx, cy)
+        # what the crop must contain (with headroom + edge margins)
+        need_l = min(s["cx"] - s["half_w"] for s in subjects) - 0.02 * cw
+        need_r = max(s["cx"] + s["half_w"] for s in subjects) + 0.02 * cw
+        need_t = min(s["head_y"] for s in subjects) - 0.05 * ch
+        need_b = max(s["foot_y"] for s in subjects) + 0.02 * ch
+        for i, s in enumerate(subjects):
+            if s["head_y"] < top + 0.05 * ch:
+                issues.append(f"subject {i}: head cut at top "
+                              f"(head_y={s['head_y']:.0f}, "
+                              f"crop_top={top:.0f})")
+            if s["foot_y"] > bottom - 0.02 * ch:
+                issues.append(f"subject {i}: feet cut at bottom "
+                              f"(foot_y={s['foot_y']:.0f}, "
+                              f"crop_bottom={bottom:.0f})")
+            if s["cx"] - s["half_w"] < left + 0.02 * cw:
+                issues.append(f"subject {i}: cut at left edge "
+                              f"(cx={s['cx']:.0f})")
+            if s["cx"] + s["half_w"] > right - 0.02 * cw:
+                issues.append(f"subject {i}: cut at right edge "
+                              f"(cx={s['cx']:.0f})")
+        if need_r - need_l > cw or need_b - need_t > ch:
+            issues.append("subjects do not fit the crop at this scale "
+                          "-- zoom out (smaller scale), do not just "
+                          "shift the focus")
+            return issues, (cx, cy)
+        # shift the crop so the required window fits inside it
+        new_left = min(max(need_l, need_r - cw), frame_w - cw)
+        new_left = max(0.0, new_left)
+        new_top = min(max(need_t, need_b - ch), frame_h - ch)
+        new_top = max(0.0, new_top)
+        corrected = (new_left + cw / 2.0, new_top + ch / 2.0)
+        return issues, corrected
+
+    @staticmethod
     def shot_diversity_report(shots):
         """Diversity summary of a planned shot list."""
         types = [s.get("shot_type") for s in (shots or [])]

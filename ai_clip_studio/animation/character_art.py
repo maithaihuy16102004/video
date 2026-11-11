@@ -192,10 +192,13 @@ EXPRESSIONS = {
                       brow_in=-0.20, brow_out=0.08, brow_asym=0.00,
                       mouth_curve=-1.00, mouth_open=0.00,
                       mouth_w=0.90, mouth_dx=0.00),
-    "surprised": dict(eye_h=1.60, eye_w=1.30, eye_dx=0.00,
+    # v5 (audit 2026-11-11): the old surprised eyes (1.60 x 1.30) were
+    # so large they read uneven against the small round mouth; softened
+    # to 1.45 x 1.15 with a wider mouth so both eyes stay symmetric.
+    "surprised": dict(eye_h=1.45, eye_w=1.15, eye_dx=0.00,
                       brow_in=-0.26, brow_out=-0.22, brow_asym=0.00,
-                      mouth_curve=0.00, mouth_open=1.00,
-                      mouth_w=0.85, mouth_dx=0.00),
+                      mouth_curve=0.00, mouth_open=0.85,
+                      mouth_w=1.00, mouth_dx=0.00),
     "worried":   dict(eye_h=1.15, eye_w=1.00, eye_dx=0.00,
                       brow_in=-0.18, brow_out=0.06, brow_asym=0.00,
                       mouth_curve=-0.55, mouth_open=0.15,
@@ -227,22 +230,34 @@ LEGACY_MOOD_TO_EXPRESSION = {
 # ---------------------------------------------------------------------------
 
 TEMPLATES = {
+    # gait: each template walks its own way (audit 2026-11-11). Male
+    # strides long, female steps shorter with less arm swing, a child
+    # hurries with big arm swings, an elder shuffles short and leans
+    # forward. These are template data, not per-story animation.
     "male": dict(height=560, suit="#172033", skin="#F3F0E8",
                  hat="none", moustache=False, hair_style="short",
                  glasses=False, cane=False, costume="none",
-                 name="male"),
+                 name="male",
+                 gait=dict(stride_frac=0.16, arm_amp=0.45, lean=0.08,
+                           bob_frac=0.04, lift_frac=0.08, overlap=0.20)),
     "female": dict(height=540, suit="#2E5FA3", skin="#F3F0E8",
                    hat="none", moustache=False, hair_style="long",
                    glasses=False, cane=False, costume="none",
-                   name="female"),
+                   name="female",
+                   gait=dict(stride_frac=0.145, arm_amp=0.32, lean=0.05,
+                             bob_frac=0.035, lift_frac=0.07, overlap=0.20)),
     "child": dict(height=400, suit="#D9A441", skin="#F3F0E8",
                   hat="none", moustache=False, hair_style="tuft",
                   glasses=False, cane=False, costume="none",
-                  name="child"),
+                  name="child",
+                  gait=dict(stride_frac=0.13, arm_amp=0.55, lean=0.06,
+                            bob_frac=0.05, lift_frac=0.09, overlap=0.15)),
     "elderly": dict(height=520, suit="#6B6259", skin="#F3F0E8",
                     hat="none", moustache=False, hair_style="short",
                     glasses=True, cane=True, costume="none",
-                    name="elderly"),
+                    name="elderly",
+                    gait=dict(stride_frac=0.12, arm_amp=0.25, lean=0.12,
+                              bob_frac=0.025, lift_frac=0.05, overlap=0.25)),
 }
 
 # Body variants scale torso width AND limb width together (see
@@ -252,13 +267,18 @@ BODY_VARIANTS = tuple(BODY_WIDTH_SCALE.keys())
 CHARACTER_INSTANCES = {
     "minh": dict(template="male", name="minh", suit="#2E5FA3"),
     "lan": dict(template="female", name="lan", suit="#47BD75"),
+    # Lustig keeps the male stride but leans forward a touch more --
+    # a confident swagger, not a shuffle. His identifier is the
+    # bowler + moustache, not his walk.
     "lustig": dict(template="male", name="lustig", suit="#172033",
-                   hat="bowler", moustache=True),
+                   hat="bowler", moustache=True,
+                   gait=dict(stride_frac=0.15, arm_amp=0.40, lean=0.12,
+                             bob_frac=0.04, lift_frac=0.08, overlap=0.20)),
 }
 
 _STICKMAN_KWARGS = (
     "height", "suit", "skin", "hat", "moustache", "name", "template",
-    "body_variant", "hair_style", "glasses", "cane", "costume",
+    "body_variant", "hair_style", "glasses", "cane", "costume", "gait",
 )
 
 
@@ -500,13 +520,20 @@ def _draw_face(draw, char, hx, hy, view, face_dx, params, ink, pal):
     return mx, my
 
 
-def _hair_cap(draw, hx, hy, r, ink, chord=0.55):
+def _hair_cap(draw, hx, hy, r, ink, chord=0.72, bow=0.12):
     """Hair cap as a polygon that follows the head circle EXACTLY: the
-    top arc of the head circle down to a horizontal chord at
-    ``hy - chord*r``. The old pieslice of a flatter ellipse poked
-    ~0.2r outside the head outline at the sides and read as a beret.
-    The chord sits just above the brow line (hy-0.52r) so brows stay
-    visible on the face fill."""
+    top arc of the head circle down to a chord at ``hy - chord*r``.
+
+    v5 (audit 2026-11-11): the v4 chord 0.55 made a solid black cap
+    0.45r tall -- 23% of the head diameter at the centre column -- while
+    the reference head is PLAIN WHITE. The cap is the single biggest
+    silhouette deviation from the reference, so it is thinned to a
+    hairline: chord 0.72 (0.28r tall at the sides, 0.16r at the centre)
+    and the bottom edge is BOWED UP in the middle (``bow``) so the
+    hairline reads as a curve, not a straight bowl-cut line across the
+    forehead. Short hair stays recognisable as a hair identifier, but
+    the head is mostly the reference's plain white circle again.
+    """
     a_lo = 180 + math.degrees(math.asin(chord))
     a_hi = 360 - math.degrees(math.asin(chord))
     pts = []
@@ -517,6 +544,14 @@ def _hair_cap(draw, hx, hy, r, ink, chord=0.55):
         a += 3.0
     rad = math.radians(a_hi)
     pts.append((hx + r * math.cos(rad), hy + r * math.sin(rad)))
+    # bottom edge: from the right chord end back to the left, bowed up
+    # in the middle so the hairline is higher at the centre.
+    half_w = r * math.cos(math.asin(chord))
+    n = 16
+    for i in range(1, n + 1):
+        x = half_w * (1.0 - 2.0 * i / n)
+        y = hy - chord * r - bow * r * (1.0 - (x / half_w) ** 2)
+        pts.append((hx + x, y))
     draw.polygon(pts, fill=ink)
 
 
@@ -554,10 +589,9 @@ def _draw_hair(draw, char, hx, hy, view, ink, part="cap"):
                           180, 360, fill=ink)
         return
     if style == "short":
-        # v4: the cap follows the head circle exactly (see _hair_cap)
-        # with its chord at hy-0.55r, just above the brow line -- the
-        # old deep pieslice buried the brows and bulged outside the
-        # head outline like a beret.
+        # v5: thin hairline cap (see _hair_cap) -- chord 0.72, bowed
+        # hairline -- the v4 chord 0.55 buried the top of the head in
+        # black while the reference head is plain white.
         _hair_cap(draw, hx, hy, r, ink)
     elif style == "long":
         _hair_cap(draw, hx, hy, r, ink)

@@ -263,10 +263,13 @@ class TestExpressions(unittest.TestCase):
     def test_expression_at_keyframes(self):
         keys = [(0.0, "neutral"), (1.0, "surprised")]
         at_half = expression_at(keys, 0.5)
-        self.assertAlmostEqual(at_half["mouth_open"], 0.5)
-        self.assertAlmostEqual(at_half["eye_h"], (1.0 + 1.6) / 2)
+        # v5: surprised is softened (mouth_open 0.85, eye_h 1.45 --
+        # the old 1.00 / 1.60 read uneven against the small round
+        # mouth). The interpolation math is unchanged.
+        self.assertAlmostEqual(at_half["mouth_open"], 0.85 / 2)
+        self.assertAlmostEqual(at_half["eye_h"], (1.0 + 1.45) / 2)
         self.assertEqual(expression_at(keys, 0.0)["mouth_open"], 0.0)
-        self.assertEqual(expression_at(keys, 2.0)["mouth_open"], 1.0)
+        self.assertEqual(expression_at(keys, 2.0)["mouth_open"], 0.85)
 
     def test_expression_renders_morph_gradually(self):
         """Mid-blend differs from neutral LESS than the full expression
@@ -328,11 +331,16 @@ class TestRigV3(unittest.TestCase):
               "duration": 2.0, "from_x": 500, "to_x": 900,
               "ground_y": 920}],
             chars, fps=24)
-        # At t=0 the right foot is the stance foot (phase 0).
+        # v5: at t=0 the walk starts from a STAND -- both feet on the
+        # ground (double support). The old walk lifted the left foot
+        # 45 px at phase 0, which is not how a walk starts.
         frame0 = tl[0]["minh"]
-        self.assertEqual(check_foot_contact(frame0, 920, stance=("r",)), [])
-        # ...while the swinging left foot is lifted off the ground.
-        self.assertLess(frame0["foot_l"][1], 920 - 10)
+        self.assertEqual(check_foot_contact(frame0, 920), [])
+        self.assertAlmostEqual(frame0["foot_l"][1], 920, delta=0.5)
+        self.assertAlmostEqual(frame0["foot_r"][1], 920, delta=0.5)
+        # ...and the left foot lifts off during the first step.
+        frame12 = tl[12]["minh"]
+        self.assertLess(frame12["foot_l"][1], 920 - 10)
 
     def test_hand_reaches_prop_exactly(self):
         ch = _standing_char()
