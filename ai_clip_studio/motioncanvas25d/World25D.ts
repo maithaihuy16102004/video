@@ -50,12 +50,32 @@ export interface CameraKeyframe {
   position: [number, number, number];
   target: [number, number, number];
   fov?: number;
+  /**
+   * Hard cut: when true, the camera HOLDS the previous keyframe's
+   * pose until exactly this keyframe's time, then jumps to this
+   * pose. No interpolation into a cut keyframe. The spec emitter
+   * (ai_clip_studio/motioncanvas_spec.py) sets cut on every
+   * shot-start keyframe after the first, so framing changes by cut
+   * and the camera is fixed within a shot. Keyframes without the
+   * flag interpolate exactly as before (the smoke-test spec's
+   * continuous move is unaffected).
+   */
+  cut?: boolean;
 }
 
 export interface CharacterAnchorSpec {
   id: string;
   feet: [number, number, number]; // world position of the feet (y = ground)
   height: number; // world height, for scale
+}
+
+/** Projected screen box of one character anchor (see characterScreenBoxes). */
+export interface CharacterScreenBox {
+  feetX: number;
+  feetY: number;
+  headY: number;
+  heightPx: number;
+  visible: boolean;
 }
 
 export interface World25DSpec {
@@ -198,6 +218,13 @@ export class World25D {
       const a = sorted[i];
       const b = sorted[i + 1];
       if (t >= a.t && t <= b.t) {
+        if (b.cut) {
+          // Hard cut at b.t: hold the previous pose until the
+          // boundary instant, then jump. No interpolation across
+          // a cut, so the camera is fixed within each shot.
+          this.applyKeyframe(t < b.t ? a : b);
+          return;
+        }
         // smoothstep easing, not linear: the camera must ease in/out
         const raw = (t - a.t) / Math.max(b.t - a.t, 1e-6);
         const k = raw * raw * (3 - 2 * raw);
@@ -233,6 +260,12 @@ export class World25D {
   projectToScreen(world: [number, number, number]): {
     x: number; y: number; scale: number; visible: boolean;
   } {
+    // Refresh the camera matrices first: project() reads
+    // matrixWorldInverse, which updateCamera's lookAt does not
+    // refresh on its own. In the render paths render() runs before
+    // this, but the projection must also be correct when called
+    // standalone (tests, tooling) — never silently stale.
+    this.camera.updateMatrixWorld();
     const v = new THREE.Vector3(...world).project(this.camera);
     const visible = v.z < 1; // behind the camera -> z >= 1
     const x = ((v.x + 1) / 2) * this.width;
@@ -243,8 +276,8 @@ export class World25D {
     return { x, y, scale: focalPx / Math.max(depth, 0.1), visible };
   }
 
-  characterScreenBoxes(): Record<string, { feetX: number; feetY: number; headY: number; heightPx: number; visible: boolean }> {
-    const out: Record<string, { feetX: number; feetY: number; headY: number; heightPx: number; visible: boolean }> = {};
+  characterScreenBoxes(): Record<string, CharacterScreenBox> {
+    const out: Record<string, CharacterScreenBox> = {};
     for (const a of this.spec.character_anchors ?? []) {
       const feet = this.projectToScreen(a.feet);
       const head = this.projectToScreen([a.feet[0], a.feet[1] + a.height, a.feet[2]]);

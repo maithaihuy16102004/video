@@ -11,18 +11,32 @@
  * The scene that uses this node is `scene25d.tsx`.
  */
 import { Node, NodeProps } from '@motion-canvas/2d';
-import { World25D, World25DSpec } from './World25D';
+import {
+  CharacterScreenBox,
+  World25D,
+  World25DSpec,
+} from './World25D';
 
 export interface ThreeWorld25DNodeProps extends NodeProps {
   spec: World25DSpec;
   timeSignal: () => number;
   width?: number;
   height?: number;
+  /**
+   * Called every frame, after the camera update and the 3D render,
+   * with the projected character boxes for the CURRENT frame, so
+   * the caller (character engine) can draw the 2D characters at
+   * the right place and scale. Invoking it here (in draw) instead
+   * of from the scene generator keeps the boxes in sync with the
+   * camera state that was actually rendered.
+   */
+  onCharacterBoxes?: (boxes: Record<string, CharacterScreenBox>) => void;
 }
 
 export class ThreeWorld25DNode extends Node {
   private world: World25D;
   private timeSignal: () => number;
+  private onCharacterBoxes?: (boxes: Record<string, CharacterScreenBox>) => void;
   private offscreenCanvas?: HTMLCanvasElement;
   private canvasWidth: number;
   private canvasHeight: number;
@@ -31,6 +45,7 @@ export class ThreeWorld25DNode extends Node {
     super(props);
     this.world = new World25D(props.spec, props.width ?? 1920, props.height ?? 1080);
     this.timeSignal = props.timeSignal;
+    this.onCharacterBoxes = props.onCharacterBoxes;
     this.canvasWidth = props.width ?? 1920;
     this.canvasHeight = props.height ?? 1080;
 
@@ -57,6 +72,9 @@ export class ThreeWorld25DNode extends Node {
         this.canvasWidth,
         this.canvasHeight,
       );
+      if (this.onCharacterBoxes) {
+        this.onCharacterBoxes(this.world.characterScreenBoxes());
+      }
     }
     this.drawChildren(context);
   }

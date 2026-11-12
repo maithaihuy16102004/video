@@ -184,5 +184,50 @@ class TestSceneAndRender(unittest.TestCase):
         self.assertGreater(top, side)
 
 
+class TestPaintersOrderFarthestCorner(unittest.TestCase):
+    """Stage 3 regression: painter's order must use the FARTHEST
+    corner, not the box centre. The map paper (centre depth 9.634)
+    sits BEHIND its region patches (centre depth 9.650) but is much
+    wider, so centre-based ordering painted the paper AFTER the
+    region and covered it (the 'Anh' region vanished). Farthest-
+    corner depths (paper 10.119 > region 9.823) restore the order."""
+
+    def _map_scene(self, with_region):
+        paper = Box3D(center=(0.0, 2.2, -5.0), size=(10.4, 4.7, 0.2),
+                      color=(238, 226, 190), name="map_paper")
+        boxes = [paper]
+        if with_region:
+            boxes.append(Box3D(center=(3.1, 1.3, -4.85),
+                               size=(2.8, 1.4, 0.1),
+                               color=(150, 165, 155),
+                               name="map_region_6"))
+        cam = PerspectiveCamera(position=(0.0, 2.0, 4.8),
+                                target=(0.0, 1.2, 0.0),
+                                fov_deg=46.0, aspect=16 / 9)
+        scene = Scene25D(boxes=boxes, characters=[], camera=cam,
+                         sky_top=(222, 214, 180),
+                         sky_bottom=(235, 228, 200),
+                         ground_color=(105, 82, 58),
+                         ground_extent=30.0)
+        return scene, cam, paper, boxes[-1]
+
+    def test_paper_sorts_behind_region(self):
+        from ai_clip_studio.renderer25d.render import _paint_depth
+        _scene, cam, paper, region = self._map_scene(True)
+        self.assertGreater(_paint_depth(cam, "box", paper),
+                           _paint_depth(cam, "box", region))
+
+    def test_region_visible_over_paper(self):
+        scene_with, cam, _p, _r = self._map_scene(True)
+        scene_without, _c, _p2, _r2 = self._map_scene(False)
+        px, py, _s, _vis = cam.project((3.1, 1.3, -4.85), 960, 540)
+        with_img = render_frame(scene_with, 960, 540)
+        without_img = render_frame(scene_without, 960, 540)
+        c_with = with_img.getpixel((int(px), int(py)))
+        c_without = without_img.getpixel((int(px), int(py)))
+        self.assertNotEqual(c_with, c_without,
+                            "region centre must differ from bare paper")
+
+
 if __name__ == "__main__":
     unittest.main()

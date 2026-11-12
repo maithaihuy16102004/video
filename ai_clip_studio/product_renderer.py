@@ -1588,6 +1588,27 @@ def _boxes_from_landmark(name: str) -> list[Box3D]:
     return out
 
 
+def _shot_location_kind(shot: dict):
+    """The composed environment kind for a shot, via the same
+    dispatch build_scene_ex uses (trait block -> compose_location,
+    inline text -> compose_inline, else None for the legacy keyword
+    path). Pure: safe to call before the scene build (the build
+    re-composes). Used for camera decisions that depend on the
+    environment's orientation — a map board faces the camera."""
+    location_data = shot.get("v1_location")
+    if location_data is not None:
+        return compose_location(
+            location_data, mood=shot.get("mood", "warm"),
+            time_of_day=shot.get("time_of_day", "day"))["kind"]
+    location_text = shot.get("location_text", "")
+    if (location_text or "").strip():
+        return compose_inline(
+            location_text, mood=shot.get("mood", "warm"),
+            time_of_day=shot.get("time_of_day", "day"),
+            setting=shot.get("setting", ""))["kind"]
+    return None
+
+
 def build_scene_ex(location_keyword: str, setting: str, mood: str,
                    time_of_day: str, location_data=None,
                    location_text: str = "") -> tuple:
@@ -2746,6 +2767,22 @@ def _render_shot(args: dict) -> dict:
     # for char_metrics).
     _angle = resolve_viewpoint_angle(shot["shot_type"],
                                      shot.get("camera_angle"))
+    # Map-board frontal rule (Stage 3 / F5 x F9): a map_panel
+    # environment is a VERTICAL board facing the camera. A steep
+    # requested angle (birds_eye/high_angle) looks down at the
+    # ground and shows the board edge-on — the probe's birds_eye
+    # map still was 95% ground with the board cut at the top edge.
+    # Map shots therefore render with a frontal (eye_level)
+    # viewpoint so the map stays legible; the requested angle is
+    # recorded on the report (camera_angle_requested), never
+    # silently dropped. Shot-type azimuth (OTS/SRS) still applies:
+    # only the elevation is clamped.
+    _angle_requested = _angle
+    _map_frontal = False
+    if _shot_location_kind(shot) == "map_panel" \
+            and _angle != "eye_level":
+        _angle = "eye_level"
+        _map_frontal = True
     if shot["shot_type"] == "over_the_shoulder" \
             and _ots_subject in names:
         _subject_name = _ots_subject
@@ -3356,7 +3393,13 @@ def _render_shot(args: dict) -> dict:
             "(camera_at() geometry in camera_planner.py is retained "
             "for tooling). No crop-zoom substitute was applied.")
     _camera_limitation = None
-    if _angle == "dutch":
+    if _map_frontal:
+        _camera_limitation = (
+            "map location: the board faces the camera (frontal "
+            "eye_level viewpoint) so the map stays legible; "
+            f"requested angle {_angle_requested} recorded as "
+            "camera_angle_requested.")
+    elif _angle == "dutch":
         _camera_limitation = (
             "dutch angle: frame tilt not applied (rotation overscan "
             "would break the F2 head-size cap); the shot renders "
@@ -3373,6 +3416,7 @@ def _render_shot(args: dict) -> dict:
         "camera_movement_executed": "STATIC",
         "movement_limitation": _movement_limitation,
         "camera_angle": _angle,
+        "camera_angle_requested": _angle_requested,
         "camera_position": tuple(shot_cam.position),
         "camera_target": tuple(shot_cam.target),
         "camera_limitation": _camera_limitation,
