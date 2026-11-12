@@ -490,9 +490,13 @@ class TestBusF6(unittest.TestCase):
         # on the body's clear right portion, the right wheel's light
         # hubcap, and the bright headlight. The board shot is a
         # tracking shot at 1.0x (F2 cap), so full-frame projected
-        # coordinates apply directly.
+        # coordinates apply directly — projected with the SHOT
+        # camera from the render report (Stage 3 / F9: every shot
+        # resolves its own viewpoint; the legacy fixed CAM no longer
+        # renders anything).
+        from ai_clip_studio.camera_planner import PerspectiveCamera
         from ai_clip_studio.product_renderer import (
-            BUS_BODY_CENTER, BUS_BODY_SIZE, BUS_WHEEL_X, CAM,
+            BUS_BODY_CENTER, BUS_BODY_SIZE, BUS_WHEEL_X,
             H as PH, W as PW, _render_shot)
         from ai_clip_studio.product_flow import plan_shots
         from ai_clip_studio.tests.test_product_flow import TestShotPlanSync
@@ -503,11 +507,17 @@ class TestBusF6(unittest.TestCase):
         self.assertNotIn("bus", list(board.get("scene_cues") or [])
                          + list(board.get("action_cues") or []))
         with tempfile.TemporaryDirectory() as tmp:
-            _render_shot({"shot": dict(board, index=2), "package": pkg,
-                          "out_dir": Path(tmp), "still_only": True})
+            rep = _render_shot({"shot": dict(board, index=2),
+                                "package": pkg,
+                                "out_dir": Path(tmp), "still_only": True})
             arr = np.asarray(Image.open(
                 Path(tmp) / "shot_002" / "still.png").convert("RGB")
             ).astype(int)
+        self.assertEqual(rep["applied_scale"], 1.0,
+                         "board still must be uncropped for direct "
+                         "projection")
+        CAM = PerspectiveCamera(position=rep["camera_position"],
+                                target=rep["camera_target"])
         cx, cy, cz = BUS_BODY_CENTER
         sx_, sy_, sz_ = BUS_BODY_SIZE
         zf = cz + sz_ / 2.0

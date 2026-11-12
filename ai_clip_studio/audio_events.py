@@ -1742,6 +1742,30 @@ def resolve_v1_cues(cues: list[Any] | None, *, package: dict | None,
                     kinds_per_scene.get(_scene_no, set()):
                 none_spans[_kind_key].append([_span[0], _span[1]])
 
+    # End-card silence (Stage 3 integration): the card declares
+    # BGM: NONE + SFX: NONE and the shot clock already excludes
+    # end-card shots from scene spans — but full-length beds (the
+    # rain bed) are placed at 0.0 over the whole mix, so without an
+    # explicit mute span they leak under the silent card. Mute
+    # every stem under end-card shots when the card declares NONE
+    # for both BGM and SFX; a card that declares music is left
+    # alone.
+    _end_card = package.get("v1_end_card") \
+        if isinstance(package, dict) else None
+    if isinstance(_end_card, dict):
+        _ec_fields = _end_card.get("fields") \
+            if isinstance(_end_card.get("fields"), dict) else {}
+        _ec_bgm = str(_end_card.get("bgm") or _ec_fields.get("BGM")
+                      or "").strip().upper()
+        _ec_sfx = str(_end_card.get("sfx") or _ec_fields.get("SFX")
+                      or "").strip().upper()
+        if _ec_bgm == "NONE" and _ec_sfx == "NONE":
+            for _span in shot_spans:
+                if _span["shot"].get("kind") == "end_card":
+                    for _kind_key in none_spans:
+                        none_spans[_kind_key].append(
+                            [_span["start"], _span["end"]])
+
     rendered = sum(1 for r in reports if r["render"] == "rendered")
     return {
         "source": ("v1_audio_cues+trait_blocks"

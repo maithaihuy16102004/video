@@ -101,6 +101,7 @@ class Timeline:
     action_seconds: float = 0.0      # physical actions needing extra time
     transition_seconds: float = 0.0  # scene transitions
     audio_tail_sec: float = DEFAULT_AUDIO_TAIL_SEC
+    end_card_sec: float = 0.0        # end-card shot (V1 END_CARD)
     total_duration_sec: float = 0.0
     all_measured: bool = False
 
@@ -124,8 +125,15 @@ def build_timeline(
     transition_seconds: float = 0.0,
     audio_tail_sec: float = DEFAULT_AUDIO_TAIL_SEC,
     speech_speed: float = 1.0,
+    end_card_sec: float = 0.0,
 ) -> Timeline:
-    """Build the timeline from real durations. No caps, no speed-up."""
+    """Build the timeline from real durations. No caps, no speed-up.
+
+    ``end_card_sec`` is the V1 END_CARD shot duration: the card is
+    part of the rendered video, so the timeline total must cover
+    it — otherwise TechnicalGate.timeline_sync fails on every
+    script that declares an end card (Stage 3 integration fix).
+    """
     if speech_speed != 1.0:
         raise TimelineError(
             f"speech_speed must be 1.00x (V5 rule), got {speech_speed} — "
@@ -138,11 +146,13 @@ def build_timeline(
         all_measured = all_measured and measured
         total += duration + line.pause_after_sec
     total += float(action_seconds) + float(transition_seconds) + float(audio_tail_sec)
+    total += float(end_card_sec)
     timeline = Timeline(
         lines=list(lines),
         action_seconds=float(action_seconds),
         transition_seconds=float(transition_seconds),
         audio_tail_sec=float(audio_tail_sec),
+        end_card_sec=float(end_card_sec),
         total_duration_sec=round(total, 3),
         all_measured=all_measured,
     )

@@ -371,6 +371,32 @@ class TestNoneAndMemes(unittest.TestCase):
                             for r in rep["cues"][0]["reasons"]))
         self.assertEqual(len(rep["beds"]), 1)
 
+    def test_end_card_none_mutes_all_stems_under_card(self):
+        # Stage 3 integration: a card declaring BGM: NONE + SFX:
+        # NONE mutes every stem under its span, so full-length
+        # beds (rain) cannot leak under the silent card. Fixture
+        # shots total 10.65s; the 3s card spans [10.65, 13.65].
+        package, shots, entries = _resolver_fixture()
+        package["v1_end_card"] = {"bgm": "NONE", "sfx": "NONE"}
+        shots = shots + [{"scene": 2, "kind": "end_card",
+                          "duration": 3.0, "line_index": None}]
+        rep = resolve_v1_cues(
+            [], package=package, shots=shots, timeline_entries=entries)
+        for kind in ("sfx", "ambience", "bgm", "meme"):
+            self.assertEqual(rep["none_spans"][kind], [[10.65, 13.65]],
+                             kind)
+
+    def test_end_card_with_music_is_not_muted(self):
+        # A card that declares music keeps its audio: no mute span.
+        package, shots, entries = _resolver_fixture()
+        package["v1_end_card"] = {"bgm": "Soft piano", "sfx": "NONE"}
+        shots = shots + [{"scene": 2, "kind": "end_card",
+                          "duration": 3.0, "line_index": None}]
+        rep = resolve_v1_cues(
+            [], package=package, shots=shots, timeline_entries=entries)
+        for kind in ("sfx", "ambience", "bgm", "meme"):
+            self.assertEqual(rep["none_spans"][kind], [], kind)
+
     def test_shot_level_sfx_none_suppresses_cue(self):
         package, shots, entries = _resolver_fixture()
         package["scenes"][0]["v1_scene"]["shots"] = [
@@ -1234,11 +1260,16 @@ class TestEp1RealPackageOffline(unittest.TestCase):
             self.assertTrue(any("coexists" in r
                                 for r in by_id[cue_id]["reasons"]))
         # The only scene-wide SFX NONE span is scene 4 (flag + zero
-        # SFX cues); scenes 1/6 yield no span (coexistence).
+        # SFX cues); scenes 1/6 yield no span (coexistence). The
+        # second span is the end card (Stage 3 integration: the
+        # NONE/NONE card mutes every stem under itself).
         scene_spans = clock["scene_spans"]
+        card = next(s for s in clock["shot_spans"]
+                    if s["shot"].get("kind") == "end_card")
         self.assertEqual(
             rep["none_spans"]["sfx"],
-            [[scene_spans[4][0], scene_spans[4][1]]])
+            [[scene_spans[4][0], scene_spans[4][1]],
+             [card["start"], card["end"]]])
         # Anchoring: line-anchored owning shots; SFX_004 (no trigger
         # anchor on SC03_SH03) falls back to the recorded scene
         # start; ACTION_DURATION without a known span uses the
@@ -1259,8 +1290,13 @@ class TestEp1RealPackageOffline(unittest.TestCase):
         self.assertTrue(any("ACTION_DURATION" in r and "default" in r
                             for r in by_id["SFX_003"]["reasons"]))
         # SC02 ambience NONE (scene-wide: no ambience cue there)
-        # yields the only ambience NONE span; SC06 pad fades down.
-        self.assertEqual(len(rep["none_spans"]["ambience"]), 1)
+        # yields an ambience NONE span; the second span is the end
+        # card (Stage 3 integration: NONE/NONE card mutes every
+        # stem). SC06 pad fades down.
+        self.assertEqual(
+            rep["none_spans"]["ambience"],
+            [[scene_spans[2][0], scene_spans[2][1]],
+             [card["start"], card["end"]]])
         sc6_pad = next(b for b in rep["beds"]
                        if b["stem"] == "music" and b["scene"] == 6)
         self.assertTrue(sc6_pad["fade_down"])
@@ -1383,10 +1419,15 @@ class TestEp1V2Stage3Continuation(unittest.TestCase):
             self.assertNotIn(seg["shot_id"], EP1_SFX_NONE_SHOTS)
         # Scene 4 (SFX: NONE on every shot, zero SFX cues) yields
         # the scene-wide NONE span, muting legacy/rain SFX there.
+        # The second span is the end card (Stage 3 integration:
+        # the NONE/NONE card mutes every stem under itself).
         scene_spans = clock["scene_spans"]
+        card = next(s for s in clock["shot_spans"]
+                    if s["shot"].get("kind") == "end_card")
         self.assertEqual(
             rep["none_spans"]["sfx"],
-            [[scene_spans[4][0], scene_spans[4][1]]])
+            [[scene_spans[4][0], scene_spans[4][1]],
+             [card["start"], card["end"]]])
         # Scoping: SFX: NONE does NOT prohibit ambience/BGM. The
         # scene-1 ambience + BGM cues sit on SC01_SH03 (an SFX:NONE
         # shot) and must still render.

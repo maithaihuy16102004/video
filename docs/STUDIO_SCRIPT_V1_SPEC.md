@@ -915,7 +915,7 @@ Plain numbers without a unit are also accepted.
 `TYPE` enum (canonical form lower_snake_case; UPPER_SNAKE_CASE input is
 accepted and normalised to the canonical form; matching is
 case-insensitive and treats spaces and hyphens as underscores). These
-nine values match the engine camera planner's shot types:
+eleven values match the engine camera planner's shot types:
 
 | Canonical `TYPE` | Accepted input forms include | Meaning |
 |---|---|---|
@@ -928,6 +928,8 @@ nine values match the engine camera planner's shot types:
 | `object_insert` | `OBJECT_INSERT` | Insert shot of an object or detail |
 | `tracking` | `TRACKING` | Shot whose camera tracks a moving subject |
 | `shot_reverse_shot` | `SHOT_REVERSE_SHOT` | Alternating shot/reverse-shot pair |
+| `medium_close_up` | `MEDIUM_CLOSE_UP` | Chest-up medium close-up of the subject (channel-study R1) |
+| `graphic_insert` | `GRAPHIC_INSERT` | Flat full-frame graphic insert card: time, counting, or object card, rendered as a card, not a crop (channel-study R6) |
 
 Any other `TYPE` value is a validation error (V1E014). No other shot
 type may be invented by the parser or the planner; a script needing a
@@ -2214,10 +2216,13 @@ and none of them may be papered over by inventing a second vocabulary.
    mapping. The face system owns this vocabulary in Phase B (§12.3,
    Appendix B item 7).
 7. **Shot-type vocabulary is a subset.** The Gemini prompt offers six
-   shot types; the V1 vocabulary (§5.5) has nine
-   (`extreme_close_up`, `over_the_shoulder`, `shot_reverse_shot` are
+   shot types; the V1 vocabulary (§5.5) has eleven
+   (`extreme_close_up`, `over_the_shoulder`, `shot_reverse_shot`,
+   `medium_close_up`, `graphic_insert` are
    missing from the prompt). Phase B MUST use the full V1 vocabulary
    and key shot enrichment by V1 SHOT id, not by spoken-line index.
+   (Resolved in Stage 3: both the free-form and V1 enrichment
+   prompts now offer the full eleven-type vocabulary.)
 
 ---
 

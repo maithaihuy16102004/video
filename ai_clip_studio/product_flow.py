@@ -63,6 +63,7 @@ from .chrome_detect import detect_chrome
 from .drive_uploader import DRIVE_ROOT_FOLDER_ID, GwsCliDriveClient
 from .gemini_planner import resolve_plan
 from .language_gate import check_production_language
+from .motioncanvas_spec import MotionCanvasSpecError, emit_job_spec
 from .product_renderer import (
     FPS, GROUND_Y, map_character, plan_shots, render_product_video,
     render_storyboard_stills,
@@ -757,6 +758,30 @@ def dedupe_audio_events(events):
     return deduped
 
 
+def _end_card_seconds(package: dict) -> float:
+    """End-card duration in seconds (0.0 when the package declares
+    no end card). The V1 adapter stores ``duration_sec``; fall back
+    to parsing ``duration`` (a number, or a \"3s\" string). The
+    timeline total must include the card: plan_shots appends an
+    end-card shot and the renderer renders it, so excluding it
+    breaks TechnicalGate.timeline_sync (Stage 3 integration fix).
+    """
+    card = package.get("v1_end_card") or package.get("end_card")
+    if not isinstance(card, dict):
+        return 0.0
+    raw = card.get("duration_sec", card.get("duration"))
+    if isinstance(raw, (int, float)):
+        return float(raw) if float(raw) > 0 else 0.0
+    if isinstance(raw, str):
+        text = raw.strip().lower().rstrip("s").strip()
+        try:
+            value = float(text)
+        except ValueError:
+            return 0.0
+        return value if value > 0 else 0.0
+    return 0.0
+
+
 def run_product_job(script_text: str, job_dir: Path, *,
                     config: dict | None = None,
                     drive_client: GwsCliDriveClient | None = None,
@@ -791,7 +816,14 @@ def run_product_job(script_text: str, job_dir: Path, *,
               f"{len(script_text)} chars, vi-VN, 16:9 1920x1080 24fps")
 
         # --- 2. Scene Package (Gemini or labelled fallback) ----------
-        package, planner, detail = resolve_plan(script_text)
+        # enrich_v1 is opt-in via job config (server: "enrich_v1"
+        # request flag): V1 scripts get real Gemini §15 trait
+        # enrichment; on any enrichment failure the adapter falls
+        # back to deterministic derivation with the reason
+        # recorded, so the job never fails here. Default off.
+        package, planner, detail = resolve_plan(
+            script_text,
+            enrich_v1=bool((config or {}).get("enrich_v1")))
         job.package = package
         job.planner = planner
         job.planner_detail = detail
@@ -912,7 +944,9 @@ def run_product_job(script_text: str, job_dir: Path, *,
                 pause_after_sec=line.get("pause_after_sec", 0.35)))
         action_seconds = sum(float(s.get("action_lead_sec") or 0.0)
                              for s in package["scenes"])
-        timeline = build_timeline(tl_lines, action_seconds=action_seconds)
+        timeline = build_timeline(
+            tl_lines, action_seconds=action_seconds,
+            end_card_sec=_end_card_seconds(package))
         # Re-time the shot plan with the REAL durations.
         timeline_entries = [
             {"line_index": i + 1, "speaker": l.speaker, "kind": l.kind,
@@ -932,6 +966,25 @@ def run_product_job(script_text: str, job_dir: Path, *,
               f"total {timeline.total_duration_sec:.2f}s, all lines "
               f"measured, no truncation (guard: voice <= timeline)")
 
+        # --- 7b. Motion Canvas spec (Windows 3D path) ------------------
+        # General scene-package -> World25D spec emission (one spec
+        # per scene, real per-shot camera keyframes, fixed within
+        # shots, cut on shot boundaries). Additional artifact for
+        # the Windows Motion Canvas render; never a gate for the
+        # 2D draft. A failure is LOUD in the job record and the 2D
+        # render continues; a partial file is never written.
+        try:
+            mc_spec = emit_job_spec(
+                package, shots, timeline.total_duration_sec,
+                snapshot_hash=job.script_hash)
+            (job_dir / "world25d_spec.json").write_text(json.dumps(
+                mc_spec, indent=2, ensure_ascii=False), encoding="utf-8")
+            stage("motioncanvas_spec", "done",
+                  f"{len(mc_spec['scene_specs'])} scene specs, "
+                  f"{mc_spec['duration_seconds']}s")
+        except MotionCanvasSpecError as exc:
+            stage("motioncanvas_spec", "failed", str(exc)[:300])
+
         # --- 8. SFX / Music -------------------------------------------
         rainy = any(s.get("location", {}).get("location_keyword")
                     == "rainy_street" for s in package["scenes"]) or \
@@ -942,7 +995,9 @@ def run_product_job(script_text: str, job_dir: Path, *,
         clock = 0.0
         line_by_index = {e["line_index"]: e for e in timeline_entries}
         for shot in shots:
-            if shot["kind"] == "action":
+            if shot["kind"] in ("action", "end_card"):
+                # Line-less shots (action leads, the end card) only
+                # advance the clock; they carry no timeline entry.
                 clock += shot["duration"]
             else:
                 entry = line_by_index[shot["line_index"]]
@@ -1252,6 +1307,9 @@ def run_product_job(script_text: str, job_dir: Path, *,
             "manifest": str(job_dir / "manifest.json"),
             "renderer_info": str(job_dir / "renderer_info.json"),
         }
+        if (job_dir / "world25d_spec.json").exists():
+            job.artifacts["motioncanvas_spec"] = str(
+                job_dir / "world25d_spec.json")
 
         # --- 15. Google Drive Upload (draft -> TEST folder) -------------
         if upload:
@@ -1269,7 +1327,10 @@ def run_product_job(script_text: str, job_dir: Path, *,
                          "size_bytes": remote_size,
                          "folder": TEST_FOLDER_ID,
                          "artifacts": {}}
-            for key in ("qa_report", "manifest", "contact_sheet"):
+            for key in ("qa_report", "manifest", "contact_sheet",
+                        "motioncanvas_spec"):
+                if key not in job.artifacts:
+                    continue
                 path = Path(job.artifacts[key])
                 r2 = client.upload_file(path, TEST_FOLDER_ID)
                 fid2 = r2.get("id", "")
@@ -1282,7 +1343,9 @@ def run_product_job(script_text: str, job_dir: Path, *,
             stage("drive_upload", "done",
                   f"TEST folder, file {file_id} "
                   f"({remote_size} bytes, verified) + QA report + "
-                  f"manifest + contact sheet")
+                  f"manifest + contact sheet"
+                  + (" + motioncanvas_spec"
+                     if "motioncanvas_spec" in job.artifacts else ""))
         else:
             stage("drive_upload", "skipped", "upload=False (test run)")
         (job_dir / "job.json").write_text(json.dumps(

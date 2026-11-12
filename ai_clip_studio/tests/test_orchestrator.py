@@ -25,7 +25,13 @@ from ai_clip_studio.orchestrator import (
 )
 from ai_clip_studio.pipeline import segment_script
 from ai_clip_studio import upstream
-from test_ai_clip_studio import MockDriveClient, make_silent_wav
+try:
+    # Dotted invocation (ai_clip_studio.tests.*): the tests dir is
+    # a namespace package, so the sibling module imports dotted.
+    from ai_clip_studio.tests.test_ai_clip_studio import (
+        MockDriveClient, make_silent_wav)
+except ImportError:  # Discovery (top-level test modules).
+    from test_ai_clip_studio import MockDriveClient, make_silent_wav
 
 
 def fallback_planner(script: str) -> dict:

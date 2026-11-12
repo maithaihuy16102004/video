@@ -823,7 +823,8 @@ class Handler(BaseHTTPRequestHandler):
             job_id = request.request_id
             config = {"language": str(body.get("language", "vi-VN")),
                       "aspect_ratio": str(body.get("aspect_ratio", "16:9")),
-                      "analysis_id": body.get("analysis_id")}
+                      "analysis_id": body.get("analysis_id"),
+                      "enrich_v1": bool(body.get("enrich_v1", False))}
             with JOBS_LOCK:
                 JOBS[job_id] = {"job_id": job_id, "status": "queued",
                                 "request_id": job_id,

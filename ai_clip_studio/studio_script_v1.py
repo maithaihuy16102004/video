@@ -76,6 +76,10 @@ SHOT_TYPES = (
     "object_insert",
     "tracking",
     "shot_reverse_shot",
+    # Stage 3 / channel-study vocabulary (R1/R6), mirroring
+    # camera_planner.SHOT_TYPES exactly (sync test).
+    "medium_close_up",
+    "graphic_insert",
 )
 
 TRANSITIONS = (

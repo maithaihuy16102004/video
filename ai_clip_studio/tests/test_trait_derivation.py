@@ -440,7 +440,7 @@ class TestCameraAnglesC9(unittest.TestCase):
         self.assertEqual(set(DEFAULT_ANGLE_BY_SHOT), {
             "establishing", "medium", "close_up", "extreme_close_up",
             "over_the_shoulder", "reaction", "object_insert", "tracking",
-            "shot_reverse_shot"})
+            "shot_reverse_shot", "medium_close_up", "graphic_insert"})
         self.assertTrue(all(a in CAMERA_ANGLES
                             for a in DEFAULT_ANGLE_BY_SHOT.values()))
 

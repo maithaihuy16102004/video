@@ -44,6 +44,9 @@ SHOT_TYPES = (
     "establishing", "medium", "close_up", "extreme_close_up",
     "over_the_shoulder", "reaction", "object_insert", "tracking",
     "shot_reverse_shot",
+    # Stage 3 / channel-study vocabulary (R1/R6), mirroring
+    # camera_planner.SHOT_TYPES exactly.
+    "medium_close_up", "graphic_insert",
 )
 CAMERA_MOVEMENTS = (
     "STATIC", "PAN_LEFT", "PAN_RIGHT", "TILT_UP", "TILT_DOWN",
@@ -113,6 +116,8 @@ DEFAULT_ANGLE_BY_SHOT = {
     "object_insert": "high_angle",
     "tracking": "eye_level",
     "shot_reverse_shot": "eye_level",
+    "medium_close_up": "eye_level",
+    "graphic_insert": "eye_level",
 }
 
 # Generic colour-word map. Mirror of planner_fallback.COLOR_WORDS

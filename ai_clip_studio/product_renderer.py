@@ -1829,6 +1829,10 @@ def plan_shots(package: dict, timeline: list[dict]) -> list[dict]:
             "counterpart": d.get("counterpart") or d.get("listener")
             or d.get("ots_counterpart"),
             "shot_id": d.get("shot_id"),
+            # SRS side from the directive (adapter alternates per
+            # shot); None means "no directive value" — plan_shots
+            # falls back to its per-scene counter below.
+            "srs_side": d.get("srs_side"),
             "location_override": d.get("location_override"),
             # Channel-study vocabulary (Stage 3): staging mode,
             # foreground occluder, shot-level character view,
@@ -2122,7 +2126,12 @@ def plan_shots(package: dict, timeline: list[dict]) -> list[dict]:
                 "costume_overrides": dict(scene_costumes),
             }
             if st == "shot_reverse_shot":
-                entry["srs_side"] = srs_counter % 2
+                # Directive value wins (the V1 adapter alternates
+                # srs_side per SRS shot in the scene); shots with no
+                # directive value keep the per-scene counter.
+                _ds = directive.get("srs_side") if directive else None
+                entry["srs_side"] = (1 if _ds else 0) \
+                    if _ds is not None else srs_counter % 2
                 srs_counter += 1
             entry.update(_prop_fields())
             if directive and directive.get("subject"):

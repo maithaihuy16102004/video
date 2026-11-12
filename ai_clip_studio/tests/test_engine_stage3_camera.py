@@ -414,5 +414,40 @@ class TestChannelVocabulary(unittest.TestCase):
         self.assertGreater(float((seam.sum(axis=2) < 120).mean()), 0.5)
 
 
+class TestDirectiveSrsSide(unittest.TestCase):
+    """M2 (Stage 3 integration): a shot directive's srs_side wins
+    over plan_shots' per-scene counter; shots without a directive
+    value keep the counter behaviour."""
+
+    def test_directive_srs_side_wins_over_counter(self):
+        # Counter order would be 0, 1; directives say 1, 0.
+        _, shots = _planned_shots([
+            {"scene": 1, "line_index": 1,
+             "shot_type": "shot_reverse_shot",
+             "camera_angle": "eye_level",
+             "camera_movement": "STATIC", "srs_side": True},
+            {"scene": 1, "line_index": 2,
+             "shot_type": "shot_reverse_shot",
+             "camera_angle": "eye_level",
+             "camera_movement": "STATIC", "srs_side": False}])
+        line_shots = [s for s in shots
+                      if s["kind"] in ("dialogue", "narration")]
+        self.assertEqual([s["srs_side"] for s in line_shots], [1, 0])
+
+    def test_missing_directive_srs_side_keeps_counter(self):
+        _, shots = _planned_shots([
+            {"scene": 1, "line_index": 1,
+             "shot_type": "shot_reverse_shot",
+             "camera_angle": "eye_level",
+             "camera_movement": "STATIC"},
+            {"scene": 1, "line_index": 2,
+             "shot_type": "shot_reverse_shot",
+             "camera_angle": "eye_level",
+             "camera_movement": "STATIC"}])
+        line_shots = [s for s in shots
+                      if s["kind"] in ("dialogue", "narration")]
+        self.assertEqual([s["srs_side"] for s in line_shots], [0, 1])
+
+
 if __name__ == "__main__":
     unittest.main()

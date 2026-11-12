@@ -31,7 +31,7 @@ from ai_clip_studio.language_gate import (  # noqa: E402
 )
 from ai_clip_studio.preflight import run_preflight  # noqa: E402
 from ai_clip_studio.product_flow import (  # noqa: E402
-    build_frame_symlinks, dedupe_audio_events,
+    _end_card_seconds, build_frame_symlinks, dedupe_audio_events,
 )
 from ai_clip_studio.product_renderer import (  # noqa: E402
     PAUSE_AFTER_SEC, action_actor, plan_shots, render_product_video,
@@ -566,6 +566,30 @@ class TestFrameCountExact(unittest.TestCase):
                 out["n_frames"],
                 round(out["duration_sec"] * 24),
                 "frame count must equal round(duration x fps)")
+
+
+class TestEndCardSeconds(unittest.TestCase):
+    """Stage 3 integration: the timeline must cover the end card."""
+
+    def test_duration_sec_preferred(self):
+        self.assertEqual(
+            _end_card_seconds({"v1_end_card": {"duration_sec": 3.0,
+                                               "duration": "3s"}}), 3.0)
+
+    def test_duration_string_parsed(self):
+        self.assertEqual(
+            _end_card_seconds({"v1_end_card": {"duration": "4s"}}), 4.0)
+        self.assertEqual(
+            _end_card_seconds({"end_card": {"duration": 2.5}}), 2.5)
+
+    def test_no_card_is_zero(self):
+        self.assertEqual(_end_card_seconds({}), 0.0)
+        self.assertEqual(_end_card_seconds({"v1_end_card": None}), 0.0)
+        self.assertEqual(
+            _end_card_seconds({"v1_end_card": {"duration": "bogus"}}),
+            0.0)
+        self.assertEqual(
+            _end_card_seconds({"v1_end_card": {"duration_sec": -1}}), 0.0)
 
 
 if __name__ == "__main__":

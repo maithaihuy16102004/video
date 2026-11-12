@@ -115,6 +115,23 @@ class TestTimeline(unittest.TestCase):
             make_silent_wav(w, 2.5)
             self.assertAlmostEqual(measure_wav_duration(w), 2.5, places=2)
 
+    def test_end_card_sec_included_in_total(self):
+        # Stage 3 integration: the end card is rendered video, so
+        # the timeline total must cover it (else timeline_sync
+        # fails on every script with an END_CARD block).
+        tl = build_timeline(
+            [TimelineLine(text="Câu.", duration_sec=2.0,
+                          pause_after_sec=0.35)],
+            end_card_sec=3.0)
+        # 2.0 + 0.35 + 0.5 tail + 3.0 card = 5.85
+        self.assertAlmostEqual(tl.total_duration_sec, 5.85, places=2)
+        self.assertAlmostEqual(tl.end_card_sec, 3.0, places=2)
+        tl0 = build_timeline(
+            [TimelineLine(text="Câu.", duration_sec=2.0,
+                          pause_after_sec=0.35)])
+        self.assertAlmostEqual(tl0.total_duration_sec, 2.85, places=2)
+        self.assertAlmostEqual(tl0.end_card_sec, 0.0, places=2)
+
 
 class TestPreflight(unittest.TestCase):
     def test_pass_with_measured_timeline(self):

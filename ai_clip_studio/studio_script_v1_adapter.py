@@ -227,6 +227,10 @@ SUPPORTED_CUES = frozenset({
 HONOURED_SHOT_TYPES = frozenset({
     "establishing", "medium", "close_up",
     "reaction", "object_insert", "tracking",
+    # Stage 3 / channel-study vocabulary (R1/R6): honoured by
+    # plan_shots (SHOT_SCALE carries both). Sync test: this set
+    # must equal the renderer's SHOT_SCALE keys exactly.
+    "medium_close_up", "graphic_insert",
 })
 
 # The deterministic planner's bus-arrival rule, reused verbatim so V1
@@ -1530,7 +1534,8 @@ def _v1_gemini_prompt(data: dict) -> str:
         '"shots": [{"scene": 1, "line_index": 1, '
         '"shot_type": "establishing" hoặc "medium" hoặc "close_up" hoặc '
         '"extreme_close_up" hoặc "over_the_shoulder" hoặc "reaction" hoặc '
-        '"object_insert" hoặc "tracking" hoặc "shot_reverse_shot", '
+        '"object_insert" hoặc "tracking" hoặc "shot_reverse_shot" hoặc '
+        '"medium_close_up" hoặc "graphic_insert", '
         '"purpose": "ngắn gọn"}], '
         '"sfx": [{"event": "rain_start" hoặc "foot_contact" hoặc "door_contact" '
         'hoặc "door_rotation" hoặc "paper_movement" hoặc "object_impact" hoặc '

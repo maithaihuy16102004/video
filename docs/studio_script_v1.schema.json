@@ -1215,7 +1215,9 @@
         "reaction",
         "object_insert",
         "tracking",
-        "shot_reverse_shot"
+        "shot_reverse_shot",
+        "medium_close_up",
+        "graphic_insert"
       ],
       "type": "string"
     },
