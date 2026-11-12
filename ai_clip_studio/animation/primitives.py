@@ -444,6 +444,154 @@ def run_to(char, from_x, to_x, duration, ground_y):
                      phase_name="run")
 
 
+def detour_walk(char, from_x, to_x, duration, ground_y, obstacle, *,
+                clearance=25.0, margin=40.0):
+    """Walk from ``from_x`` to ``to_x`` DETOURING AROUND a ground
+    obstacle instead of through it -- a generic obstacle-avoidance
+    primitive (the five-moment "avoids splashing water" beat is one
+    use: the obstacle is a puddle; any script passes any obstacle).
+
+    ``obstacle`` is a screen-space ellipse dict ``{x, y, rx, ry}``
+    (the puddle). The detour is a lateral (depth) arc: while the
+    character's x passes the obstacle, the root AND the feet rise by
+    ``bulge`` (screen-up = further away), so the feet pass BEHIND the
+    obstacle and never enter its ellipse, then return to the ground
+    line. The bump is TRAPEZOIDAL: sin^2 ramps over the approach /
+    exit margins, FLAT at full bulge across the whole obstacle, so
+    the feet clear it by the full clearance instead of grazing its
+    edge (the first sin^2 version grazed the ellipse at normalised
+    distance 1.01). The underlying walk is the proven planted-foot core (``walk_to``); only the screen-Y follows the
+    detour profile, so the foot-slip check is on X (a planted foot's
+    x never moves; its y follows the depth, exactly as a real step
+    around an obstacle does). If the obstacle is not on the path (or
+    is already clear of it, e.g. a puddle in the foreground below the
+    ground line), the bulge is 0 and the primitive degrades to a
+    plain walk. Returns f(t) -> char; also exposes ``bulge`` and the
+    crossing window as attributes on the returned function for tests.
+    """
+    walk_fn = walk_to(char, from_x, to_x, duration, ground_y)
+    ox, oy = float(obstacle["x"]), float(obstacle["y"])
+    orx, ory = float(obstacle["rx"]), float(obstacle["ry"])
+    direction = 1 if to_x >= from_x else -1
+    span = to_x - from_x
+    # Foot spread (v9.1 fix): the bump is keyed to the ROOT's x, but
+    # the feet extend +/- half a stride around the root (the walk's
+    # planted feet sit step/2 ahead and behind). With a margin of
+    # only 40 px, the FRONT foot entered the puddle's x-range while
+    # the root was still in the margin and the bump was ~0 -- the
+    # scene-test detour (H=783, stride 196 px) measured a minimum
+    # foot-ellipse distance of 0.76, i.e. a foot INSIDE the puddle.
+    # The flat top must therefore span the obstacle PLUS the foot
+    # spread on both sides, so the bump is at full height whenever
+    # ANY foot is within the obstacle's x-range; the ramps sit
+    # outside that. (The H=560 unit test passed by luck: its smaller
+    # stride (140 px) happened to plant the feet clear of the worst
+    # case. The v9 test now uses H=783 + the scene-test layout.)
+    from ai_clip_studio.animation.rig import GAIT_DEFAULT
+    spread = GAIT_DEFAULT["stride_frac"] * float(char.H) / 2.0
+    if span == 0:
+        u_a = u_b = u_c = u_d = 0.0
+    else:
+        # trapezoidal bump: ramp up over the margin, FLAT at full
+        # bulge across the obstacle PLUS the foot spread, ramp down
+        # over the far margin. (The first version used a single
+        # sin^2 bump over the whole window: the feet grazed the
+        # ellipse's side edge at normalised distance 1.01 -- outside,
+        # but only just. The flat top alone was not enough either:
+        # it was keyed to the root, not the feet.)
+        u_a = (ox - direction * (orx + spread + margin) - from_x) / span
+        u_b = (ox - direction * (orx + spread) - from_x) / span
+        u_c = (ox + direction * (orx + spread) - from_x) / span
+        u_d = (ox + direction * (orx + spread + margin) - from_x) / span
+    u_a, u_d = max(0.0, u_a), min(1.0, u_d)
+    u_b = min(max(0.0, u_b), 1.0)
+    u_c = min(max(0.0, u_c), 1.0)
+    # upward shift needed so the planted feet clear the obstacle's
+    # top edge by `clearance` (screen-up = further away).
+    bulge = max(0.0, (ground_y - (oy - ory)) + clearance)
+
+    def fn(t):
+        walk_fn(t)
+        u = min(1.0, max(0.0, t / max(duration, 0.01)))
+        if bulge > 0 and u_a < u < u_d:
+            if u < u_b:
+                w = math.sin(math.pi / 2 * (u - u_a)
+                             / max(u_b - u_a, 1e-6)) ** 2
+            elif u <= u_c:
+                w = 1.0
+            else:
+                w = math.cos(math.pi / 2 * (u - u_c)
+                             / max(u_d - u_c, 1e-6)) ** 2
+        else:
+            w = 0.0
+        lat = bulge * w
+        if lat:
+            char.pose["root_y"] = char.pose.get("root_y", ground_y) - lat
+            for attr in ("foot_target_l", "foot_target_r"):
+                tgt = getattr(char, attr, None)
+                if tgt is not None:
+                    setattr(char, attr, (tgt[0], tgt[1] - lat))
+        return char
+
+    fn.bulge = bulge
+    fn.crossing = (u_a, u_d)
+    fn.obstacle = dict(obstacle)
+    return fn
+
+
+def board_vehicle(char, from_x, door, duration, ground_y, *,
+                  step_height=36.0):
+    """Board a vehicle through its door -- a generic boarding
+    primitive (the five-moment "boards the bus" beat is one use: any
+    script passes any door). ``door`` is a screen-space rect dict
+    ``{x, y, width, height}`` (the door rect returned by
+    ``landmarks.draw_bus_2d``); the character walks to the door
+    centre, steps UP onto the vehicle step (feet plant on the step,
+    ``ground_y - step_height``), then walks IN through the doorway.
+    Three phases, all planted-foot: an approach walk (50% of the
+    duration), a step-up (20%, the whole body rises on a smoothstep
+    while the feet plant on the step), and an entry walk at step
+    height (30%). The caller draws the vehicle AFTER the character
+    for the entry frames, so the character is occluded by the doorway
+    as they go in (the occlusion contract -- the primitive only moves
+    the character; it does not hide them). Returns f(t) -> char.
+    """
+    door_cx = float(door["x"]) + float(door["width"]) / 2.0
+    door_top = float(door["y"])
+    # inside the doorway: half a door-width past the centre, still
+    # under the door top (the character is fully inside the frame).
+    inside_x = door_cx + (float(door["width"]) * 0.35)
+    t_walk = 0.50 * duration
+    t_step = 0.20 * duration
+    t_enter = 0.30 * duration
+    walk_fn = walk_to(char, from_x, door_cx, t_walk, ground_y)
+    enter_fn = walk_to(char, door_cx, inside_x, t_enter,
+                       ground_y - step_height)
+    _state = {"stepped": False}
+
+    def fn(t):
+        if t < t_walk:
+            walk_fn(t)
+            return char
+        if t < t_walk + t_step:
+            # step up: the whole body rises onto the step. The feet
+            # are planted on the step because standing() is called
+            # with the RAISED ground line.
+            u = smoothstep((t - t_walk) / max(t_step, 0.01))
+            gy_eff = ground_y - step_height * u
+            standing(char, door_cx, gy_eff,
+                     facing=char.pose.get("facing", 1))
+            _state["stepped"] = True
+            return char
+        enter_fn(t - t_walk - t_step)
+        return char
+
+    fn.door_centre_x = door_cx
+    fn.step_height = step_height
+    fn.inside_x = inside_x
+    return fn
+
+
 def turn_to(char, new_facing, duration=0.35):
     """Turn the character to face ``new_facing`` (+1 right / -1 left)
     as a VISIBLE rotation, not an instant flip.
@@ -551,6 +699,18 @@ def wave(char, duration, freq=1.8):
     so the hand settles at the raised position instead of stopping
     mid-swing when the segment (and the video) ends (E10 end
     ratio was 0.82).
+
+    v9 (audit 2026-11-11): the wave INHERITS the incoming torso lean
+    and head look instead of snapping them to 0 at t=0. The motion
+    test waves straight after the handover, which ends at lean 0.08;
+    the old wave set lean 0 on its first frame, so the head moved
+    10.7 px/frame in the wave's first 3 frames while the segment
+    peak is only 12.7 (rubric E10 start ratio 0.84). The lean is now
+    captured like the hand (with the same stale-pre-warm re-capture
+    guard) and lerped from the incoming value to the wave's -0.05 as
+    the rise progresses -- the head starts still and the body
+    counter-leans gently as the arm rises, which is also the more
+    natural motion. A standalone wave (incoming lean 0) is unchanged.
     """
     _start = {}
 
@@ -560,10 +720,24 @@ def wave(char, duration, freq=1.8):
         if "hand" not in _start:
             _start["hand"] = char.joints()["hand_r"]
             _start["last"] = None
+            # v9: inherit the incoming lean / head look (see docstring).
+            _start["lean"] = char.pose.get("torso_lean", 0.0)
+            _start["look"] = char.pose.get("head_look", 0.0)
         elif (_start["last"] is not None and t < 0.25
                 and _start_moved(char, "hand_r", _start["last"])):
             # stale pre-warm capture -- re-capture (see _start_moved)
             _start["hand"] = char.joints()["hand_r"]
+            _start["lean"] = char.pose.get("torso_lean", 0.0)
+            _start["look"] = char.pose.get("head_look", 0.0)
+        elif t < 0.25 and abs(char.pose.get("torso_lean", 0.0)
+                              - _start.get("lean", 0.0)) > 0.02:
+            # the hand did not move (the guard above did not fire)
+            # but the LEAN did -- e.g. the wave was pre-warmed
+            # standing (lean 0) and now starts after a leaning
+            # handover. Re-capture so the wave starts from the
+            # incoming lean instead of snapping to 0.
+            _start["lean"] = char.pose.get("torso_lean", 0.0)
+            _start["look"] = char.pose.get("head_look", 0.0)
         sx, sy = _start["hand"]
         rise = smoothstep(min(1.0, t / 0.7))
         sway = math.sin(2 * math.pi * freq * max(0.0, t - 0.7))
@@ -585,8 +759,12 @@ def wave(char, duration, freq=1.8):
         x += _s(char, 22) * sway * rise
         char.hand_target_r = (x, y)
         _start["last"] = char.hand_target_r
-        char.set_pose(elbow_r=0.6, torso_lean=-0.05 * rise,
-                      head_look=-0.10 * rise)
+        # v9: lean / look lerp from the INCOMING values (captured
+        # above) to the wave's values as the rise progresses -- no
+        # snap at t=0 (see docstring).
+        char.set_pose(elbow_r=0.6,
+                      torso_lean=lerp(_start["lean"], -0.05, rise),
+                      head_look=lerp(_start["look"], -0.10, rise))
         return char
     return fn
 

@@ -87,6 +87,39 @@ _CUE_MOVE = ("walk", "run", "hurry", "chase")
 _CUE_LOOK = ("look", "search", "glance", "notice", "spot")
 _CUE_EMOTION = ("smile", "relief", "laugh", "cry", "emotion", "worried",
                 "surprise", "fear", "happy", "sad", "nod", "wave")
+# v9 (overnight scene/camera work): the planner's vocabulary had 9
+# shot types but plan() could only ever produce 7 -- over_the_shoulder
+# and shot_reverse_shot had NO cue path at all (a dialogue shot never
+# went over a shoulder, a reply never reversed the angle). Two new
+# generic paths, no story names:
+#   * a line segment WITH a listener (or a "face_to_face" / "dialogue"
+#     cue) frames the speaker over the listener's shoulder;
+#   * a "reverse_shot" cue frames the other side of the conversation
+#     (the caller plans the matching pair: A speaks, B replies).
+#   * "requested_shot" on the segment requests one type explicitly
+#     (validated against SHOT_TYPES) -- the shot-plan test uses it to
+#     prove every type on a real scene; cue planning is unchanged.
+_CUE_DIALOGUE = ("face_to_face", "dialogue", "conversation",
+                 "over_shoulder", "ots")
+_CUE_REVERSE = ("reverse_shot", "shot_reverse_shot", "reverse_angle")
+_REQUESTED_SUBJECT = {
+    "object_insert": "object",
+    "establishing": "scene",
+    "over_the_shoulder": "speaker",
+    "shot_reverse_shot": "receiver",
+    "reaction": "speaker",
+}
+_REQUESTED_PURPOSE = {
+    "establishing": "wide establishing shot of the place",
+    "medium": "medium shot of the speaking character",
+    "close_up": "close-up on the speaking character",
+    "extreme_close_up": "extreme close-up on the face",
+    "over_the_shoulder": "over the listener's shoulder onto the speaker",
+    "reaction": "close-up reaction shot",
+    "object_insert": "close-up insert of the object",
+    "tracking": "camera tracks alongside the moving character",
+    "shot_reverse_shot": "reverse angle on the other character",
+}
 
 
 def _norm_cues(cues):
@@ -141,7 +174,24 @@ def _shots_for_segment(segment):
     """
     cues = _norm_cues(segment.get("action_cues"))
     speaker = (segment.get("speaker") or "").strip().lower()
-    is_narration = speaker in ("narrator", "narration", "") or not cues
+    # v9: a line WITH a listener is dialogue, never narration -- the
+    # old `or not cues` clause misclassified a bare line (speaker +
+    # listener, no action cues) as narration and planned an
+    # establishing shot for it, so the over-the-shoulder cue path
+    # never fired for ordinary two-character dialogue.
+    is_narration = speaker in ("narrator", "narration", "") or (
+        not cues and not segment.get("listener"))
+
+    # v9: an explicit shot request on the segment (validated) wins --
+    # the shot-plan test uses it to prove every shot type on a real
+    # scene. Anything else falls through to cue planning, unchanged.
+    requested = segment.get("requested_shot")
+    if requested in SHOT_TYPES:
+        return [(requested, _REQUESTED_PURPOSE[requested],
+                 _REQUESTED_SUBJECT.get(requested, "speaker"))]
+    if requested is not None:
+        raise ValueError(f"unknown requested_shot: {requested!r} "
+                         f"(expected one of {sorted(SHOT_TYPES)})")
 
     # Dialogue segments ("kind": "line"): characters are standing and
     # talking, so movement cues do NOT apply — the camera should frame
@@ -151,6 +201,9 @@ def _shots_for_segment(segment):
     # Character speaker + emotion cue -> reaction close-up.
     # Character speaker otherwise -> medium on the speaker.
     # Narrator with neither -> establishing (breathing room).
+    # v9: a line WITH a listener (or a face-to-face / dialogue cue)
+    # goes over the listener's shoulder -- but an emotional beat still
+    # wins the reaction close-up.
     if segment.get("kind") == "line":
         if is_narration:
             # A boarding/arrival line is about the vehicle arriving,
@@ -173,6 +226,19 @@ def _shots_for_segment(segment):
         if _has(cues, _CUE_EMOTION):
             return [("reaction", "close-up reaction shot carrying the "
                      "emotional beat", "speaker")]
+        # v9: a reverse cue on a dialogue line is the shot-reverse-shot
+        # half of the conversation -- it wins over the plain OTS, so a
+        # reply line can ask for the reverse angle by cue, not only by
+        # requested_shot.
+        if _has(cues, _CUE_REVERSE):
+            return [("shot_reverse_shot",
+                     "reverse angle on the replying character, eye-line "
+                     "matched with the previous shot", "speaker")]
+        if segment.get("listener") or _has(cues, _CUE_DIALOGUE):
+            return [("over_the_shoulder",
+                     "over the listener's shoulder onto the speaking "
+                     "character, the conversation in one frame",
+                     "speaker")]
         return [("medium", "medium shot of the speaking character",
                  "speaker")]
     if _has(cues, _CUE_HANDOFF):
@@ -191,6 +257,13 @@ def _shots_for_segment(segment):
             ("medium", "medium shot of the character as the vehicle "
              "arrives / the character boards", "speaker"),
         ]
+    # v9: reverse angle -- the other side of a conversation. The
+    # caller plans the matching pair (A speaks, B replies); each side
+    # is one shot, eye-line matched by the renderer.
+    if _has(cues, _CUE_REVERSE):
+        return [("shot_reverse_shot",
+                 "reverse angle on the other character, eye-line "
+                 "matched with the previous shot", "receiver")]
     # Multi-group composition (story order: move -> look -> pick -> emotion).
     groups = []
     if _has(cues, _CUE_MOVE):

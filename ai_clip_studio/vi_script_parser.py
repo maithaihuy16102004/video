@@ -32,7 +32,7 @@ SCENE_RE = re.compile(r"^#{0,3}\s*CẢNH\s+(\d+)\s*[—\-:–]?\s*(.*)$")
 FIELD_RE = re.compile(r"^(Bối cảnh|Hành động|Âm thanh|Yêu cầu animation|Người dẫn chuyện)\s*:\s*(.*)$")
 DIALOGUE_RE = re.compile(r"^([A-ZÀ-Ỹ][\wÀ-ỹ]{0,15}(?: [A-ZÀ-Ỹ][\wÀ-ỹ]{0,15})?)\s*:\s*\"(.+)\"\s*$")
 NARRATOR_RE = re.compile(r"^Người dẫn chuyện\s*:\s*\"(.+)\"\s*$")
-CHARACTER_RE = re.compile(r"^-\s*([A-ZÀ-Ỹ][\wÀ-ỹ]{0,15})\s*:\s*(.+)$")
+CHARACTER_RE = re.compile(r"^-\s*([A-ZÀ-Ỹ][\wÀ-ỹ]{0,15}(?: [A-ZÀ-Ỹ][\wÀ-ỹ]{0,15})?)\s*:\s*(.+)$")
 QUOTED_RE = re.compile(r"\"([^\"]+)\"")
 
 # Generic Vietnamese action-verb map: regex -> action cue. Used by the
@@ -164,9 +164,12 @@ def parse_vi_script(script_text: str) -> ViScript:
                     if key in desc.lower():
                         hint = key
                         break
-                result.characters.append(
-                    {"name": cm.group(1), "description": desc,
-                     "voice_hint": hint})
+                # One entry per character: scripts repeat the cast list
+                # in every scene; keep the first description.
+                if cm.group(1) not in {c["name"] for c in result.characters}:
+                    result.characters.append(
+                        {"name": cm.group(1), "description": desc,
+                         "voice_hint": hint})
                 continue
             in_characters = False
         if current is None:

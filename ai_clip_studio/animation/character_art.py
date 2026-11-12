@@ -344,6 +344,29 @@ def make_character_instance(name, **overrides):
     return make_character(template, **spec)
 
 
+def make_character_from_data(data):
+    """Build a character from STRUCTURED DATA (the Gemini hook).
+
+    Mai's reminder (2026-11-11 23:22): Gemini supplies a script's
+    distinctive character traits as structured data; the engine must
+    ACCEPT that data and draw from it, not hardcode a character's
+    traits. ``data`` is a dict with the same fields ``make_character``
+    takes: ``template`` ('male' | 'female' | 'child' | 'elderly'),
+    ``name``, ``suit``, ``body_variant``, ``height``, and any template
+    field (hat, moustache, hair_style, glasses, cane, costume).
+    A named ``instance`` key resolves through CHARACTER_INSTANCES
+    first (so a pipeline that only knows the name still works); a
+    ``template`` key builds a fresh character from the data. Unknown
+    keys are ignored (the pipeline may carry extra Gemini fields).
+    """
+    spec = dict(data or {})
+    if "instance" in spec and "template" not in spec:
+        name = spec.pop("instance")
+        return make_character_instance(name, **spec)
+    template = spec.pop("template", "male")
+    return make_character(template, **spec)
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
