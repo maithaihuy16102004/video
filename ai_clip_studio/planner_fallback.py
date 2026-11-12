@@ -21,6 +21,16 @@ from __future__ import annotations
 
 import re
 
+from .trait_derivation import (
+    build_character_trait_block,
+    build_location_trait_block,
+    build_trait_blocks,
+    derive_action_directives,
+    derive_location_traits,
+    derive_render_traits,
+    map_action_cue_to_primitive,
+    snapshot_hash_for_text,
+)
 from .vi_script_parser import parse_vi_script
 
 COLOR_WORDS: list[tuple[str, str]] = [
@@ -117,10 +127,86 @@ def deterministic_planner(script_text: str) -> dict:
         for cue in scene.action_cues:
             audio_events.append({"event": cue, "scene": scene.number,
                                  "at_seconds": round(clock, 2)})
-    return {
+    package = {
         "characters": characters,
         "locations": locations,
         "scenes": scenes,
         "shots": shots,
         "audio_events": audio_events,
     }
+    package["trait_blocks"] = _fallback_trait_blocks(
+        script_text, characters, parsed)
+    return package
+
+
+def _fallback_trait_blocks(script_text: str, characters: list[dict],
+                           parsed) -> dict:
+    """Section 15 trait blocks, deterministic derivation only.
+
+    Same envelope shape as the Gemini route (shape parity is
+    structural: one shared builder). Audio is empty: a cue-less
+    free-form script has no scripted cues, and the package's
+    estimated audio_events timestamps must never be presented as
+    section 15.4 events.
+    """
+    char_map = {" ".join(c["name"].strip().casefold().split()): c["name"]
+                for c in characters}
+    directives, unmapped = derive_action_directives(
+        [{"text": s.action_text, "scene_number": s.number,
+          "shot_id": None, "source_line": None}
+         for s in parsed.scenes],
+        char_map)
+    # Cue-tag fallback: when a scene's action prose yields no
+    # directive at all, its cue tags still map (where a primitive
+    # exists); unmappable cues are reported, never substituted.
+    covered_scenes = {d["scene_number"] for d in directives}
+    for scene in parsed.scenes:
+        if scene.number in covered_scenes:
+            continue
+        for cue in scene.action_cues:
+            primitive = map_action_cue_to_primitive(cue)
+            if primitive is None:
+                unmapped.append({
+                    "kind": "action_cue", "action_text": cue,
+                    "scene_number": scene.number, "shot_id": None,
+                    "source_line": None,
+                    "reason": ("no PRIMITIVES mapping for this "
+                               "action cue"),
+                })
+            else:
+                directives.append({
+                    "type": primitive, "char": None, "start": None,
+                    "duration": 1.5, "scene_number": scene.number,
+                    "shot_id": None, "source_line": None,
+                    "action_text": cue,
+                })
+    blocks = []
+    for char in characters:
+        traits = derive_render_traits(
+            char["name"], "", char["description"], "", [],
+            char["voice_hint"], height_px=char["height_px"])
+        traits["jacket_color"] = char["jacket_color"]
+        if char["voice_hint"]:
+            traits["voice_hint"] = char["voice_hint"]
+        blocks.append(build_character_trait_block(
+            identity_id=char["name"], name=char["name"],
+            appearance=char["description"],
+            voice_style=char["voice_hint"],
+            render_traits=traits,
+            actions=[d for d in directives
+                     if d.get("char") == char["name"]]))
+    location_blocks = []
+    for scene in parsed.scenes:
+        block = build_location_trait_block(
+            location_id=f"scene_{scene.number}",
+            scene_numbers=[scene.number], name=scene.setting)
+        block["render_traits"] = derive_location_traits(
+            inline_text=scene.setting)
+        location_blocks.append(block)
+    return build_trait_blocks(
+        snapshot_hash=snapshot_hash_for_text(script_text),
+        planner="fallback", model=None, usage=None,
+        reason="deterministic local planner (no Gemini call ran)",
+        characters=blocks, locations=location_blocks,
+        sfx=[], music=[], unmapped_cues=[],
+        actions=directives, unmapped=unmapped, dropped=[])

@@ -50,7 +50,15 @@ import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .audio_events import plan_audio_events
+from .audio_events import (
+    SYNTHESIS_MAP,
+    AudioEvent,
+    audio_event_to_synth_job,
+    plan_audio_events,
+    resolve_mix_gains,
+    resolve_v1_cues,
+    scene_none_flags,
+)
 from .chrome_detect import detect_chrome
 from .drive_uploader import DRIVE_ROOT_FOLDER_ID, GwsCliDriveClient
 from .gemini_planner import resolve_plan
@@ -175,11 +183,15 @@ def build_frame_symlinks(frames: list, out_dir: Path) -> str:
     return str(out_dir / "f%04d.png")
 
 
-def _mix_audio(job_dir: Path, timeline_entries: list[dict],
-               total_sec: float, rainy: bool) -> tuple[Path, dict]:
+def _mix_audio_legacy(job_dir: Path, timeline_entries: list[dict],
+                      total_sec: float, rainy: bool) -> tuple[Path, dict]:
     """Mix voice wavs at their timeline offsets + a restrained rain
     bed (when the script is rainy). Returns (mix_path, measurements).
-    The rain bed is verified to sit at least 6 dB below the voice."""
+    The rain bed is verified to sit at least 6 dB below the voice.
+
+    Kept byte-identical for old-style callers: _mix_audio dispatches
+    here when no stem data is passed (see _mix_audio_stems for the
+    Stage 3 stem-based mix)."""
     mix = job_dir / "audio" / "mix.wav"
     mix.parent.mkdir(parents=True, exist_ok=True)
     inputs: list[str] = []
@@ -234,6 +246,389 @@ def _mix_audio(job_dir: Path, timeline_entries: list[dict],
     return mix, {"rain_db": rain_db, "voice_db_mean": voice_db,
                  "voice_minus_rain_db": restraint,
                  "rain_bed": str(rain_path) if rain_path else None}
+
+
+def _db_to_linear(db: float) -> float:
+    return 10.0 ** (float(db) / 20.0)
+
+
+def _synth_segment(spec: dict, duration: float, out_path: Path,
+                   *, fade_mode: str = "edge") -> Path:
+    """Render one synthesised segment wav from a SYNTHESIS_MAP spec
+    (ffmpeg lavfi, mono 48 kHz). fade_mode "edge" fades out at the
+    end of the segment; "full" fades out across the whole segment
+    (BGM lines such as "fade down to near silence")."""
+    dur = max(0.05, float(duration))
+    if fade_mode == "full":
+        fade_st, fade_d = 0.0, dur
+    else:
+        fade_d = min(0.35, dur * 0.5)
+        fade_st = max(0.0, dur - fade_d)
+    edge = min(0.2, dur / 4.0)
+    fmt = {"dur": f"{dur:.3f}", "fade_st": f"{fade_st:.3f}",
+           "fade_d": f"{fade_d:.3f}", "edge": f"{edge:.3f}"}
+    inputs: list[str] = []
+    for lavfi in spec["inputs"]:
+        inputs += ["-f", "lavfi", "-i", lavfi.format(**fmt)]
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    r = subprocess.run(
+        ["ffmpeg", "-y", "-v", "error"] + inputs + [
+            "-filter_complex", spec["filter"].format(**fmt),
+            "-map", "[out]", "-ac", "1", "-ar", "48000", str(out_path)],
+        capture_output=True, text=True, timeout=120)
+    if r.returncode != 0 or not out_path.exists():
+        raise RuntimeError(
+            f"synthesis failed ({spec['method']}): {r.stderr[:300]}")
+    return out_path
+
+
+def _rms_db_windows(path: Path,
+                    windows: list[tuple[float, float]]) -> float | None:
+    """RMS dB of an audio file over the UNION of time windows, via
+    one ffmpeg aselect+astats pass. Silence -> -120.0 (the same
+    convention _rms_db uses). Used for the restraint check: voice
+    vs each non-voice stem, measured in dialogue windows only."""
+    windows = [(a, b) for a, b in windows if b > a]
+    if not windows:
+        return _rms_db(path)
+    expr = "+".join(f"between(t,{a:.3f},{b:.3f})" for a, b in windows)
+    filt = f"aselect='{expr}',asetpts=N/SR/TB,astats=metadata=1"
+    r = subprocess.run(
+        ["ffmpeg", "-v", "info", "-i", str(path), "-vn",
+         "-af", filt, "-f", "null", "-"],
+        capture_output=True, text=True, timeout=120)
+    overall = False
+    for line in (r.stderr or "").splitlines():
+        if "Overall" in line:
+            overall = True
+        if overall and "RMS level dB:" in line:
+            value = line.split("RMS level dB:")[-1].strip()
+            if value in ("-inf", "-infinity"):
+                return -120.0
+            try:
+                return float(value)
+            except ValueError:
+                return None
+    return None
+
+
+def _combine_rms_db(values: list[float | None]) -> float | None:
+    """RMS dB of the sum of non-overlapping signals measured over the
+    same windows (mean squares add; dialogue and narration stems
+    never overlap in time)."""
+    energies = [10.0 ** (v / 10.0) for v in values if v is not None]
+    if not energies:
+        return None
+    import math
+    return round(10.0 * math.log10(sum(energies)), 2)
+
+
+def _placed_stem(placements: list[tuple[Path, float, float]],
+                 total_sec: float, out_path: Path, *,
+                 duck_windows: list[tuple[float, float]] | None = None,
+                 duck_db: float | None = None,
+                 mute_windows: list[tuple[float, float]] | None = None
+                 ) -> Path:
+    """Mix placed segments into one full-length stem wav.
+
+    placements: (wav_path, gain_db, delay_sec). Ducking lowers the
+    whole stem by duck_db during each duck window (speech); mute
+    windows silence it (explicit NONE spans). The output is exactly
+    total_sec long (apad + atrim)."""
+    inputs: list[str] = []
+    filters: list[str] = []
+    labels: list[str] = []
+    for i, (wav, gain_db, delay_sec) in enumerate(placements):
+        inputs += ["-i", str(wav)]
+        delay_ms = int(round(max(0.0, delay_sec) * 1000))
+        filters.append(
+            f"[{i}:a]volume={_db_to_linear(gain_db):.6f},"
+            f"adelay={delay_ms}:all=1[p{i}]")
+        labels.append(f"[p{i}]")
+    n = len(labels)
+    filters.append(
+        f"{''.join(labels)}amix=inputs={n}:normalize=0:"
+        f"duration=longest[mix]")
+    last = "[mix]"
+    step = 0
+    if duck_db is not None and duck_windows:
+        for a, b in duck_windows:
+            if b <= a:
+                continue
+            filters.append(
+                f"{last}volume={_db_to_linear(duck_db):.6f}:"
+                f"enable='between(t,{a:.3f},{b:.3f})'[d{step}]")
+            last = f"[d{step}]"
+            step += 1
+    if mute_windows:
+        for a, b in mute_windows:
+            if b <= a:
+                continue
+            filters.append(
+                f"{last}volume=0:"
+                f"enable='between(t,{a:.3f},{b:.3f})'[m{step}]")
+            last = f"[m{step}]"
+            step += 1
+    filters.append(
+        f"{last}apad=whole_dur={total_sec:.2f},"
+        f"atrim=0:{total_sec:.2f}[out]")
+    r = subprocess.run(
+        ["ffmpeg", "-y", "-v", "error"] + inputs + [
+            "-filter_complex", ";".join(filters), "-map", "[out]",
+            "-ac", "1", "-ar", "48000", str(out_path)],
+        capture_output=True, text=True, timeout=300)
+    if r.returncode != 0 or not out_path.exists():
+        raise RuntimeError(
+            f"stem build failed ({out_path.name}): {r.stderr[:400]}")
+    return out_path
+
+
+def _mix_audio_stems(job_dir: Path, timeline_entries: list[dict],
+                     total_sec: float, rainy: bool,
+                     segments: list[dict], beds: list[dict],
+                     mix_gains: dict | None,
+                     none_spans: dict) -> tuple[Path, dict]:
+    """Stem-based mix (Stage 3): voice stems (dialogue/narration) +
+    synthesised foley segments + ambience beds + music pads, each a
+    separate wav under job_dir/audio/, plus the master mix.wav.
+
+    Restraint is HARD and measured: in dialogue windows the voice
+    RMS must sit >= 6 dB above every non-voice stem. A stem that
+    fails is lowered and the mix rebuilt (up to 3 rebuilds); the
+    voice is never raised. Music/ambience duck under speech by the
+    resolved ducking amount; the master respects MASTER_LIMIT_DB
+    (alimiter) when the package carries it. The mix is exactly
+    total_sec long with a 0.5 s fade-out, never truncated."""
+    audio_dir = job_dir / "audio"
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    synth_dir = audio_dir / "synth"
+    synth_dir.mkdir(parents=True, exist_ok=True)
+    gains = mix_gains or resolve_mix_gains({})
+    bus = gains["bus_gains"]
+    duck_db = gains["ducking_db"]
+    master_limit = gains["master_limit_db"]
+    windows = [(float(e["start"]), float(e["end"]))
+               for e in timeline_entries
+               if e.get("start") is not None
+               and e.get("end") is not None]
+    skipped = 0
+
+    synth_files: dict[tuple[str, float, bool], Path] = {}
+
+    def _synth_for(kind: str, duration: float,
+                   fade_down: bool = False) -> Path:
+        key = (kind, round(float(duration), 3), bool(fade_down))
+        if key in synth_files:
+            return synth_files[key]
+        path = synth_dir / f"{kind}_{len(synth_files):03d}.wav"
+        _synth_segment(SYNTHESIS_MAP[kind], duration, path,
+                       fade_mode="full" if fade_down else "edge")
+        synth_files[key] = path
+        return path
+
+    # Rain bed: the same lavfi chain as the legacy path, rendered
+    # from the single rain_bed spec definition.
+    rain_path = None
+    rain_db = None
+    if rainy:
+        rain_path = audio_dir / "rain_bed.wav"
+        _synth_segment(SYNTHESIS_MAP["rain_bed"], total_sec, rain_path)
+        rain_db = _rms_db(rain_path)
+
+    # Voice stems, split by kind, at GLOBAL_AUDIO bus gains.
+    dialogue_placements: list[tuple[Path, float, float]] = []
+    narration_placements: list[tuple[Path, float, float]] = []
+    for entry in timeline_entries:
+        placement = (Path(entry["wav"]),
+                     bus["narration_gain_db"]
+                     if entry.get("kind") == "narration"
+                     else bus["dialogue_gain_db"],
+                     float(entry["start"]))
+        if entry.get("kind") == "narration":
+            narration_placements.append(placement)
+        else:
+            dialogue_placements.append(placement)
+    stem_paths: dict[str, Path] = {}
+    if dialogue_placements:
+        stem_paths["dialogue.wav"] = _placed_stem(
+            dialogue_placements, total_sec, audio_dir / "dialogue.wav")
+    if narration_placements:
+        stem_paths["narration.wav"] = _placed_stem(
+            narration_placements, total_sec, audio_dir / "narration.wav")
+    voice_paths = [stem_paths[k] for k in ("dialogue.wav",
+                                           "narration.wav")
+                   if k in stem_paths]
+
+    # Foley segments (points + ACTION_DURATION spans).
+    foley_placements: list[tuple[Path, float, float]] = []
+    for seg in segments:
+        duration = float(seg.get("duration") or 0.0)
+        if duration <= 0:
+            skipped += 1
+            continue
+        foley_placements.append((
+            _synth_for(seg["synth_kind"], duration),
+            float(seg["gain_db"]), float(seg["at_seconds"])))
+    # Ambience beds (+ the rain bed, ducked and NONE-muted with them).
+    ambience_placements: list[tuple[Path, float, float]] = []
+    music_placements: list[tuple[Path, float, float]] = []
+    for bed in beds:
+        start = float(bed["start"])
+        end = float(bed["end"])
+        if end <= start:
+            skipped += 1
+            continue
+        placed = (_synth_for(bed["synth_kind"], end - start,
+                             bed.get("fade_down", False)),
+                  float(bed["gain_db"]), start)
+        if bed.get("stem") == "music":
+            music_placements.append(placed)
+        else:
+            ambience_placements.append(placed)
+    if rain_path is not None:
+        ambience_placements.append((rain_path, 0.0, 0.0))
+    ambience_mute = [(float(a), float(b)) for a, b in
+                     (none_spans.get("ambience") or [])]
+    bgm_mute = [(float(a), float(b)) for a, b in
+                (none_spans.get("bgm") or [])]
+
+    def build_stems(extra_att: dict[str, float]) -> dict[str, Path]:
+        built: dict[str, Path] = {}
+        if foley_placements:
+            built["foley.wav"] = _placed_stem(
+                [(p, g + extra_att.get("foley.wav", 0.0), d)
+                 for p, g, d in foley_placements],
+                total_sec, audio_dir / "foley.wav")
+        if ambience_placements:
+            built["ambience.wav"] = _placed_stem(
+                [(p, g + extra_att.get("ambience.wav", 0.0), d)
+                 for p, g, d in ambience_placements],
+                total_sec, audio_dir / "ambience.wav",
+                duck_windows=windows, duck_db=duck_db,
+                mute_windows=ambience_mute)
+        if music_placements:
+            built["music.wav"] = _placed_stem(
+                [(p, g + extra_att.get("music.wav", 0.0), d)
+                 for p, g, d in music_placements],
+                total_sec, audio_dir / "music.wav",
+                duck_windows=windows, duck_db=duck_db,
+                mute_windows=bgm_mute)
+        return built
+
+    def build_master(non_voice: dict[str, Path]) -> Path:
+        mix_inputs = voice_paths + [non_voice[k] for k in
+                                    ("foley.wav", "ambience.wav",
+                                     "music.wav") if k in non_voice]
+        if not mix_inputs:
+            raise RuntimeError("no audio inputs to mix")
+        inputs: list[str] = []
+        for path in mix_inputs:
+            inputs += ["-i", str(path)]
+        labels = "".join(f"[{i}:a]" for i in range(len(mix_inputs)))
+        chain = (f"{labels}amix=inputs={len(mix_inputs)}:normalize=0:"
+                 f"duration=longest[mix];"
+                 f"[mix]apad=whole_dur={total_sec:.2f},"
+                 f"atrim=0:{total_sec:.2f}")
+        if master_limit is not None:
+            chain += (f",alimiter=limit={_db_to_linear(master_limit):.6f}"
+                      ":level=false")
+        chain += (f",afade=t=out:st={max(0.0, total_sec - 0.5):.2f}"
+                  ":d=0.5[out]")
+        mix = audio_dir / "mix.wav"
+        r = subprocess.run(
+            ["ffmpeg", "-y", "-v", "error"] + inputs + [
+                "-filter_complex", chain, "-map", "[out]",
+                "-ac", "1", "-ar", "48000", str(mix)],
+            capture_output=True, text=True, timeout=300)
+        if r.returncode != 0 or not mix.exists():
+            raise RuntimeError(f"audio mix failed: {r.stderr[:500]}")
+        return mix
+
+    # Voice window RMS (voice stems never change, so measure once).
+    voice_db_windows = _combine_rms_db(
+        [_rms_db_windows(p, windows) for p in voice_paths]) \
+        if voice_paths and windows else None
+    extra_att: dict[str, float] = {}
+    non_voice = build_stems(extra_att)
+    mix = build_master(non_voice)
+    stem_dbs: dict[str, float | None] = {}
+    gaps: dict[str, float | None] = {}
+    iterations = 0
+    for attempt in range(4):
+        iterations = attempt + 1
+        stem_dbs = {name: _rms_db_windows(path, windows)
+                    for name, path in non_voice.items()}
+        gaps = {}
+        failing: dict[str, float] = {}
+        for name, stem_db in stem_dbs.items():
+            if voice_db_windows is None or stem_db is None:
+                gaps[name] = None
+            else:
+                gaps[name] = round(voice_db_windows - stem_db, 1)
+                if gaps[name] < 6.0:
+                    failing[name] = gaps[name]
+        if not failing or attempt == 3:
+            break
+        for name, gap in failing.items():
+            extra_att[name] = extra_att.get(name, 0.0) - (6.0 - gap + 1.0)
+        non_voice = build_stems(extra_att)
+        mix = build_master(non_voice)
+    restraint_ok = None
+    if gaps:
+        measured = [g for g in gaps.values() if g is not None]
+        restraint_ok = bool(measured) and all(g >= 6.0 for g in measured)
+    mix_duration = measure_wav_duration(mix)
+    if abs(mix_duration - total_sec) > 0.05:
+        raise RuntimeError(
+            f"mix length {mix_duration:.3f}s != timeline "
+            f"{total_sec:.3f}s — refusing an inexact mix")
+    voice_rms = [_rms_db(Path(e["wav"])) for e in timeline_entries]
+    voice_rms = [v for v in voice_rms if v is not None]
+    voice_db_mean = (sum(voice_rms) / len(voice_rms)
+                     if voice_rms else None)
+    all_stems = dict(stem_paths)
+    all_stems.update(non_voice)
+    return mix, {
+        "rain_db": rain_db, "voice_db_mean": voice_db_mean,
+        "voice_minus_rain_db": (round(voice_db_mean - rain_db, 1)
+                                if rain_db is not None
+                                and voice_db_mean is not None else None),
+        "rain_bed": str(rain_path) if rain_path else None,
+        "stems": {name: str(path) for name, path in all_stems.items()},
+        "restraint": {
+            "voice_db_windows": voice_db_windows,
+            "stem_db_windows": stem_dbs, "gaps_db": gaps,
+            "extra_attenuation_db": extra_att,
+            "iterations": iterations, "ok": restraint_ok,
+            "required_gap_db": 6.0, "ducking_db": duck_db},
+        "ducking_db": duck_db, "master_limit_db": master_limit,
+        "mix_duration_sec": round(mix_duration, 3),
+        "fade_out_sec": 0.5,
+        "synth_segments": len(synth_files),
+        "skipped_jobs": skipped}
+
+
+def _mix_audio(job_dir: Path, timeline_entries: list[dict],
+               total_sec: float, rainy: bool, *,
+               segments: list[dict] | None = None,
+               beds: list[dict] | None = None,
+               mix_gains: dict | None = None,
+               none_spans: dict | None = None) -> tuple[Path, dict]:
+    """Mix voice wavs at their timeline offsets plus synthesised
+    stems. Contract: returns (mix_path, measurements); the mix is
+    exactly total_sec long with a 0.5 s fade-out and no truncation.
+
+    Old-style calls (no keyword arguments) take the legacy path
+    (voice + optional rain bed, unchanged). Calls with stem data
+    (stage 8) take the stem-based path: dialogue/narration/foley/
+    ambience/music stems, ducking, restraint re-mix and the master
+    limiter (see _mix_audio_stems)."""
+    if segments is None and beds is None and mix_gains is None:
+        return _mix_audio_legacy(job_dir, timeline_entries,
+                                 total_sec, rainy)
+    return _mix_audio_stems(job_dir, timeline_entries, total_sec,
+                            rainy, segments or [], beds or [],
+                            mix_gains, none_spans or {})
 
 
 def build_contact_sheet(frames: list[str], out_path: Path,
@@ -481,7 +876,14 @@ def run_product_job(script_text: str, job_dir: Path, *,
             for line in scene["lines"]:
                 flat_lines.append({"speaker": line["speaker"],
                                    "kind": line["kind"],
-                                   "text": line["text"]})
+                                   "text": line["text"],
+                                   # Per-line pause (POST_DIALOGUE_
+                                   # PAUSE): the adapter emits it as
+                                   # seconds; 0.35 preserves all
+                                   # existing behaviour. Stage 7 reads
+                                   # it into the TimelineLine.
+                                   "pause_after_sec": line.get(
+                                       "pause_after_sec", 0.35)})
         if not flat_lines:
             raise RuntimeError("no spoken lines in the script — "
                                "nothing to narrate")
@@ -507,7 +909,7 @@ def run_product_job(script_text: str, job_dir: Path, *,
             tl_lines.append(TimelineLine(
                 speaker=line["speaker"], kind=line["kind"],
                 text=line["text"], duration_sec=round(dur, 3),
-                pause_after_sec=0.35))
+                pause_after_sec=line.get("pause_after_sec", 0.35)))
         action_seconds = sum(float(s.get("action_lead_sec") or 0.0)
                              for s in package["scenes"])
         timeline = build_timeline(tl_lines, action_seconds=action_seconds)
@@ -564,29 +966,124 @@ def run_product_job(script_text: str, job_dir: Path, *,
                     "event": _cue,
                     "at_seconds": scene_start.get(_scene["number"], 0.0),
                     "scene": _scene["number"]})
+        # Scene-level SFX: NONE (V1) forbids even legacy action-cue
+        # events in that scene (SPEC section 10.2). Non-V1 packages
+        # carry no flags, so nothing is filtered for them. Raw flags
+        # are used deliberately here: legacy events carry no shot
+        # attribution, so a shot-scoped NONE cannot be ruled out for
+        # them; shot-attributed V1 cues use the coexistence rule in
+        # resolve_v1_cues instead.
+        _none_flags = scene_none_flags(package)
+        if _none_flags:
+            visual_events = [
+                v for v in visual_events
+                if not _none_flags.get(v.get("scene"), {}).get("sfx")]
         events = plan_audio_events(visual_events, script_text=script_text)
         deduped = dedupe_audio_events(events.events)
-        events.events = deduped
-        mix_path, mix_info = _mix_audio(job_dir, timeline_entries,
-                                        total_sec, rainy)
+        # V1 cues -> timed synthesis jobs on the measured clock
+        # (Stage 3): triggers resolve here, never from planner data.
+        # Non-V1 packages have no v1_audio_cues: the report is empty
+        # and only legacy events render.
+        v1_report = resolve_v1_cues(
+            package.get("v1_audio_cues") or [],
+            package=package, shots=shots,
+            timeline_entries=timeline_entries, rainy=rainy,
+            script_text=script_text)
+        mix_gains = v1_report["mix_gains"]
+        # Legacy planned events render too (previously plan-only):
+        # map them to synthesis jobs. A V1 cue wins a collision
+        # (same event at the same rounded time) because its trigger
+        # is specific; the legacy duplicate is recorded, not doubled.
+        v1_segments = list(v1_report["segments"])
+        v1_keys = {(s["event_type"], round(s["at_seconds"], 1))
+                   for s in v1_segments}
+        legacy_segments: list[dict] = []
+        legacy_beds: list[dict] = []
+        legacy_skipped: list[dict] = []
+        for _ev in deduped:
+            if (_ev.event_type, round(_ev.at_seconds, 1)) in v1_keys:
+                legacy_skipped.append({
+                    "event": _ev.event_type,
+                    "at_seconds": _ev.at_seconds,
+                    "reason": "superseded by a scripted V1 cue at "
+                              "the same time (not doubled)"})
+                continue
+            _kind, _job, _reason = audio_event_to_synth_job(
+                _ev, mix_gains, total_sec=total_sec)
+            if _kind == "segment":
+                legacy_segments.append(_job)
+            elif _kind == "bed":
+                legacy_beds.append(_job)
+            else:
+                legacy_skipped.append({
+                    "event": _ev.event_type,
+                    "at_seconds": _ev.at_seconds, "reason": _reason})
+        if rainy:
+            # rain_start beds dedupe against the global rain bed.
+            kept_beds = []
+            for _bed in legacy_beds:
+                if _bed["synth_kind"] == "rain_bed":
+                    legacy_skipped.append({
+                        "event": "rain_start",
+                        "at_seconds": _bed["start"],
+                        "reason": "deduped against the global rain "
+                                  "bed (not doubled)"})
+                else:
+                    kept_beds.append(_bed)
+            legacy_beds = kept_beds
+        segments = v1_segments + legacy_segments
+        beds = list(v1_report["beds"]) + legacy_beds
+        # Combined AudioEvent plan for the report: V1 segments carry
+        # cue provenance; surviving legacy events keep their shape.
+        combined_events: list[AudioEvent] = []
+        for _seg in v1_segments:
+            combined_events.append(AudioEvent(
+                _seg["event_type"], _seg["at_seconds"], _seg["sfx"],
+                _seg["category"], _seg["gain_db"],
+                source="synthesised",
+                end_seconds=_seg["end_seconds"],
+                cue_name=_seg["cue_name"], cue_id=_seg["cue_id"],
+                scene=_seg["scene"], synthesis=_seg["method"]))
+        for _ev in deduped:
+            if (_ev.event_type, round(_ev.at_seconds, 1)) not in v1_keys:
+                combined_events.append(_ev)
+        combined_events.sort(key=lambda e: e.at_seconds)
+        events.events = combined_events
+        mix_path, mix_info = _mix_audio(
+            job_dir, timeline_entries, total_sec, rainy,
+            segments=segments, beds=beds, mix_gains=mix_gains,
+            none_spans=v1_report["none_spans"])
         (job_dir / "audio_plan.json").write_text(json.dumps(
             {"events": events.to_dict(),
              "justification": [
                  {"event": e.event_type, "at_seconds": e.at_seconds,
                   "sfx": e.sfx, "gain_db": e.gain_db,
-                  "scene": next((v.get("scene") for v in visual_events
-                                 if v["event"] == e.event_type
-                                 and abs(v["at_seconds"] - e.at_seconds) < 0.6),
-                               None)}
-                 for e in deduped],
+                  "scene": (e.scene if e.scene is not None else
+                            next((v.get("scene") for v in visual_events
+                                  if v["event"] == e.event_type
+                                  and abs(v["at_seconds"]
+                                          - e.at_seconds) < 0.6),
+                                 None)),
+                  "cue_name": e.cue_name, "cue_id": e.cue_id,
+                  "synthesis": e.synthesis}
+                 for e in combined_events],
              "blocked": events.blocked_memes,
+             "legacy_skipped": legacy_skipped,
+             "v1_cue_resolution": v1_report,
              "mix": mix_info, "rainy": rainy},
             indent=2, ensure_ascii=False), encoding="utf-8")
         stage("sfx_music", "done",
-              f"{len(deduped)} SFX events (deduplicated, each tied to a "
-              f"real on-screen cue), blocked={len(events.blocked_memes)}, "
+              f"{len(combined_events)} SFX events (deduplicated, each "
+              f"tied to a real on-screen cue or a scripted V1 cue), "
+              f"blocked={len(events.blocked_memes)}, "
+              f"V1 cues {v1_report['rendered_cues']}/"
+              f"{v1_report['total_cues']} rendered "
+              f"({len(v1_report['unmapped_cues'])} unmapped, "
+              f"{len(v1_report['unresolved_triggers'])} unresolved "
+              f"triggers), stems={sorted(mix_info.get('stems', {}))}, "
               f"rain bed={'yes' if rainy else 'no'}, "
               f"voice-rain gap={mix_info['voice_minus_rain_db']} dB, "
+              f"restraint gaps={mix_info.get('restraint', {}).get('gaps_db')}, "
               f"0.5s fade-out (no abrupt ending)")
 
         # --- 9. Subtitle -----------------------------------------------

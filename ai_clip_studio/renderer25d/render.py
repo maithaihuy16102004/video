@@ -87,10 +87,40 @@ def _draw_ground_grid(img: Image.Image, scene: Scene25D, cam: PerspectiveCamera)
     img.alpha_composite(overlay)
 
 
+def _horizon_y(scene: Scene25D, cam: PerspectiveCamera,
+               width: int, height: int) -> float:
+    """Screen y of the ground plane's far edge (the horizon line).
+
+    The ground polygon's top edge is the projection of its far edge
+    (z = -ground_extent); nothing that lies ON the ground may ever be
+    drawn above it. Returns a value clamped to [0, height]: when the
+    horizon is off-frame the clip is a no-op.
+    """
+    ext = scene.ground_extent
+    ys = []
+    for c in ((-ext, 0.0, -ext), (ext, 0.0, -ext)):
+        _, y, _, vis = _project_clipped(cam, c, width, height)
+        if vis:
+            ys.append(y)
+    if not ys:
+        return 0.0
+    return min(max(min(ys), 0.0), float(height))
+
+
 def _draw_contact_shadow(img: Image.Image, scene: Scene25D,
                          cam: PerspectiveCamera, ground_pos, height,
-                         base_radius: float):
-    """Blurred ellipse on the ground, from lighting.contact_shadow()."""
+                         base_radius: float, horizon_y: float | None = None):
+    """Blurred ellipse on the ground, from lighting.contact_shadow().
+
+    Stage 3: the ellipse is CLIPPED to the ground (never above
+    ``horizon_y``). A contact shadow lies on the ground plane; the
+    unclipped ellipse of a wide box extends hundreds of pixels above
+    the horizon and darkens the sky (the dark-daytime bug: a day sky
+    ramp of ~(140, 183, 221) rendered as (28, 37, 45)). The clip is
+    applied after the blur, so no blurred fringe leaks into the sky.
+    ``horizon_y=None`` keeps the old unclipped behaviour for direct
+    callers; render_frame always passes the horizon.
+    """
     sh = contact_shadow(ground_pos, height, base_radius, scene.lights.key)
     cx, cz = sh["center"]
     # ellipse axes in world units -> project the two axis end points
@@ -107,6 +137,12 @@ def _draw_contact_shadow(img: Image.Image, scene: Scene25D,
     alpha = int(255 * sh["alpha"])
     dl.ellipse([px - rx, py - rz, px + rx, py + rz], fill=(0, 0, 0, alpha))
     layer = layer.filter(ImageFilter.GaussianBlur(blur))
+    if horizon_y is not None and horizon_y > 0:
+        # Erase everything above the horizon. On an RGBA image
+        # ImageDraw REPLACES pixels, so a (0,0,0,0) rectangle clears
+        # the alpha there instead of blending.
+        ImageDraw.Draw(layer).rectangle(
+            [0, 0, img.size[0], int(horizon_y)], fill=(0, 0, 0, 0))
     img.alpha_composite(layer)
 
 
@@ -244,12 +280,20 @@ def render_frame(scene: Scene25D, width: int = 1920, height: int = 1080,
     img = Image.new("RGBA", (width, height), (0, 0, 0, 255))
     _sky(img, scene.sky_top, scene.sky_bottom)
     _draw_ground_grid(img, scene, cam)
-    # contact shadows first (they lie on the ground, under everything)
+    horizon = _horizon_y(scene, cam, width, height)
+    # contact shadows first (they lie on the ground, under everything).
+    # Flat ground slabs (path/kerb) cast NO shadow: a slab lying on
+    # the ground has no visible shadow, and its huge footprint used
+    # to darken the whole frame including the sky (Stage 3).
     for box in scene.boxes:
+        if box.is_flat_ground_slab():
+            continue
         _draw_contact_shadow(img, scene, cam, box.ground_pos(),
-                             box.height_above_ground(), box.base_radius())
+                             box.height_above_ground(), box.base_radius(),
+                             horizon_y=horizon)
     for ch in scene.characters:
-        _draw_contact_shadow(img, scene, cam, ch.world_pos, 0.0, 0.35)
+        _draw_contact_shadow(img, scene, cam, ch.world_pos, 0.0, 0.35,
+                             horizon_y=horizon)
     # far-to-near painter's order across boxes + characters together
     items = [(cam.depth_of(b.center), "box", b) for b in scene.boxes]
     items += [(cam.depth_of(c.world_pos), "character", c)
@@ -260,6 +304,29 @@ def render_frame(scene: Scene25D, width: int = 1920, height: int = 1080,
         else:
             _draw_character_marker(img, scene, cam, obj, draw_character)
     return img.convert("RGB")
+
+
+def render_boxes_layer(scene: Scene25D, width: int = 1920,
+                     height: int = 1080, boxes=None) -> Image.Image:
+    """Boxes ONLY on a transparent layer, same projection + shading as
+    render_frame (far-to-near painter's order, same light rig, same
+    face labels). No sky, no ground, no contact shadows.
+
+    Stage 3 (foreground occlusion): the product renderer draws the
+    full scene as the background, then the characters, then composites
+    this layer for the boxes that stand IN FRONT of the character
+    plane — so a foreground crate genuinely occludes the feet behind
+    it. The boxes are drawn with the same _draw_box call render_frame
+    uses, so the layer pixels are identical to the background pixels
+    wherever no character intervenes. ``boxes=None`` draws every box
+    in the scene.
+    """
+    cam = scene.camera
+    img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    draw_boxes = list(scene.boxes if boxes is None else boxes)
+    for box in sorted(draw_boxes, key=lambda b: -cam.depth_of(b.center)):
+        _draw_box(img, scene, cam, box)
+    return img
 
 
 def render_proof_frames(scene: Scene25D, out_dir, width: int = 960,

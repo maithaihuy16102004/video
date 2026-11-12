@@ -244,7 +244,13 @@ class TestSyntheticFullScript(unittest.TestCase):
     def test_every_block_parsed(self):
         doc = parse_studio_script_v1(SYNTHETIC_FULL)
         self.assertTrue(doc.is_valid, [(i.line, i.code, i.message) for i in doc.validation_errors])
-        self.assertEqual(doc.warnings, [])
+        # Phase B Stage 3 (SPEC §16): this legacy synthetic document has
+        # narrator lines and does not declare first-person mode, so it
+        # gets exactly one V1E025 legacy-narrator WARNING (narrator
+        # still allowed, per the backward-compatibility rule). This is
+        # the sole Phase A behavior adjustment in Stage 3.
+        self.assertEqual([w.code for w in doc.warnings], ["V1E025"])
+        self.assertEqual(doc.warnings[0].line, 0)
 
         meta = doc.to_dict()["meta"]
         self.assertEqual(meta["project"], "Dự án thử nghiệm")

@@ -20,6 +20,8 @@ Shot scales (crop factor vs. the full frame):
 """
 from __future__ import annotations
 
+import math
+
 from PIL import Image
 
 # ---------------------------------------------------------------------------
@@ -48,6 +50,42 @@ SHOT_SCALE = {
     "tracking": 1.6,
     "shot_reverse_shot": 1.6,
 }
+
+# Camera-movement vocabulary (Stage 3 / F9, redefined by the P0
+# camera redirect 2026-11-12). A movement is a CAMERA-POSITION path,
+# never a crop: see camera_at() for the geometry. The enum is
+# distinct from ShotDirector's lowercase CAMERA_MOVES below, which
+# are 3D camera-path labels. Within-shot movement is NOT yet executed
+# by the product renderer (the camera is FIXED within a shot, per the
+# RicksClips rule; movement values are recorded with a limitation) —
+# camera_at() is the tested geometry the follow-up round wires in.
+CAMERA_MOVEMENT = (
+    "STATIC",
+    "PAN_LEFT",
+    "PAN_RIGHT",
+    "TILT_UP",
+    "TILT_DOWN",
+    "DOLLY_IN",
+    "DOLLY_OUT",
+    "TRACKING",
+    "CRANE_UP",
+    "CRANE_DOWN",
+    "HANDHELD",
+)
+
+# Shot types that frame FULL BODIES. F2 RULE (hard): these never
+# exceed scale 1.0 — including under DOLLY_IN. A movement on a
+# full-body shot may pan the crop, never zoom past the cap.
+# close_up / reaction / extreme_close_up / object_insert frame a
+# head or a detail, so the zoom is the point of the shot; a
+# shot_reverse_shot frames heads (alternating close-ups), so it is
+# not a full-body type either.
+FULL_BODY_SHOT_TYPES = (
+    "establishing",
+    "medium",
+    "tracking",
+    "over_the_shoulder",
+)
 
 # Where the camera focuses for each shot type.
 SHOT_FOCUS = {
@@ -408,6 +446,17 @@ def _fix_partial_others(shot, focus, subjects, others, frame_w, frame_h):
     return focus, notes, remaining
 
 
+def normalize_movement(value) -> str:
+    """Normalise a camera-movement value to a CAMERA_MOVEMENT enum
+    string. Accepts any case / underscore / hyphen / space spelling
+    of an enum member; anything else (None, "", unknown) degrades to
+    "STATIC" — a bad movement label must never crash a render."""
+    if value is None:
+        return "STATIC"
+    norm = str(value).strip().upper().replace("-", "_").replace(" ", "_")
+    return norm if norm in CAMERA_MOVEMENT else "STATIC"
+
+
 class CameraPlanner:
     """Plan camera shots from generic per-segment action cues."""
 
@@ -582,6 +631,25 @@ class CameraPlanner:
                                   (shot or {}).get("shot_type", "medium"),
                                   1.6))
         planned_scale = max(1.0, planned_scale)
+        if not subjects:
+            # Stage 3 (empty-cast / location-only shot): with nothing
+            # to frame, the only honest crop is the full frame. A
+            # 1.6x/2.6x crop centred on nothing would zoom into an
+            # arbitrary patch of the location.
+            full = dict(shot or {})
+            full_cam = dict((shot or {}).get("camera") or {})
+            full_cam["scale"] = 1.0
+            full["camera"] = full_cam
+            centre = focus_xy if focus_xy is not None else (
+                frame_w / 2.0, frame_h / 2.0)
+            full["safe_frame"] = {
+                "planned_scale": planned_scale,
+                "applied_scale": 1.0,
+                "focus": [round(centre[0], 1), round(centre[1], 1)],
+                "notes": ["no subjects: full frame (location-only shot)"],
+            }
+            return full, centre, ["no subjects: full frame "
+                                  "(location-only shot)"]
         if max_scale is not None:
             planned_scale = min(planned_scale,
                                 max(1.0, float(max_scale)))
@@ -746,6 +814,186 @@ _ANGLE_BY_SHOT = {
     "tracking": "eye_level",
     "shot_reverse_shot": "eye_level",
 }
+
+# ---------------------------------------------------------------------------
+# Per-shot viewpoints (Stage 3 / F9, P0 camera redirect 2026-11-12).
+#
+# Mai's verdict: the videos did not change camera angle — shot types
+# differed only by crop scale + focus (zoom). The fix is REAL
+# viewpoint geometry: every shot resolves to its own PerspectiveCamera
+# (position + target), and the product renderer threads that camera
+# through the whole shot render (background, horizon, parallax,
+# character projection). ShotDirector's angle/camera_move labels are
+# NOT on the executed path; viewpoint_for_shot() is the executed
+# equivalent, sharing the ANGLES / _ANGLE_BY_SHOT vocabulary.
+#
+# Geometry: cameras sit on a SPHERE around the subject target, at the
+# same radius as the legacy fixed camera (so the same subject at the
+# same camera distance keeps the same head size across angles — the
+# F2 no-head-pump rule). Angles differ by elevation and azimuth:
+#   eye_level      base elevation (~9.5 deg, the legacy camera)
+#   low_angle      camera below eye line, looking up
+#   high_angle     camera above, looking down
+#   birds_eye      steep top-down
+#   dutch          eye-level geometry + a frame tilt (see tilt_deg_for)
+#   over_shoulder  azimuth toward the counterpart (camera behind the
+#                  listener's shoulder, target on the subject)
+# Shot-reverse-shot alternates azimuth across the axis by srs_side.
+# FOV is never varied (46 deg, the legacy value).
+# ---------------------------------------------------------------------------
+from .renderer25d.camera import PerspectiveCamera  # noqa: E402
+
+# Legacy fixed camera (product_renderer.CAM): the default viewpoint.
+DEFAULT_CAM_POSITION = (0.0, 2.0, 4.8)
+DEFAULT_CAM_TARGET = (0.0, 1.2, 0.0)
+DEFAULT_CAM_FOV = 46.0
+
+# Offset of the legacy camera from its target, and the sphere radius
+# every viewpoint preserves. eye_level returns this offset EXACTLY so
+# a default-angle shot is pixel-identical to the legacy render.
+_EYE_OFFSET = (0.0, 0.8, 4.8)
+_VIEWPOINT_RADIUS = math.sqrt(0.8 * 0.8 + 4.8 * 4.8)
+_BASE_ELEV_DEG = math.degrees(math.atan2(0.8, 4.8))
+
+# Elevation (degrees above the horizontal, seen from the target) per
+# angle. dutch shares eye_level geometry; its tilt is a frame
+# rotation applied by the renderer (tilt_deg_for).
+_ANGLE_ELEV_DEG = {
+    "eye_level": _BASE_ELEV_DEG,
+    "low_angle": -8.0,
+    "high_angle": 32.0,
+    "birds_eye": 62.0,
+    "dutch": _BASE_ELEV_DEG,
+    "over_shoulder": _BASE_ELEV_DEG,
+}
+
+# Azimuth (degrees) for the two-sided framings.
+_OTS_AZIMUTH_DEG = 28.0
+_SRS_AZIMUTH_DEG = 18.0
+
+# Dutch frame tilt, degrees (counter-clockwise, applied by the
+# renderer to the composited frame before subtitles).
+DUTCH_TILT_DEG = 7.0
+
+
+def resolve_camera_angle(shot_type, camera_angle=None):
+    """Resolve the ANGLES-vocabulary angle for a shot.
+
+    An explicit valid ``camera_angle`` wins; otherwise the
+    _ANGLE_BY_SHOT default for the shot type; unknown shot types and
+    invalid angles degrade to "eye_level". Never raises."""
+    if isinstance(camera_angle, str):
+        angle = camera_angle.strip().lower().replace("-", "_")
+        if angle in ANGLES:
+            return angle
+    return _ANGLE_BY_SHOT.get(shot_type, "eye_level")
+
+
+def tilt_deg_for(angle):
+    """Frame tilt in degrees for an angle (dutch only, else 0.0)."""
+    return DUTCH_TILT_DEG if angle == "dutch" else 0.0
+
+
+def _spherical_offset(azimuth_deg, elevation_deg,
+                      radius=_VIEWPOINT_RADIUS):
+    """Camera offset from target at (azimuth, elevation) on the sphere.
+
+    Azimuth 0 = directly in front of the target (+z); positive
+    azimuth moves the camera toward +x (frame-left side of the
+    subject). Elevation is measured from the horizontal."""
+    az = math.radians(azimuth_deg)
+    el = math.radians(elevation_deg)
+    return (radius * math.cos(el) * math.sin(az),
+            radius * math.sin(el),
+            radius * math.cos(el) * math.cos(az))
+
+
+def viewpoint_for_shot(shot_type="medium", camera_angle=None,
+                       subject_pos=(0.0, 1.2, 0.0), counterpart_x=None,
+                       srs_side=0):
+    """Resolve a shot's REAL viewpoint: a PerspectiveCamera.
+
+    ``subject_pos`` is the world target point (usually the subject's
+    world x at eye height, z on the subject plane). ``counterpart_x``
+    is the other character's world x (over-the-shoulder: the camera
+    sits on the counterpart's side). ``srs_side`` (0/1) alternates
+    the azimuth for shot_reverse_shot runs. A shot that declares an
+    angle always gets that angle's camera — never silently the fixed
+    legacy camera; only the eye_level default reproduces it exactly.
+
+    Returns a PerspectiveCamera (fov 46, aspect 16:9) positioned on
+    the viewpoint sphere around ``subject_pos``.
+    """
+    angle = resolve_camera_angle(shot_type, camera_angle)
+    tx, ty, tz = (float(v) for v in subject_pos)
+    elev = _ANGLE_ELEV_DEG.get(angle, _BASE_ELEV_DEG)
+    azimuth = 0.0
+    if angle == "over_shoulder" or shot_type == "over_the_shoulder":
+        if counterpart_x is not None and tx is not None:
+            side = 1.0 if float(counterpart_x) >= tx else -1.0
+        else:
+            side = 1.0
+        azimuth = side * _OTS_AZIMUTH_DEG
+    elif shot_type == "shot_reverse_shot":
+        azimuth = _SRS_AZIMUTH_DEG if int(srs_side or 0) else -_SRS_AZIMUTH_DEG
+    if angle == "eye_level" and azimuth == 0.0:
+        # Exact legacy offset: default shots stay pixel-identical.
+        off = _EYE_OFFSET
+    else:
+        off = _spherical_offset(azimuth, elev)
+    position = (tx + off[0], ty + off[1], tz + off[2])
+    return PerspectiveCamera(position=position, target=(tx, ty, tz),
+                             fov_deg=DEFAULT_CAM_FOV, aspect=16.0 / 9.0)
+
+
+def camera_at(movement, t01, base_camera, direction=1):
+    """Camera position along a movement path at progress t01 in [0,1].
+
+    REAL camera-position geometry (never a crop): TRACKING translates
+    camera + target laterally (subject stays framed, background
+    parallaxes); DOLLY_IN/OUT move along the view axis; PAN/TILT move
+    the target (camera rotates); CRANE moves the camera height;
+    HANDHELD adds small deterministic offsets. STATIC returns the
+    base camera unchanged.
+
+    NOTE (P0 redirect): the product renderer does not yet execute
+    within-shot movement (camera fixed within a shot, per RicksClips;
+    movement values render STATIC with a recorded limitation). This
+    resolver is the tested geometry the follow-up round wires into
+    the per-frame render (per-frame background + pose re-projection).
+    """
+    move = normalize_movement(movement)
+    t = min(1.0, max(0.0, float(t01)))
+    if move == "STATIC" or t == 0.0 and move != "HANDHELD":
+        return base_camera
+    pos = base_camera.position
+    tgt = base_camera.target
+    if move == "HANDHELD":
+        dx = 0.05 * math.sin(2 * math.pi * 3 * t + 0.7)
+        dy = 0.03 * math.sin(2 * math.pi * 2.3 * t + 1.9)
+        return base_camera.moved(dpos=(dx, dy, 0.0))
+    if move == "TRACKING":
+        shift = 1.6 * float(direction) * t
+        return base_camera.moved(dpos=(shift, 0.0, 0.0),
+                                 dtarget=(shift, 0.0, 0.0))
+    if move in ("DOLLY_IN", "DOLLY_OUT"):
+        frac = 0.15 * t * (1.0 if move == "DOLLY_IN" else -1.0)
+        delta = tuple((tgt[i] - pos[i]) * frac for i in range(3))
+        return base_camera.moved(dpos=delta)
+    if move == "PAN_LEFT":
+        return base_camera.moved(dtarget=(-1.5 * t, 0.0, 0.0))
+    if move == "PAN_RIGHT":
+        return base_camera.moved(dtarget=(1.5 * t, 0.0, 0.0))
+    if move == "TILT_UP":
+        return base_camera.moved(dtarget=(0.0, 1.0 * t, 0.0))
+    if move == "TILT_DOWN":
+        return base_camera.moved(dtarget=(0.0, -1.0 * t, 0.0))
+    if move == "CRANE_UP":
+        return base_camera.moved(dpos=(0.0, 1.2 * t, 0.0))
+    if move == "CRANE_DOWN":
+        return base_camera.moved(dpos=(0.0, -1.2 * t, 0.0))
+    return base_camera
+
 
 # size label per shot type
 _SIZE_BY_SHOT = {

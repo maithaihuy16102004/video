@@ -17,8 +17,39 @@
     "audioCue": {
       "additionalProperties": false,
       "properties": {
+        "cue_id": {
+          "description": "Structured SFX sub-block ID (e.g. SFX_001); empty for legacy one-line cues.",
+          "type": "string"
+        },
         "cue_type": {
           "$ref": "#/$defs/cueType"
+        },
+        "cue_type_text": {
+          "description": "Structured SFX sub-block TYPE, verbatim; empty for legacy one-line cues.",
+          "type": "string"
+        },
+        "duration": {
+          "description": "Structured SFX sub-block DURATION, verbatim (e.g. 0.4s); empty for legacy cues.",
+          "type": "string"
+        },
+        "duration_mode": {
+          "description": "Structured SFX sub-block DURATION_MODE, verbatim; empty when not given.",
+          "type": "string"
+        },
+        "duration_seconds": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Parsed seconds from duration when parseable; null otherwise."
+        },
+        "event": {
+          "description": "Structured SFX sub-block EVENT, verbatim; empty for legacy one-line cues.",
+          "type": "string"
         },
         "gain_db": {
           "anyOf": [
@@ -81,7 +112,13 @@
         "scene_number",
         "shot_id",
         "line",
-        "source_key"
+        "source_key",
+        "cue_id",
+        "event",
+        "cue_type_text",
+        "duration",
+        "duration_mode",
+        "duration_seconds"
       ],
       "type": "object"
     },
@@ -117,21 +154,33 @@
           },
           "type": "array"
         },
+        "fields": {
+          "$ref": "#/$defs/verbatimFields"
+        },
         "head_ratio": {
           "description": "Locked range 0.33-0.35, default 0.34. Values outside (including 0.42) are validation errors.",
           "maximum": 0.35,
           "minimum": 0.33,
           "type": "number"
         },
-        "identity_id": {
-          "description": "Defaults to the character name; stable across costume changes.",
+        "id": {
+          "description": "CHARACTER block id (e.g. CHAR_HITLER). In the legacy dialect the id equals the name.",
           "type": "string"
+        },
+        "identity_id": {
+          "description": "Defaults to the block id; stable across costume changes.",
+          "type": "string"
+        },
+        "is_extra": {
+          "description": "True when VOICE: NONE or ROLE is 'Background extras'.",
+          "type": "boolean"
         },
         "line": {
           "minimum": 1,
           "type": "integer"
         },
         "name": {
+          "description": "Display name from NAME; in the legacy dialect, the CHARACTER name.",
           "type": "string"
         },
         "role": {
@@ -153,6 +202,7 @@
         }
       },
       "required": [
+        "id",
         "name",
         "role",
         "appearance",
@@ -163,6 +213,8 @@
         "voice_style",
         "head_ratio",
         "identity_id",
+        "is_extra",
+        "fields",
         "line"
       ],
       "type": "object"
@@ -202,17 +254,43 @@
     "endCard": {
       "additionalProperties": false,
       "properties": {
+        "background": {
+          "type": "string"
+        },
+        "bgm": {
+          "type": "string"
+        },
         "duration": {
           "type": "number"
+        },
+        "duration_raw": {
+          "description": "DURATION exactly as written (e.g. 3s).",
+          "type": "string"
+        },
+        "duration_sec": {
+          "description": "Parsed DURATION in seconds; same value as duration.",
+          "type": "number"
+        },
+        "fields": {
+          "$ref": "#/$defs/verbatimFields"
         },
         "line": {
           "minimum": 1,
           "type": "integer"
         },
+        "secondary_text": {
+          "type": "string"
+        },
+        "sfx": {
+          "type": "string"
+        },
         "style": {
           "type": "string"
         },
         "text": {
+          "type": "string"
+        },
+        "text_language": {
           "type": "string"
         }
       },
@@ -220,7 +298,15 @@
         "text",
         "duration",
         "style",
-        "line"
+        "line",
+        "background",
+        "secondary_text",
+        "text_language",
+        "duration_raw",
+        "duration_sec",
+        "bgm",
+        "sfx",
+        "fields"
       ],
       "type": "object"
     },
@@ -292,6 +378,9 @@
         "foley_gain_db": {
           "type": "number"
         },
+        "fields": {
+          "$ref": "#/$defs/verbatimFields"
+        },
         "master_limit_db": {
           "type": "number"
         },
@@ -311,7 +400,8 @@
         "bgm_gain_db",
         "bgm_ducking_db",
         "master_limit_db",
-        "buses"
+        "buses",
+        "fields"
       ],
       "type": "object"
     },
@@ -330,13 +420,27 @@
           "type": "string"
         },
         "background": {
-          "type": "string"
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          ],
+          "description": "Background layer: legacy single value (string) or new-dialect bullet list (array)."
         },
         "features": {
           "items": {
             "type": "string"
           },
           "type": "array"
+        },
+        "fields": {
+          "$ref": "#/$defs/verbatimFields"
         },
         "forbidden": {
           "items": {
@@ -345,7 +449,18 @@
           "type": "array"
         },
         "foreground": {
-          "type": "string"
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          ],
+          "description": "Foreground layer: legacy single value (string) or new-dialect bullet list (array)."
         },
         "geography": {
           "type": "string"
@@ -362,7 +477,18 @@
           "type": "integer"
         },
         "midground": {
-          "type": "string"
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          ],
+          "description": "Midground layer: legacy single value (string) or new-dialect bullet list (array)."
         },
         "name": {
           "type": "string"
@@ -374,6 +500,10 @@
           "type": "array"
         },
         "period": {
+          "type": "string"
+        },
+        "type": {
+          "description": "LOCATION TYPE (e.g. INTERIOR, EXTERIOR); empty when not declared.",
           "type": "string"
         },
         "weather": {
@@ -394,6 +524,8 @@
         "weather",
         "palette",
         "forbidden",
+        "type",
+        "fields",
         "line"
       ],
       "type": "object"
@@ -411,6 +543,17 @@
       "properties": {
         "aspect_ratio": {
           "$ref": "#/$defs/aspectRatio"
+        },
+        "external_narrator": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "EXTERNAL_NARRATOR declaration; must be NONE in first-person documents (SPEC §16), null when absent."
         },
         "genre": {
           "anyOf": [
@@ -434,6 +577,17 @@
         "meme_policy": {
           "$ref": "#/$defs/memePolicy"
         },
+        "primary_character": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "PRIMARY_CHARACTER block id; must reference a declared CHARACTER (SPEC §16), null when absent."
+        },
         "project": {
           "anyOf": [
             {
@@ -445,9 +599,67 @@
           ],
           "description": "Null when the PROJECT header is absent (unspecified, SPEC §4); no upstream default is inherited."
         },
+        "project_fields": {
+          "$ref": "#/$defs/verbatimFields"
+        },
+        "project_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "PROJECT_ID from the PROJECT block; null when absent."
+        },
+        "storytelling_mode": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "STORYTELLING_MODE from the PROJECT block (e.g. FIRST_PERSON_ROLEPLAY); null when absent."
+        },
         "target_duration": {
-          "description": "AUTO or a positive number of seconds.",
+          "description": "AUTO, a plain number of seconds, or a range such as '85–100 seconds', verbatim.",
           "type": "string"
+        },
+        "target_duration_max": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Parsed upper bound of TARGET_DURATION; null for AUTO or unparseable values."
+        },
+        "target_duration_min": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Parsed lower bound of TARGET_DURATION (equal to the max for a plain number); null for AUTO or unparseable values."
+        },
+        "title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "TITLE from the PROJECT block; null when absent."
         },
         "tone": {
           "anyOf": [
@@ -470,6 +682,9 @@
             }
           ],
           "description": "Single field for the STYLE / VISUAL_STYLE alias rule (SPEC §4): the value of whichever key is present, VISUAL_STYLE on conflict, null when neither is present. There is no separate 'style' field."
+        },
+        "visual_style_fields": {
+          "$ref": "#/$defs/verbatimFields"
         }
       },
       "required": [
@@ -481,7 +696,16 @@
         "target_duration",
         "tone",
         "meme_policy",
-        "meme_max_per_minute"
+        "meme_max_per_minute",
+        "storytelling_mode",
+        "primary_character",
+        "external_narrator",
+        "project_id",
+        "title",
+        "project_fields",
+        "visual_style_fields",
+        "target_duration_min",
+        "target_duration_max"
       ],
       "type": "object"
     },
@@ -490,6 +714,9 @@
       "properties": {
         "draft_folder": {
           "type": "string"
+        },
+        "fields": {
+          "$ref": "#/$defs/verbatimFields"
         },
         "format": {
           "const": "MP4"
@@ -510,7 +737,8 @@
         "fps",
         "format",
         "draft_folder",
-        "master"
+        "master",
+        "fields"
       ],
       "type": "object"
     },
@@ -528,6 +756,13 @@
           "type": "boolean"
         },
         "description": {
+          "type": "string"
+        },
+        "fields": {
+          "$ref": "#/$defs/verbatimFields"
+        },
+        "id": {
+          "description": "PROP block id; in the legacy dialect the id equals the name.",
           "type": "string"
         },
         "interactions": {
@@ -555,15 +790,22 @@
             "type": "integer"
           },
           "type": "array"
+        },
+        "type": {
+          "description": "PROP TYPE (e.g. DOCUMENT, WEAPON); empty when not declared.",
+          "type": "string"
         }
       },
       "required": [
+        "id",
         "name",
         "description",
         "owner",
         "scenes",
         "all_scenes",
         "interactions",
+        "type",
+        "fields",
         "line"
       ],
       "type": "object"
@@ -571,6 +813,16 @@
     "qaConfig": {
       "additionalProperties": false,
       "properties": {
+        "expected_counts": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "description": "Parsed EXPECTED_* counts from the QA block, keyed by lowercase name (e.g. expected_scenes).",
+          "type": "object"
+        },
+        "fields": {
+          "$ref": "#/$defs/verbatimFields"
+        },
         "language_gate": {
           "type": "boolean"
         },
@@ -595,7 +847,9 @@
         "require_technical",
         "require_creative_review",
         "language_gate",
-        "max_hard_fails"
+        "max_hard_fails",
+        "fields",
+        "expected_counts"
       ],
       "type": "object"
     },
@@ -634,6 +888,21 @@
         "camera_movement": {
           "$ref": "#/$defs/cameraMovement"
         },
+        "camera_movement_text": {
+          "description": "Scene CAMERA_MOVEMENT exactly as written; empty when no CAMERA_MOVEMENT line was given.",
+          "type": "string"
+        },
+        "characters": {
+          "description": "Scene CHARACTERS list of CHARACTER block ids; empty when NONE.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "costume": {
+          "description": "Scene COSTUME (e.g. CIVILIAN, MILITARY); empty when not declared.",
+          "type": "string"
+        },
         "duration": {
           "description": "AUTO or seconds, verbatim.",
           "type": "string"
@@ -653,6 +922,13 @@
             "$ref": "#/$defs/expression"
           },
           "type": "array"
+        },
+        "fields": {
+          "$ref": "#/$defs/verbatimFields"
+        },
+        "id": {
+          "description": "Scene block id (e.g. SC01) in the new dialect; empty in the legacy dialect, where scenes are numbered only.",
+          "type": "string"
         },
         "line": {
           "minimum": 1,
@@ -709,7 +985,8 @@
           "type": "string"
         },
         "transition": {
-          "$ref": "#/$defs/transition"
+          "description": "Scene TRANSITION, verbatim. In legacy documents it is one of the transition vocabulary; in new-dialect documents any descriptive value is preserved (SPEC §6.11).",
+          "type": "string"
         },
         "vfx_cues": {
           "description": "VFX lines, stored with cue_type VFX.",
@@ -727,6 +1004,7 @@
       },
       "required": [
         "number",
+        "id",
         "title",
         "line",
         "location_ref",
@@ -740,6 +1018,10 @@
         "expressions",
         "camera",
         "camera_movement",
+        "camera_movement_text",
+        "characters",
+        "costume",
+        "fields",
         "voice_note",
         "meme_note",
         "transition",
@@ -764,7 +1046,19 @@
           "type": "string"
         },
         "camera_movement": {
-          "$ref": "#/$defs/cameraMovement"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/cameraMovement"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Enum movement when declared (STATIC by default); null when CAMERA_MOVEMENT is descriptive prose (see camera_movement_text)."
+        },
+        "camera_movement_text": {
+          "description": "CAMERA_MOVEMENT exactly as written; empty when no CAMERA_MOVEMENT line was given.",
+          "type": "string"
         },
         "duration": {
           "description": "AUTO or seconds, verbatim.",
@@ -780,8 +1074,26 @@
             }
           ]
         },
+        "end_hold": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Parsed END_HOLD in seconds; null when not declared."
+        },
+        "end_hold_raw": {
+          "description": "END_HOLD exactly as written (e.g. 0.6s); empty when not declared.",
+          "type": "string"
+        },
         "expression": {
           "type": "string"
+        },
+        "fields": {
+          "$ref": "#/$defs/verbatimFields"
         },
         "id": {
           "type": "string"
@@ -789,6 +1101,32 @@
         "line": {
           "minimum": 1,
           "type": "integer"
+        },
+        "location_override": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "LOCATION_OVERRIDE block id; null when not declared."
+        },
+        "post_dialogue_pause": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Parsed POST_DIALOGUE_PAUSE in seconds; null when not declared."
+        },
+        "post_dialogue_pause_raw": {
+          "description": "POST_DIALOGUE_PAUSE exactly as written (e.g. 0.6s); empty when not declared.",
+          "type": "string"
         },
         "spoken_line_ids": {
           "items": {
@@ -799,8 +1137,31 @@
         "subject": {
           "type": "string"
         },
+        "trigger": {
+          "description": "TRIGGER exactly as written (LINE_ID + quote); empty when not declared.",
+          "type": "string"
+        },
+        "trigger_line_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "LINE_ID parsed from TRIGGER when it starts with one; null otherwise."
+        },
         "type": {
-          "$ref": "#/$defs/shotType"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/shotType"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Shot type enum when TYPE is declared; null in new-dialect shots that declare CAMERA only (SPEC §5.5)."
         },
         "type_raw": {
           "description": "TYPE value exactly as written, before normalization.",
@@ -823,6 +1184,15 @@
         "type_raw",
         "camera",
         "camera_movement",
+        "camera_movement_text",
+        "location_override",
+        "trigger",
+        "trigger_line_id",
+        "post_dialogue_pause",
+        "post_dialogue_pause_raw",
+        "end_hold",
+        "end_hold_raw",
+        "fields",
         "subject",
         "duration",
         "duration_seconds",
@@ -867,9 +1237,20 @@
           "type": "integer"
         },
         "line_id": {
-          "description": "Explicit [Lnn] if given, else auto L001, L002... in document order.",
-          "pattern": "^L\\d+$",
+          "description": "Explicit id if given (legacy [Lnn] form or a verbatim id such as EP01_FP_01), else auto L001, L002... in document order.",
+          "pattern": "^[A-Za-z][A-Za-z0-9_-]*$",
           "type": "string"
+        },
+        "lip_sync": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "LIP_SYNC value for this line (e.g. REQUIRED); null when not declared."
         },
         "scene_number": {
           "minimum": 1,
@@ -887,7 +1268,11 @@
           "description": "Containing shot id, or null when the line is directly in the scene."
         },
         "speaker": {
-          "description": "Canonical declared character name, or 'Narrator' for narration.",
+          "description": "Canonical declared character display name, or 'Narrator' for legacy narrator lines.",
+          "type": "string"
+        },
+        "speaker_id": {
+          "description": "CHARACTER block id of the speaker; empty for legacy narrator lines.",
           "type": "string"
         },
         "text": {
@@ -901,6 +1286,8 @@
       "required": [
         "line_id",
         "speaker",
+        "speaker_id",
+        "lip_sync",
         "text",
         "kind",
         "voice_note",
@@ -951,7 +1338,7 @@
       "additionalProperties": false,
       "properties": {
         "code": {
-          "description": "SPEC §8.2 error code (V1E001–V1E024). Parsers emit exactly these codes; V1E022 is timeline-stage only and never appears in parse output.",
+          "description": "SPEC §8.2 error code (V1E001–V1E025). Parsers emit exactly these codes; V1E022 is timeline-stage only and never appears in parse output. V1E025 is an error in first-person documents and a warning in legacy documents with narrator lines (SPEC §16).",
           "pattern": "^V1E0\\d\\d$",
           "type": "string"
         },
@@ -969,6 +1356,23 @@
         "code",
         "message"
       ],
+      "type": "object"
+    },
+    "verbatimFields": {
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        ]
+      },
+      "description": "Verbatim block fields: every declared KEY: value exactly as written (string), or the list of bullet items / repeated values (array of strings). Nothing declared is ever silently discarded.",
       "type": "object"
     }
   },

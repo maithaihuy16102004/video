@@ -57,6 +57,20 @@ class Box3D:
     def base_radius(self) -> float:
         return max(self.size[0], self.size[2]) * 0.55
 
+    def is_flat_ground_slab(self) -> bool:
+        """True for a thin slab lying flush ON the ground (a path strip,
+        a kerb): it rests on the ground plane and is too thin to cast
+        a visible contact shadow of its own. Such a slab must never
+        get a contact-shadow ellipse: its footprint is huge (a 14-unit
+        path has base_radius 7.7), and the projected ellipse covers
+        the whole frame including the sky (Stage 3 dark-daytime bug:
+        two slab shadows at alpha 0.55 composited to ~80% darkening
+        over a day sky). A raised thin box (a railing bar, an awning)
+        is NOT a slab: it hangs above the ground and keeps its shadow.
+        """
+        return (self.height_above_ground() == 0.0
+                and self.size[1] <= 0.2)
+
 
 # Faces of a box: (corner indices into corners(), outward normal).
 # corners() order: dx in (-,+), dy in (-,+), dz in (-,+) -> index =

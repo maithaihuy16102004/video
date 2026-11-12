@@ -1,254 +1,332 @@
-# STUDIO SCRIPT V1
+STUDIO SCRIPT V1
 # =====================================================================
 # MẪU KỊCH BẢN STUDIO SCRIPT V1 — sao chép toàn bộ tệp này để bắt đầu.
 # - Thay mọi giá trị mẫu bằng nội dung thật của dự án. Tên trong mẫu này
-#   (NHÂN VẬT A, NHÂN VẬT B, ĐỊA ĐIỂM X, VẬT DỤNG X) là tên giả rõ ràng.
+#   (CHAR_NHAN_VAT_A, CHAR_NHAN_VAT_B, LOC_DIA_DIEM_X, PROP_VAT_DUNG_X)
+#   là tên giả rõ ràng.
 # - Giữ nguyên các khóa (PROJECT, CHARACTER, SCENE, ...). Khóa không phân
 #   biệt hoa/thường; giá trị giữ nguyên tiếng Việt, không viết lại.
 # - Dòng bắt đầu bằng # là ghi chú, không ảnh hưởng kịch bản. Dòng trống
-#   cũng được bỏ qua. Ngoài ghi chú, tệp này chỉ chứa cú pháp hợp lệ.
+#   cũng được bỏ qua. Dòng ⸻ là dấu phân cách giữa các khối.
+# - QUY TẮC TIÊN QUYẾT (SPEC §16): mọi kịch bản đều kể ở NGÔI THỨ NHẤT.
+#   Không bao giờ có người dẫn truyện bên ngoài. Mọi dòng NARRATION đều
+#   do nhân vật chính đọc bằng giọng của nhân vật (VOICE_ID), và mọi
+#   dòng thoại đều phải có SPEAKER trỏ tới một CHARACTER đã khai báo.
+#   Khai báo STORYTELLING_MODE, PRIMARY_CHARACTER và EXTERNAL_NARRATOR:
+#   NONE trong khối PROJECT, như mẫu dưới đây.
 # - Lời dẫn và lời thoại được giữ nguyên từng chữ và đọc thành tiếng.
 #   Các dòng khác (VISUAL, ACTION, CAMERA, VOICE_NOTE, ...) không bị đọc.
 # - HEAD_RATIO chỉ nhận 0.33-0.35, mặc định 0.34. Không dùng 0.42.
 # - Đặc tả đầy đủ: docs/STUDIO_SCRIPT_V1_SPEC.md
 # =====================================================================
 
-# --- PHẦN ĐẦU (HEADER): đặt trước khối đầu tiên. ---
-# PROJECT: tên dự án (tùy chọn).
-PROJECT: Tên dự án mẫu
-# LANGUAGE: ngôn ngữ, mặc định vi-VN.
-LANGUAGE: vi-VN
-# GENRE: thể loại (tùy chọn).
+PROJECT
+# PROJECT_ID: mã dự án, dùng làm tên thư mục Drive.
+PROJECT_ID: DU_AN_MAU
+# TITLE: tiêu đề hiển thị của video.
+TITLE: Tiêu đề mẫu
+# EPISODE: số tập.
+EPISODE: 01
+# GENRE: thể loại.
 GENRE: Thể loại mẫu
-# STYLE: tên cũ của VISUAL_STYLE. Nếu cả hai khác nhau, VISUAL_STYLE thắng.
-STYLE: Phong cách hình ảnh mẫu
-# VISUAL_STYLE: phong cách hình ảnh (tùy chọn).
-VISUAL_STYLE: Phong cách hình ảnh mẫu
+# LANGUAGE: ngôn ngữ lời thoại và phụ đề; mặc định vi-VN.
+LANGUAGE: vi-VN
+# STORYTELLING_MODE: phải bắt đầu bằng FIRST_PERSON.
+STORYTELLING_MODE: FIRST_PERSON_ROLEPLAY
+# PRIMARY_CHARACTER: id của nhân vật kể chuyện (phải đã khai báo).
+PRIMARY_CHARACTER: CHAR_NHAN_VAT_A
+# EXTERNAL_NARRATOR: luôn NONE — không có người dẫn truyện bên ngoài.
+EXTERNAL_NARRATOR: NONE
+# PLATFORM: nền tảng phát hành.
+PLATFORM: YouTube
 # ASPECT_RATIO: chỉ 16:9 hoặc 9:16; mặc định 16:9.
 ASPECT_RATIO: 16:9
-# TARGET_DURATION: AUTO hoặc số giây; mặc định AUTO.
-TARGET_DURATION: AUTO
-# TONE: giọng điệu chung (tùy chọn).
-TONE: Giọng điệu mẫu
-# MEME_POLICY: CONTEXTUAL, NONE hoặc ALWAYS; mặc định CONTEXTUAL.
-MEME_POLICY: CONTEXTUAL
-# MEME_MAX_PER_MINUTE: số nguyên từ 0 trở lên; mặc định 2.
-MEME_MAX_PER_MINUTE: 2
-
-# --- NHÂN VẬT: một khối CHARACTER cho mỗi nhân vật. Tên không trùng nhau. ---
-CHARACTER: NHÂN VẬT A
-# ROLE: vai trò của nhân vật trong câu chuyện.
-ROLE: Vai trò mẫu
-# APPEARANCE: mô tả ngoại hình riêng, giúp nhân vật khác biệt.
-APPEARANCE: Ngoại hình mẫu riêng biệt
-# TRAITS: các nét riêng, phân cách bằng dấu ; .
-TRAITS: Nét riêng mẫu một; nét riêng mẫu hai
-# COSTUME: trang phục mặc định của nhân vật.
-COSTUME: Trang phục mặc định mẫu
-# COSTUME_CHANGE: lặp lại được; đổi trang phục theo cảnh, không đổi danh tính.
-COSTUME_CHANGE: SCENE 1: Trang phục mẫu cho cảnh 1
-# VOICE: AUTO để pipeline tự chọn, hoặc ghi mã giọng đọc cụ thể.
-VOICE: AUTO
-# VOICE_STYLE: phong cách giọng đọc.
-VOICE_STYLE: Phong cách giọng mẫu
-# HEAD_RATIO: tỉ lệ đầu, chỉ 0.33-0.35; mặc định 0.34. Không dùng 0.42.
-HEAD_RATIO: 0.34
-# IDENTITY_ID: mã danh tính ổn định; mặc định bằng tên nhân vật.
-IDENTITY_ID: NHAN_VAT_A
-
-CHARACTER: NHÂN VẬT B
-# ROLE: vai trò của nhân vật trong câu chuyện.
-ROLE: Vai trò mẫu khác
-# APPEARANCE: mô tả ngoại hình riêng, giúp nhân vật khác biệt.
-APPEARANCE: Ngoại hình mẫu riêng biệt khác
-# TRAITS: các nét riêng, phân cách bằng dấu ; .
-TRAITS: Nét riêng mẫu ba; nét riêng mẫu bốn
-# COSTUME: trang phục mặc định của nhân vật.
-COSTUME: Trang phục mặc định mẫu khác
-# COSTUME_CHANGE: lặp lại được; đổi trang phục theo cảnh, không đổi danh tính.
-COSTUME_CHANGE: SCENE 1: Trang phục mẫu khác cho cảnh 1
-# VOICE: AUTO để pipeline tự chọn, hoặc ghi mã giọng đọc cụ thể.
-VOICE: AUTO
-# VOICE_STYLE: phong cách giọng đọc.
-VOICE_STYLE: Phong cách giọng mẫu khác
-# HEAD_RATIO: tỉ lệ đầu, chỉ 0.33-0.35; mặc định 0.34. Không dùng 0.42.
-HEAD_RATIO: 0.34
-# IDENTITY_ID: mã danh tính ổn định; mặc định bằng tên nhân vật.
-IDENTITY_ID: NHAN_VAT_B
-
-# --- ĐỊA ĐIỂM: một khối LOCATION cho mỗi bối cảnh. Mã không trùng nhau. ---
-LOCATION: ĐỊA ĐIỂM X
-# NAME: tên hiển thị của địa điểm.
-NAME: Tên địa điểm mẫu
-# PERIOD: thời kỳ lịch sử hoặc niên đại.
-PERIOD: Thời kỳ mẫu
-# GEOGRAPHY: mô tả địa lý.
-GEOGRAPHY: Địa lý mẫu
-# ARCHITECTURE: mô tả kiến trúc.
-ARCHITECTURE: Kiến trúc mẫu
-# FEATURES: các đặc điểm riêng, phân cách bằng dấu ; . Phải nhìn thấy được.
-FEATURES: Đặc điểm riêng mẫu một; đặc điểm riêng mẫu hai
-# FOREGROUND: mô tả tiền cảnh.
-FOREGROUND: Tiền cảnh mẫu
-# MIDGROUND: mô tả trung cảnh.
-MIDGROUND: Trung cảnh mẫu
-# BACKGROUND: mô tả hậu cảnh.
-BACKGROUND: Hậu cảnh mẫu
-# LIGHTING: mô tả ánh sáng.
-LIGHTING: Ánh sáng mẫu
-# WEATHER: mô tả thời tiết.
-WEATHER: Thời tiết mẫu
-# PALETTE: các màu chủ đạo, phân cách bằng dấu ; .
-PALETTE: Màu mẫu một; màu mẫu hai
-# FORBIDDEN: các yếu tố cấm xuất hiện, phân cách bằng dấu ; .
-FORBIDDEN: Yếu tố cấm mẫu một; yếu tố cấm mẫu hai
-
-# --- ĐẠO CỤ: một khối PROP cho mỗi vật dụng. Tên không trùng nhau. ---
-PROP: VẬT DỤNG X
-# DESCRIPTION: mô tả vật dụng.
-DESCRIPTION: Mô tả vật dụng mẫu
-# OWNER: tên CHARACTER sở hữu, hoặc NONE nếu không thuộc ai.
-OWNER: NHÂN VẬT A
-# SCENES: danh sách số cảnh phân cách bằng dấu phẩy, hoặc ALL.
-SCENES: 1
-# INTERACTION: các động từ tương tác, phân cách bằng dấu ; .
-INTERACTION: Cầm; đưa; đặt xuống
-
-# --- ÂM THANH TOÀN CỤC: mức âm (dB) cho 6 bus. Tối đa một khối. ---
-GLOBAL_AUDIO:
-# NARRATION_GAIN_DB: mức bus lời dẫn; mặc định 0.
-NARRATION_GAIN_DB: 0
-# DIALOGUE_GAIN_DB: mức bus thoại; mặc định 0.
-DIALOGUE_GAIN_DB: 0
-# AMBIENCE_GAIN_DB: mức bus âm thanh nền; mặc định -18.
-AMBIENCE_GAIN_DB: -18
-# FOLEY_GAIN_DB: mức bus foley; mặc định -12.
-FOLEY_GAIN_DB: -12
-# SFX_GAIN_DB: mức bus hiệu ứng; mặc định -6.
-SFX_GAIN_DB: -6
-# BGM_GAIN_DB: mức bus nhạc nền; mặc định -18.
-BGM_GAIN_DB: -18
-# BGM_DUCKING_DB: nhạc nền giảm thêm bấy nhiêu dB khi có lời nói; mặc định -6.
-BGM_DUCKING_DB: -6
-# MASTER_LIMIT_DB: trần âm lượng tổng; mặc định -1.0.
-MASTER_LIMIT_DB: -1.0
-
-# --- RÀNG BUỘC CẤM TOÀN CỤC: mỗi dòng một ràng buộc. Tối đa một khối. ---
-GLOBAL_NEGATIVE_CONSTRAINTS:
-# Dạng "- ..." hoặc "NO: ...".
-- Điều cấm mẫu một
-NO: Điều cấm mẫu hai
-
-# --- CẢNH: số cảnh không trùng nhau; thứ tự sản xuất theo thứ tự văn bản. ---
-SCENE 1: Tiêu đề cảnh mẫu
-# LOCATION: ghi đúng mã LOCATION đã khai báo, hoặc mô tả tự do (dạng cũ).
-LOCATION: ĐỊA ĐIỂM X
-# TIME_OF_DAY: thời điểm trong ngày.
-TIME_OF_DAY: Thời điểm mẫu
-# MOOD: tâm trạng của cảnh.
-MOOD: Tâm trạng mẫu
-# DURATION: AUTO hoặc số giây; mặc định AUTO.
-DURATION: AUTO
-# VISUAL: mô tả hình ảnh của cảnh.
-VISUAL: Mô tả hình ảnh mẫu
-# TRANSITION: CUT, DISSOLVE, FADE, FADE_TO_BLACK, MATCH_CUT hoặc WIPE; mặc định CUT.
-# Có thể đặt ở đây hoặc ở cuối cảnh; hai vị trí cùng một ý nghĩa.
-TRANSITION: CUT
-# CAMERA: mô tả góc máy mặc định của cảnh (cho nội dung ngoài SHOT).
-CAMERA: Mô tả góc máy mẫu
-# CAMERA_MOVEMENT: STATIC, PAN_LEFT, PAN_RIGHT, TILT_UP, TILT_DOWN, DOLLY_IN,
-# DOLLY_OUT, TRACKING, CRANE_UP, CRANE_DOWN hoặc HANDHELD; mặc định STATIC.
-CAMERA_MOVEMENT: STATIC
-# ACTION: mô tả hành động, giữ nguyên văn, không bị đọc thành lời.
-ACTION: Hành động mẫu trong cảnh.
-# EXPRESSION: dạng "EXPRESSION: Nhân vật: biểu cảm" hoặc "EXPRESSION: biểu cảm".
-EXPRESSION: NHÂN VẬT A: Biểu cảm mẫu
-# VOICE_NOTE: chỉ đạo sản xuất về giọng đọc; KHÔNG được đọc thành lời.
-VOICE_NOTE: Chỉ đạo giọng đọc mẫu.
-# NARRATION: lời dẫn, người nói là Narrator. Dòng này được gán mã L001 tự động.
-NARRATION: Lời dẫn mẫu thứ nhất.
-# NARRATION [Lnn]: lời dẫn có mã dòng ghi rõ. Mã dòng là duy nhất toàn văn bản.
-NARRATION [L002]: Lời dẫn mẫu thứ hai.
-# DIALOGUE: dạng "DIALOGUE: Người nói: lời thoại"; người nói phải là CHARACTER đã khai báo.
-DIALOGUE: NHÂN VẬT A: Lời thoại mẫu của nhân vật A.
-# Dạng cũ: dòng thoại trần "TÊN NHÂN VẬT: lời thoại".
-NHÂN VẬT B: Lời thoại mẫu của nhân vật B.
-# SFX: lặp lại được; TRIGGER là mã dòng (ví dụ L001) hoặc mô tả hành động;
-# PRIORITY là REQUIRED (mặc định) hoặc OPTIONAL.
-SFX: Hiệu ứng âm thanh mẫu | TRIGGER: L001 | PRIORITY: REQUIRED
-# SFX: NONE nghĩa là cảnh này không có hiệu ứng nào; ghi nhận rõ ràng, không tự thêm.
-# SFX: NONE
-# AMBIENCE: MODE là LOOP (mặc định) hoặc ONCE. Tối đa một dòng mỗi cảnh.
-AMBIENCE: Âm thanh nền mẫu | MODE: LOOP
-# AMBIENCE: NONE nghĩa là cảnh này không có âm thanh nền.
-# AMBIENCE: NONE
-# BGM: INTENSITY là LOW, MEDIUM (mặc định) hoặc HIGH. MUSIC: là tên cũ của BGM.
-BGM: Nhạc nền mẫu | INTENSITY: MEDIUM
-# MUSIC: Nhạc nền mẫu | INTENSITY: MEDIUM
-# MEME: dạng cũ, chỉ ghi nhận dữ liệu; GAIN_DB không có mặc định; PRIORITY mặc định OPTIONAL.
-MEME: Meme mẫu | TRIGGER: L003 | GAIN_DB: -12 | PRIORITY: OPTIONAL
-# MEME: NONE nghĩa là cảnh này không có meme.
-# MEME: NONE
-# VFX: lặp lại được; hoặc nhiều hiệu ứng trên một dòng, phân cách bằng dấu ; .
-VFX: Hiệu ứng hình ảnh mẫu | TRIGGER: L003
-# SHOT: khối cảnh quay trong SCENE; mã shot duy nhất trong cảnh; TYPE là bắt buộc.
-SHOT SH01:
-# TYPE: establishing, medium, close_up, extreme_close_up, over_the_shoulder,
-# reaction, object_insert, tracking hoặc shot_reverse_shot (dạng UPPER_SNAKE cũng được).
-TYPE: establishing
-# CAMERA: mô tả góc máy của shot.
-CAMERA: Mô tả góc máy mẫu của shot
-# CAMERA_MOVEMENT: xem danh sách ở cấp cảnh; mặc định STATIC.
-CAMERA_MOVEMENT: DOLLY_IN
-# SUBJECT: tên CHARACTER hoặc PROP làm chủ thể của shot.
-SUBJECT: NHÂN VẬT A
-# DURATION: AUTO hoặc số giây; mặc định AUTO.
-DURATION: AUTO
-# ACTION: hành động trong shot, giữ nguyên văn.
-ACTION: Hành động mẫu trong shot.
-# EXPRESSION: biểu cảm trong shot; dạng có hoặc không có tên nhân vật.
-EXPRESSION: NHÂN VẬT A: Biểu cảm mẫu trong shot
-# VFX: các hiệu ứng của shot, phân cách bằng dấu ; .
-VFX: Hiệu ứng mẫu một; hiệu ứng mẫu hai
-# Dòng nội dung trong SHOT thuộc về shot này (ví dụ một câu thoại).
-DIALOGUE: NHÂN VẬT B: Lời thoại mẫu trong shot.
-# END_SCENE: kết thúc cảnh (dạng cũ, không bắt buộc).
-END_SCENE
-
-# --- KIỂM ĐỊNH CHẤT LƯỢNG (QA): tối đa một khối. ---
-QA:
-# MIN_SCORE: điểm tối thiểu 0-10; mặc định 8.0.
-MIN_SCORE: 8.0
-# REQUIRE_TECHNICAL: true hoặc false; mặc định true.
-REQUIRE_TECHNICAL: true
-# REQUIRE_CREATIVE_REVIEW: true hoặc false; mặc định true.
-REQUIRE_CREATIVE_REVIEW: true
-# LANGUAGE_GATE: true hoặc false; mặc định true.
-LANGUAGE_GATE: true
-# MAX_HARD_FAILS: số nguyên từ 0 trở lên; mặc định 0.
-MAX_HARD_FAILS: 0
-
-# --- ĐẦU RA (OUTPUT): tối đa một khối. ---
-OUTPUT:
-# RESOLUTION: 1920x1080 hoặc 1280x720; mặc định 1920x1080.
+# RESOLUTION: 1920x1080 hoặc 1280x720.
 RESOLUTION: 1920x1080
-# FPS: 24, 25 hoặc 30; mặc định 24.
+# FPS: 24, 25 hoặc 30.
 FPS: 24
-# FORMAT: chỉ MP4; mặc định MP4.
-FORMAT: MP4
-# DRAFT_FOLDER: thư mục chứa bản draft; mặc định "drive:drafts".
-DRAFT_FOLDER: drive:drafts
-# MASTER: chỉ MANUAL_ONLY. Master không bao giờ tự động.
-MASTER: MANUAL_ONLY
+# DURATION_MODE: AUDIO_DRIVEN để timeline theo độ dài giọng đọc thật.
+DURATION_MODE: AUDIO_DRIVEN
+# TARGET_DURATION: AUTO, số giây, hoặc khoảng như "85–100 seconds".
+TARGET_DURATION: AUTO
 
-# --- THẺ KẾT (END_CARD): tối đa một khối; vắng mặt nghĩa là không có thẻ kết. ---
-END_CARD:
-# TEXT: nội dung thẻ kết.
-TEXT: Nội dung thẻ kết mẫu
-# DURATION: số giây; mặc định 3.0. Không nhận AUTO.
-DURATION: 3.0
-# STYLE: phong cách thẻ kết.
-STYLE: Phong cách thẻ kết mẫu
+⸻
 
-# END_SCRIPT: kết thúc kịch bản (dạng cũ, không bắt buộc).
-END_SCRIPT
+VISUAL_STYLE
+# STYLE: phong cách hình ảnh chung.
+STYLE: Phong cách hình ảnh mẫu
+# QUALITY_REFERENCE: tham chiếu chất lượng hình ảnh.
+QUALITY_REFERENCE: Tham chiếu mẫu
+# VISUAL_TARGET_SCORE: mục tiêu điểm hình ảnh.
+VISUAL_TARGET_SCORE: 90/100
+# DESIGN_POLICY: chính sách thiết kế (thiết kế gốc, không sao chép).
+DESIGN_POLICY: Thiết kế gốc
+# HEAD_RATIO: tỉ lệ đầu, chỉ 0.33-0.35; mặc định 0.34. Không dùng 0.42.
+HEAD_RATIO: 0.34
+# BODY_STYLE / OUTLINE / SHADING / LIGHTING / BACKGROUND / DEPTH:
+# mô tả phong cách tạo hình và môi trường.
+BODY_STYLE: Thân hình hoạt hình có khớp đầy đủ
+OUTLINE: Nét viền sạch, tròn, nhất quán
+SHADING: Tô bóng điện ảnh nhẹ
+LIGHTING: Ánh sáng điện ảnh theo môi trường
+BACKGROUND: Môi trường nhiều lớp chi tiết
+DEPTH: Tiền cảnh, trung cảnh, hậu cảnh
+# ANIMATION: hoạt hình khớp nối điều khiển bằng code.
+ANIMATION: Hoạt hình khớp nối điều khiển bằng code
+# FACIAL_ANIMATION / LIP_SYNC / EYE_TRACKING: bật theo yêu cầu.
+FACIAL_ANIMATION: Enabled
+LIP_SYNC: Enabled for dialogue
+EYE_TRACKING: Enabled
+# CAMERA_STYLE: phong cách quay.
+CAMERA_STYLE: Kể chuyện điện ảnh
+# COLOR_PROGRESSION: danh sách gạch đầu dòng theo cảnh.
+COLOR_PROGRESSION:
+* Cảnh mở đầu: màu ấm, ánh sáng dịu.
+* Cảnh kết: màu lạnh, giảm độ bão hòa.
+# Các cờ FORBIDDEN: không bao giờ dùng slideshow tĩnh hay video AI có sẵn.
+STATIC_SLIDESHOW: FORBIDDEN
+PREGENERATED_AI_VIDEO: FORBIDDEN
+
+⸻
+
+GLOBAL_AUDIO
+# TTS_ENGINE: engine đọc giọng nói.
+TTS_ENGINE: VieNeu-TTS
+# LANGUAGE: lặp lại trong khối này là hợp lệ (phạm vi theo khối).
+LANGUAGE: vi-VN
+# TTS_SPEED: tốc độ đọc.
+TTS_SPEED: 1.0
+# VOICE_FALLBACK: NONE — không thay giọng tiếng Anh.
+VOICE_FALLBACK: NONE
+# VOICE_PRIORITY: ưu tiên giọng theo CHARACTER.
+VOICE_PRIORITY: CHARACTER_VOICE_ID
+# BGM_DUCKING: mức nén nhạc nền, có thể là khoảng như "12–18 dB".
+BGM_DUCKING: 12–18 dB
+# SFX_DENSITY / SFX_TRIGGER_MODE / AMBIENCE_MODE: chính sách âm thanh.
+SFX_DENSITY: SPARSE
+SFX_TRIGGER_MODE: EXPLICIT_ONLY
+AMBIENCE_MODE: LOOP
+# SUBTITLE_LANGUAGE / SUBTITLE_SYNC / SUBTITLE_STYLE: chính sách phụ đề.
+SUBTITLE_LANGUAGE: vi-VN
+SUBTITLE_SYNC: WORD_LEVEL
+SUBTITLE_STYLE: SHORT_PHRASES
+# Các cờ FORBIDDEN / DISABLED: không cắt âm thanh, không tăng tốc bất
+# thường, không dùng âm thanh meme, không chèn whoosh chuyển cảnh tự động.
+AUDIO_TRUNCATION: FORBIDDEN
+UNNATURAL_AUDIO_SPEEDUP: FORBIDDEN
+MEME_SOUND: DISABLED
+AUTOMATIC_TRANSITION_WHOOSH: DISABLED
+
+⸻
+
+# --- NHÂN VẬT: một khối CHARACTER cho mỗi nhân vật. Id không trùng nhau.
+# NAME là tên hiển thị; id (sau CHARACTER:) dùng để tham chiếu. ---
+CHARACTER: CHAR_NHAN_VAT_A
+NAME: Nhân vật A
+ROLE: Nhân vật chính, người kể chuyện
+AGE: 25
+GENDER: Nam
+NATIONALITY: Việt Nam
+BODY_TYPE: Cân đối
+HEAD_RATIO: 0.34
+FACE_SHAPE: Tròn
+HAIR: Tóc ngắn đen
+EYES: Mắt tròn
+SKIN_TONE: Sáng
+DEFAULT_EXPRESSION: Bình tĩnh
+PERSONALITY_PRESENTATION: Điềm đạm, quyết đoán
+FACIAL_FEATURES: Nét mặt riêng biệt
+# COSTUME_CIVILIAN: danh sách gạch đầu dòng.
+COSTUME_CIVILIAN:
+* Áo sơ mi trắng
+* Quần dài sẫm màu
+VOICE_ENGINE: VieNeu-TTS
+VOICE_ID: GIONG_DOC_MAU_A
+VOICE_SPEED: 1.0
+VOICE_TONE: Ấm, rõ ràng
+# ANIMATION_CAPABILITIES: danh sách khả năng chuyển động.
+ANIMATION_CAPABILITIES:
+* Đi bộ
+* Cầm vật dụng
+* Biểu cảm khuôn mặt
+IDENTITY_LOCK: TRUE
+
+CHARACTER: CHAR_NHAN_VAT_B
+NAME: Nhân vật B
+ROLE: Nhân vật phụ
+AGE: 30
+GENDER: Nữ
+NATIONALITY: Việt Nam
+BODY_TYPE: Mảnh
+HEAD_RATIO: 0.34
+FACE_SHAPE: Dài
+HAIR: Tóc dài đen
+EYES: Mắt to
+SKIN_TONE: Sáng
+DEFAULT_EXPRESSION: Tò mò
+COSTUME:
+* Áo dài truyền thống
+VOICE_ENGINE: VieNeu-TTS
+VOICE_ID: GIONG_DOC_MAU_B
+VOICE_SPEED: 1.0
+VOICE_TONE: Nhẹ nhàng
+IDENTITY_LOCK: TRUE
+
+⸻
+
+# --- ĐỊA ĐIỂM: một khối LOCATION cho mỗi địa điểm. Id không trùng nhau. ---
+LOCATION: LOC_DIA_DIEM_X
+NAME: Địa điểm X
+TYPE: EXTERIOR
+YEAR: 2024
+TIME_OF_DAY: MORNING
+WEATHER: Nắng nhẹ
+HISTORICAL_REFERENCE: Tham chiếu mẫu
+# DISTINCTIVE_FEATURES: nét riêng của địa điểm, dạng gạch đầu dòng.
+DISTINCTIVE_FEATURES:
+* Cổng chào lớn
+* Hàng cây dọc lối đi
+FOREGROUND:
+* Bồn hoa gần camera
+MIDGROUND:
+* Lối đi lát đá
+BACKGROUND:
+* Dãy nhà phía xa
+LIGHTING: Ánh sáng buổi sáng dịu
+COLOR_PALETTE: Xanh lá, vàng nhạt, nâu gỗ
+AMBIENCE: Tiếng chim và tiếng bước chân xa
+FORBIDDEN:
+* Không thay địa điểm khác
+
+⸻
+
+# --- ĐẠO CỤ: một khối PROP cho mỗi vật dụng. ---
+PROP: PROP_VAT_DUNG_X
+TYPE: DOCUMENT
+COLOR: Nâu nhạt
+MATERIAL: Giấy
+INTERACTION: Cầm, mở, đọc
+DESCRIPTION: Vật dụng mẫu
+OWNER: CHAR_NHAN_VAT_A
+
+⸻
+
+# --- CẢNH: SCENE: <ID> với TITLE, LOCATION (tham chiếu id hoặc văn bản),
+# CHARACTERS (danh sách id, hoặc NONE), MOOD, STORY_PURPOSE. ---
+SCENE: SC01
+TITLE: Cảnh mẫu mở đầu
+LOCATION: LOC_DIA_DIEM_X
+CHARACTERS: CHAR_NHAN_VAT_A, CHAR_NHAN_VAT_B
+MOOD: Bình yên
+STORY_PURPOSE: Giới thiệu nhân vật chính và địa điểm
+AMBIENCE: Tiếng chim buổi sáng
+BGM: Nhạc nền nhẹ
+TRANSITION: CUT
+
+# SHOT: <ID> với CAMERA là văn bản tự do mô tả góc quay. TYPE (enum) là
+# tùy chọn khi đã có CAMERA; khi có TYPE thì TYPE phải thuộc 9 loại shot.
+SHOT: SC01_SH01
+CAMERA: Medium shot, nhân vật chính ở trung tâm khung hình
+CAMERA_MOVEMENT: STATIC
+ACTION:
+* Nhân vật chính bước tới và dừng lại.
+* Nhân vật chính nhìn quanh.
+EXPRESSION: Bình tĩnh, tò mò
+# NARRATION / DIALOGUE: khối con với SPEAKER, LINE_ID, TEXT, LIP_SYNC.
+# TEXT chỉ bóc một lớp dấu ngoặc kép ngoài cùng; nội dung giữ nguyên.
+NARRATION:
+SPEAKER: CHAR_NHAN_VAT_A
+LINE_ID: MAU_001
+TEXT: “Tôi bước vào địa điểm này lần đầu tiên.”
+LIP_SYNC: REQUIRED
+# SFX: khối con có cấu trúc (gạch đầu dòng ID / EVENT / TRIGGER / TYPE /
+# INTENSITY / DURATION / DURATION_MODE), hoặc SFX: NONE.
+SFX:
+* ID: SFX_001
+* EVENT: Tiếng bước chân
+* TRIGGER: MAU_001
+* TYPE: Foley
+* INTENSITY: LOW
+* DURATION: 0.4s
+* DURATION_MODE: FIXED
+
+SHOT: SC01_SH02
+CAMERA: Close-up, nhân vật phụ nhìn về phía camera
+CAMERA_MOVEMENT: Slow dolly-in
+ACTION:
+* Nhân vật phụ mỉm cười.
+DIALOGUE:
+SPEAKER: CHAR_NHAN_VAT_B
+LINE_ID: MAU_002
+TEXT: “Chào mừng bạn đến đây.”
+LIP_SYNC: REQUIRED
+SFX: NONE
+POST_DIALOGUE_PAUSE: 0.6s
+
+⸻
+
+# GLOBAL_NEGATIVE_CONSTRAINTS: danh sách gạch đầu dòng các điều cấm.
+GLOBAL_NEGATIVE_CONSTRAINTS:
+* Không thay đổi danh tính nhân vật giữa các cảnh.
+* Không thay thế địa điểm đã khai báo.
+* Không cắt câu thoại cuối.
+
+⸻
+
+END_CARD
+BACKGROUND: Đen
+TEXT: HẾT
+SECONDARY_TEXT: Cảm ơn bạn đã xem
+TEXT_LANGUAGE: vi-VN
+DURATION: 3s
+BGM: NONE
+SFX: NONE
+
+⸻
+
+QA
+MIN_OVERALL_SCORE: 8.0/10
+MIN_CATEGORY_SCORE: 7.0/10
+TARGET_VISUAL_SCORE: 90/100
+HARD_FAIL_COUNT: 0
+EXPECTED_SCENES: 1
+EXPECTED_SHOTS: 2
+EXPECTED_SPOKEN_LINES: 2
+EXPECTED_NARRATION_LINES: 1
+EXPECTED_DIALOGUE_LINES: 1
+EXPECTED_EXTERNAL_NARRATOR_LINES: 0
+EXPECTED_EXPLICIT_SFX_EVENTS: 1
+SCRIPT_INTEGRITY_CHECK: REQUIRED
+CHARACTER_IDENTITY_CHECK: REQUIRED
+LIP_SYNC_CHECK: REQUIRED
+VIETNAMESE_LANGUAGE_CHECK: REQUIRED
+MP4_VALIDATION: REQUIRED
+HUMAN_VISUAL_REVIEW: REQUIRED
+FAILED_QA_POLICY: BLOCK_MASTER
+
+⸻
+
+OUTPUT
+VIDEO_FORMAT: MP4
+VIDEO_CODEC: H.264
+AUDIO_CODEC: AAC
+PIXEL_FORMAT: yuv420p
+RESOLUTION: 1920x1080
+FPS: 24
+EXPORT_DRAFT: TRUE
+EXPORT_MASTER: HUMAN_APPROVAL_REQUIRED
+EXPORT_SCRIPT: TRUE
+EXPORT_SUBTITLES: TRUE
+EXPORT_QA_REPORT: TRUE
+UPLOAD_GOOGLE_DRIVE: TRUE
+DRIVE_PROJECT_FOLDER: DU_AN_MAU
+DRIVE_SUBFOLDERS:
+* 01_SCRIPT
+* 02_STORYBOARD
+* 03_AUDIO
+* 04_DRAFT
+* 05_QA_REPORTS
+* 06_MASTER
+MASTER_APPROVAL: HUMAN_REQUIRED
+
+END STUDIO SCRIPT V1

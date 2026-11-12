@@ -1,0 +1,744 @@
+STUDIO SCRIPT V1 validate + review (Next.js) — patch 04
+=========================================================
+
+ORDERING: apply ON TOP OF patch 01
+(01-universal-preflight-and-production-api.patch) — this patch wires
+into the Unified Pipeline section and preflight state that 01 adds to
+app/page.tsx, so apply 01 first. Independent of patches 02/03
+(affiliate workspace / link-paste input): no shared files.
+
+  git apply ai_clip_studio/frontend_patches/01-universal-preflight-and-production-api.patch
+  git apply ai_clip_studio/frontend_patches/04-studio-script-v1-validate-review.patch
+
+WHAT IT ADDS (same surface as the :8788 server UI, Vietnamese labels):
+- app/api/production/validate/route.ts (new): proxies POST {script} to
+  the :8788 backend /api/production/validate, passing status/body
+  through unchanged (including 422 with the line-numbered error list).
+- components/ScriptReviewPanel.tsx (new): "Kiểm tra kịch bản V1"
+  button + review panel rendering the validate response generically
+  (characters/locations/props/scenes/shots/narration/dialogue/cues,
+  storytelling mode + primary character + EXTERNAL_NARRATOR status and
+  the 0-external-narrator-lines count, meta, end card, QA expected
+  counts, OUTPUT/Drive, unsupported fields, line-numbered errors).
+- app/page.tsx: renders the panel after PreflightPanel; the Unified
+  Pipeline "Tạo Draft" button stays disabled while the current script
+  text is a V1 script that failed validation. Free-form scripts are
+  never blocked; the backend still refuses invalid V1 server-side.
+
+No backend endpoint is invented: the validate endpoint is the one the
+:8788 ai_clip_studio server already serves, plus the existing
+analyze/preflight/draft endpoints. Full `npm run build` / `npm run
+lint` still needs to run on Windows (node_modules are not in the repo).
+
+diff --git a/sites/ai-clip-studio/app/api/production/validate/route.ts b/sites/ai-clip-studio/app/api/production/validate/route.ts
+new file mode 100644
+index 0000000..c72939a
+--- /dev/null
++++ b/sites/ai-clip-studio/app/api/production/validate/route.ts
+@@ -0,0 +1,35 @@
++import { NextResponse } from "next/server";
++
++// Proxy to the unified production pipeline (ai_clip_studio server, 8788).
++// POST {script} -> STUDIO SCRIPT V1 validation + human-readable review:
++//   200 valid V1 (review) or free-form script (freeform note, never blocked)
++//   422 invalid V1, with the full line-numbered error list
++// Status and body pass through unchanged (including 422) so the review
++// panel can render the real error list. Same backend endpoint and shape
++// as the :8788 server UI (/api/production/validate); no new backend
++// endpoint is invented here.
++const backend = () =>
++  process.env.PRODUCTION_BACKEND_URL || "http://127.0.0.1:8788";
++
++export async function POST(request: Request) {
++  try {
++    const body = await request.text();
++    const r = await fetch(`${backend()}/api/production/validate`, {
++      method: "POST",
++      headers: { "content-type": "application/json" },
++      body,
++    });
++    return new NextResponse(await r.text(), {
++      status: r.status,
++      headers: { "content-type": "application/json" },
++    });
++  } catch {
++    return NextResponse.json(
++      {
++        error:
++          "Production backend chưa chạy (8788). Chạy: python -m ai_clip_studio.server",
++      },
++      { status: 503 },
++    );
++  }
++}
+diff --git a/sites/ai-clip-studio/app/page.tsx b/sites/ai-clip-studio/app/page.tsx
+index 7baa797..742f1e4 100644
+--- a/sites/ai-clip-studio/app/page.tsx
++++ b/sites/ai-clip-studio/app/page.tsx
+@@ -3,2 +3,3 @@
+ import { PreflightPanel } from "../components/PreflightPanel";
++import { ScriptReviewPanel } from "../components/ScriptReviewPanel";
+ import {
+@@ -421,7 +422,16 @@ export default function Home() {
+     [prodStatus, setProdStatus] = useState(""),
+     [prodDriveUrl, setProdDriveUrl] = useState(""),
+     [prodBusy, setProdBusy] = useState(false),
+-    [prodApproved, setProdApproved] = useState(false);
++    [prodApproved, setProdApproved] = useState(false),
++    // STUDIO SCRIPT V1 validation verdict for one script text
++    // (reported by ScriptReviewPanel). Only a V1 script that FAILED
++    // validation blocks the Unified Pipeline draft; free-form scripts
++    // are never blocked here (the backend still refuses invalid V1).
++    [v1Validation, setV1Validation] = useState<{
++      script: string;
++      format: string;
++      valid: boolean;
++    } | null>(null);
+ 
+   const words = useMemo(
+     () => script.trim().split(/\s+/).filter(Boolean).length,
+@@ -578,6 +588,16 @@ export default function Home() {
+     }
+   }
+ 
++  // A V1 script with validation errors stays blocked until the SAME
++  // script text validates; editing the script clears the block (the
++  // new snapshot needs its own check, and preflight/draft still
++  // refuse invalid V1 server-side). Free-form scripts never block.
++  const v1Blocked =
++    v1Validation !== null &&
++    v1Validation.script === script &&
++    v1Validation.format === "studio_script_v1" &&
++    !v1Validation.valid;
++
+   // Unified pipeline draft: POST /api/production/draft (ai_clip_studio
+   // server on 8788) -> job_id, then poll the real job status until the
+   // draft is rendered, validated and uploaded to Google Drive.
+@@ -732,6 +752,10 @@ export default function Home() {
+             onAllowDraftRender={render}
+             onReport={(ok) => setPreflightPassed(ok)}
+           />
++          <ScriptReviewPanel
++            script={script}
++            onValidation={(v) => setV1Validation(v)}
++          />
+           <div>
+             <div className="mb-3 flex items-end justify-between">
+               <div>
+@@ -1180,11 +1204,16 @@ export default function Home() {
+                 </div>
+                 <button
+                   onClick={renderProductionDraft}
+-                  disabled={prodBusy || words < 5}
++                  disabled={prodBusy || words < 5 || v1Blocked}
+                   className="flex w-full items-center justify-center gap-2 rounded-xl border-[3px] border-white bg-[#47bd75] px-5 py-3 font-black text-white disabled:opacity-50"
+                 >
+                   <Play fill="currentColor" /> Tạo Draft qua Unified Pipeline
+                 </button>
++                {v1Blocked && (
++                  <p className="mt-2 text-xs font-bold text-[#ffb3ae]">
++                    Kịch bản V1 còn lỗi — sửa kịch bản rồi bấm “Kiểm tra kịch bản V1” lại trước khi tạo Draft.
++                  </p>
++                )}
+                 {prodJobId && (
+                   <div className="mt-2 space-y-1 text-xs font-bold">
+                     <div>Job: <span className="font-mono">{prodJobId}</span></div>
+diff --git a/sites/ai-clip-studio/components/ScriptReviewPanel.tsx b/sites/ai-clip-studio/components/ScriptReviewPanel.tsx
+new file mode 100644
+index 0000000..564c5a9
+--- /dev/null
++++ b/sites/ai-clip-studio/components/ScriptReviewPanel.tsx
+@@ -0,0 +1,593 @@
++"use client";
++
++import React, { useState } from "react";
++import {
++  CheckCircle2,
++  XCircle,
++  AlertTriangle,
++  FileText,
++  ChevronDown,
++  ChevronUp,
++} from "lucide-react";
++
++// STUDIO SCRIPT V1 validate + review panel (DIRECTIVE §2: paste -> parse
++// and validate -> display characters/locations/props/scenes/shots,
++// narration and dialogue, SFX/ambience/BGM/VFX, line-numbered errors,
++// review before production).
++//
++// Talks to POST /api/production/validate, which proxies the :8788
++// ai_clip_studio server (same endpoint and response shape as the
++// server UI). The review is rendered GENERICALLY by walking the
++// returned structure: known fields get Vietnamese labels, unknown
++// fields still display under their own key — so both the original
++// dialect and the newer FIRST_PERSON_ROLEPLAY dialect (storytelling
++// mode, primary character, external narrator, end card, QA expected
++// counts, OUTPUT block) display correctly without hardcoding either
++// dialect's field names. Nothing here re-implements parsing and no
++// validation rule lives in this panel: errors come from the backend.
++
++export interface V1ValidationIssue {
++  line: number;
++  code: string;
++  message: string;
++}
++
++export interface V1ValidationResult {
++  format: string;
++  valid: boolean;
++  snapshot_hash?: string;
++  note?: string;
++  errors?: V1ValidationIssue[];
++  warnings?: V1ValidationIssue[];
++  summary?: Record<string, any>;
++  review?: Record<string, any>;
++}
++
++export interface V1ValidationVerdict {
++  script: string;
++  format: string;
++  valid: boolean;
++}
++
++interface ScriptReviewPanelProps {
++  script: string;
++  // Reported on every completed check so the parent page can gate the
++  // Unified Pipeline draft on a FAILED V1 validation. Free-form
++  // scripts report valid=true and are never blocked. Null on a
++  // failed request (no verdict — the backend still refuses invalid V1).
++  onValidation?: (verdict: V1ValidationVerdict | null) => void;
++}
++
++const FIELD_LABELS: Record<string, string> = {
++  name: "Tên",
++  id: "ID",
++  role: "Vai trò",
++  appearance: "Ngoại hình",
++  traits: "Đặc điểm",
++  costume: "Trang phục",
++  costume_changes: "Đổi trang phục",
++  voice: "Giọng đọc",
++  voice_style: "Phong cách giọng",
++  voice_id: "Voice ID",
++  voice_engine: "Voice engine",
++  head_ratio: "head_ratio",
++  identity_id: "Identity ID",
++  period: "Thời kỳ",
++  geography: "Địa lý",
++  architecture: "Kiến trúc",
++  features: "Đặc điểm",
++  foreground: "Foreground",
++  midground: "Midground",
++  background: "Background",
++  lighting: "Ánh sáng",
++  weather: "Thời tiết",
++  palette: "Bảng màu",
++  forbidden: "Cấm",
++  description: "Mô tả",
++  owner: "Chủ sở hữu",
++  interactions: "Tương tác",
++  title: "Tiêu đề",
++  location_text: "Bối cảnh",
++  location_ref: "Location ref",
++  time_of_day: "Thời gian trong ngày",
++  mood: "Mood",
++  duration: "Thời lượng",
++  visual: "Visual",
++  actions: "Hành động",
++  action_cues: "Action cues",
++  dropped_action_cues: "Action cues bị loại",
++  camera: "Camera",
++  camera_movement: "Chuyển động camera",
++  subject: "Chủ thể",
++  type: "Loại",
++  expression: "Biểu cảm",
++  expressions: "Biểu cảm",
++  transition: "Chuyển cảnh",
++  speaker: "Người nói",
++  kind: "Loại dòng",
++  text: "Nội dung",
++  voice_note: "Ghi chú giọng",
++  line_id: "LINE_ID",
++  shot_id: "Shot",
++  cue_type: "Loại cue",
++  trigger: "Trigger",
++  priority: "Ưu tiên",
++  mode: "Mode",
++  intensity: "Cường độ",
++  gain_db: "Gain (dB)",
++  source_key: "Khóa gốc",
++  project: "Project",
++  project_id: "Project ID",
++  language: "Ngôn ngữ",
++  genre: "Thể loại",
++  visual_style: "Phong cách visual",
++  aspect_ratio: "Tỉ lệ",
++  target_duration: "Thời lượng mục tiêu",
++  tone: "Tone",
++  meme_policy: "Chính sách meme",
++  meme_max_per_minute: "Meme tối đa/phút",
++  storytelling_mode: "Chế độ kể chuyện",
++  primary_character: "Nhân vật chính (ngôi thứ nhất)",
++  external_narrator: "Người dẫn truyện ngoài",
++  key: "Khóa",
++  value: "Giá trị",
++  context: "Ngữ cảnh",
++  line: "Dòng",
++};
++
++function labelFor(key: string): string {
++  return FIELD_LABELS[key] || key;
++}
++
++function renderValue(value: any, depth: number): React.ReactNode {
++  if (value === null || value === undefined || value === "") return "—";
++  if (Array.isArray(value)) {
++    if (value.length === 0) return "—";
++    return value.map((v, i) => (
++      <span key={i}>
++        {i > 0 ? "; " : ""}
++        {renderValue(v, depth + 1)}
++      </span>
++    ));
++  }
++  if (typeof value === "object") {
++    const keys = Object.keys(value);
++    if (keys.length === 0) return "—";
++    if (depth >= 1) {
++      return keys
++        .map((k) => `${labelFor(k)}: ${String(value[k])}`)
++        .join("; ");
++    }
++    return <FieldList data={value} />;
++  }
++  return String(value);
++}
++
++function FieldList({
++  data,
++  skip,
++}: {
++  data: Record<string, any>;
++  skip?: string[];
++}) {
++  const skipped = new Set(skip || []);
++  const keys = Object.keys(data || {}).filter(
++    (k) => !skipped.has(k) && data[k] !== null && data[k] !== undefined && data[k] !== "",
++  );
++  if (keys.length === 0) return null;
++  return (
++    <ul className="mt-1 space-y-0.5 text-xs">
++      {keys.map((k) => (
++        <li key={k}>
++          <b>{labelFor(k)}:</b> {renderValue(data[k], 0)}
++        </li>
++      ))}
++    </ul>
++  );
++}
++
++function CueLine({ cue }: { cue: Record<string, any> }) {
++  return (
++    <span>
++      <b>{cue.cue_type || ""}</b>: {cue.name || ""}
++      <FieldList
++        data={cue}
++        skip={["cue_type", "name", "line", "scene_number", "shot_id"]}
++      />
++    </span>
++  );
++}
++
++export const ScriptReviewPanel: React.FC<ScriptReviewPanelProps> = ({
++  script,
++  onValidation,
++}) => {
++  const [result, setResult] = useState<V1ValidationResult | null>(null);
++  const [loading, setLoading] = useState(false);
++  const [error, setError] = useState("");
++  const [expanded, setExpanded] = useState(true);
++  const [checkedScript, setCheckedScript] = useState<string | null>(null);
++
++  const runValidation = async () => {
++    setLoading(true);
++    setError("");
++    try {
++      const res = await fetch("/api/production/validate", {
++        method: "POST",
++        headers: { "Content-Type": "application/json" },
++        body: JSON.stringify({ script }),
++      });
++      const data = (await res.json()) as V1ValidationResult;
++      if (res.status === 400) {
++        setError(data.note || "Kịch bản quá ngắn.");
++        if (onValidation) onValidation(null);
++        return;
++      }
++      setResult(data);
++      setCheckedScript(script);
++      if (onValidation) {
++        onValidation({ script, format: data.format, valid: data.valid });
++      }
++    } catch (err) {
++      console.error("V1 validation error:", err);
++      setError("Không kết nối được backend kiểm tra (8788).");
++      if (onValidation) onValidation(null);
++    } finally {
++      setLoading(false);
++    }
++  };
++
++  const stale = checkedScript !== null && checkedScript !== script;
++  const review = result?.review || {};
++  const check = (review.narrator_check || {}) as Record<string, any>;
++  const ext = check.external_narrator;
++  const extNone = String(ext || "").toUpperCase() === "NONE";
++  const audioGroups = (review.audio_cues || {}) as Record<string, any[]>;
++  const handled = new Set([
++    "characters",
++    "locations",
++    "props",
++    "scenes",
++    "audio_cues",
++    "audio_cues_grouped",
++    "constraints",
++    "unsupported_fields",
++    "meta",
++    "narrator_check",
++    "end_card",
++    "qa",
++    "output",
++    "global_audio",
++  ]);
++  const extraKeys = Object.keys(review).filter(
++    (k) => !handled.has(k) && review[k] !== null && review[k] !== "",
++  );
++
++  return (
++    <div className="rounded-[28px] border-[3px] border-[#172033] bg-white p-6 shadow-[8px_8px_0_#172033] mb-6">
++      <div className="flex items-center justify-between gap-3">
++        <h3 className="flex items-center gap-2 text-lg font-black text-[#172033]">
++          <FileText size={20} /> Kiểm tra kịch bản V1
++        </h3>
++        <button
++          type="button"
++          onClick={runValidation}
++          disabled={loading || script.trim().length < 10}
++          className="rounded-xl border-2 border-[#172033] bg-[#51d8e5] px-3 py-1.5 text-xs font-black text-[#172033] shadow-[2px_2px_0_#172033] hover:bg-white disabled:opacity-50"
++        >
++          {loading ? "Đang kiểm tra..." : "Kiểm tra kịch bản V1"}
++        </button>
++      </div>
++      <p className="mt-1 text-xs font-semibold text-[#172033]/70">
++        Xem lại trước khi sản xuất: nhân vật, bối cảnh, đạo cụ, cảnh,
++        shot, lời thoại, âm thanh và lỗi kèm số dòng. Kịch bản tự do
++        không bị chặn ở bước này.
++      </p>
++      {stale && (
++        <p className="mt-2 text-xs font-bold text-[#e44d46]">
++          Kịch bản đã thay đổi — snapshot mới cần kiểm tra lại.
++        </p>
++      )}
++      {error && (
++        <p className="mt-2 text-xs font-bold text-[#e44d46]">{error}</p>
++      )}
++      {!result ? null : result.format === "freeform" ? (
++        <div className="mt-3 text-sm">
++          <p className="font-bold text-[#2f9e5b]">{result.note}</p>
++          <p className="mt-1 break-all text-xs">
++            Snapshot hash: <code>{result.snapshot_hash}</code>
++          </p>
++        </div>
++      ) : (
++        <div className="mt-3">
++          {result.errors && result.errors.length > 0 ? (
++            <div className="rounded-xl border-2 border-[#e44d46] bg-[#fff5f5] p-3">
++              <p className="flex items-center gap-1 text-sm font-black text-[#e44d46]">
++                <XCircle size={16} /> Kịch bản V1 chưa hợp lệ —{" "}
++                {result.errors.length} lỗi (sửa trước khi render):
++              </p>
++              <ul className="mt-1 space-y-0.5 text-xs">
++                {result.errors.map((e, i) => (
++                  <li key={i}>
++                    Dòng {e.line} [{e.code}]: {e.message}
++                  </li>
++                ))}
++              </ul>
++            </div>
++          ) : (
++            <p className="flex items-center gap-1 text-sm font-bold text-[#2f9e5b]">
++              <CheckCircle2 size={16} /> Kịch bản V1 hợp lệ.
++            </p>
++          )}
++          {result.warnings && result.warnings.length > 0 && (
++            <div className="mt-2 rounded-xl border-2 border-[#b87400] bg-[#fffaf0] p-3">
++              <p className="flex items-center gap-1 text-sm font-black text-[#b87400]">
++                <AlertTriangle size={16} /> Cảnh báo:
++              </p>
++              <ul className="mt-1 space-y-0.5 text-xs">
++                {result.warnings.map((e, i) => (
++                  <li key={i}>
++                    Dòng {e.line} [{e.code}]: {e.message}
++                  </li>
++                ))}
++              </ul>
++            </div>
++          )}
++          <p className="mt-2 break-all text-xs">
++            Snapshot hash (SHA-256 của đúng văn bản đã dán, dùng xuyên
++            suốt pipeline — sửa kịch bản sẽ tạo snapshot mới):{" "}
++            <code>{result.snapshot_hash}</code>
++          </p>
++          <button
++            type="button"
++            onClick={() => setExpanded(!expanded)}
++            className="mt-2 flex items-center gap-1 text-xs font-black text-[#172033] underline"
++          >
++            {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
++            {expanded ? "Thu gọn xem lại" : "Xem lại chi tiết"}
++          </button>
++          {expanded && (
++            <div className="mt-2 space-y-4 text-sm">
++              <section>
++                <h4 className="font-black">
++                  Chế độ kể chuyện và người dẫn truyện
++                </h4>
++                <p className="text-xs">
++                  <b>
++                    Người dẫn truyện ngoài (EXTERNAL_NARRATOR):{" "}
++                    <span className={extNone ? "text-[#2f9e5b]" : ""}>
++                      {ext === null || ext === undefined || ext === ""
++                        ? "không khai báo"
++                        : String(ext)}
++                    </span>
++                  </b>
++                  {extNone
++                    ? " — bắt buộc: không có người dẫn truyện ngoài."
++                    : ""}
++                </p>
++                <p className="text-xs">
++                  Số dòng narrator ngoài:{" "}
++                  <b>{check.external_narrator_lines ?? "?"}</b> (kỳ vọng 0
++                  với kịch bản ngôi thứ nhất) · Narration:{" "}
++                  {check.narration_lines ?? 0} · Dialogue:{" "}
++                  {check.dialogue_lines ?? 0}
++                </p>
++                {check.storytelling_mode && (
++                  <p className="text-xs">
++                    Chế độ kể chuyện: <b>{String(check.storytelling_mode)}</b>
++                  </p>
++                )}
++                {check.primary_character && (
++                  <p className="text-xs">
++                    Nhân vật chính (ngôi thứ nhất):{" "}
++                    <b>{String(check.primary_character)}</b>
++                  </p>
++                )}
++              </section>
++              {review.meta && (
++                <section>
++                  <h4 className="font-black">Thông tin chung</h4>
++                  <FieldList data={review.meta} />
++                </section>
++              )}
++              <section>
++                <h4 className="font-black">Nhân vật</h4>
++                <ul className="space-y-1 text-xs">
++                  {(review.characters || []).map((c: any, i: number) => (
++                    <li key={i}>
++                      <b>{c.name || c.id || ""}</b>
++                      <FieldList data={c} skip={["name", "id", "line"]} />
++                    </li>
++                  ))}
++                </ul>
++              </section>
++              <section>
++                <h4 className="font-black">Bối cảnh (LOCATION)</h4>
++                <ul className="space-y-1 text-xs">
++                  {(review.locations || []).map((l: any, i: number) => (
++                    <li key={i}>
++                      <b>{l.id || ""}</b>
++                      {l.name && l.name !== l.id ? ` — ${l.name}` : ""}
++                      <FieldList data={l} skip={["id", "name", "line"]} />
++                    </li>
++                  ))}
++                </ul>
++              </section>
++              <section>
++                <h4 className="font-black">Đạo cụ (PROP)</h4>
++                <ul className="space-y-1 text-xs">
++                  {(review.props || []).map((p: any, i: number) => (
++                    <li key={i}>
++                      <b>{p.name || p.id || ""}</b>
++                      <FieldList data={p} skip={["name", "id", "line"]} />
++                    </li>
++                  ))}
++                </ul>
++              </section>
++              <section>
++                <h4 className="font-black">Cảnh và shot</h4>
++                {(review.scenes || []).map((sc: any, i: number) => {
++                  const lines = sc.lines || sc.spoken_lines || [];
++                  const cues =
++                    sc.all_audio_cues ||
++                    (sc.audio_cues || []).concat(sc.vfx_cues || []);
++                  return (
++                    <div key={i} className="mt-2">
++                      <p className="text-xs">
++                        <b>
++                          Cảnh {sc.number ?? sc.id ?? ""}: {sc.title || ""}
++                        </b>
++                      </p>
++                      <FieldList
++                        data={sc}
++                        skip={[
++                          "number",
++                          "id",
++                          "title",
++                          "lines",
++                          "spoken_lines",
++                          "shots",
++                          "audio_cues",
++                          "vfx_cues",
++                          "all_audio_cues",
++                          "actions",
++                          "action_cues",
++                          "dropped_action_cues",
++                          "line",
++                        ]}
++                      />
++                      {sc.actions && sc.actions.length > 0 && (
++                        <ul className="mt-1 space-y-0.5 text-xs">
++                          {sc.actions.map((a: string, j: number) => (
++                            <li key={j}>Hành động: {a}</li>
++                          ))}
++                        </ul>
++                      )}
++                      {lines.length > 0 && (
++                        <ul className="mt-1 space-y-0.5 text-xs">
++                          {lines.map((ln: any, j: number) => (
++                            <li key={j}>
++                              [{ln.line_id || ""}] <b>{ln.speaker || ""}</b> (
++                              {ln.kind === "narration"
++                                ? "narration"
++                                : "dialogue"}
++                              ): {ln.text || ""}
++                            </li>
++                          ))}
++                        </ul>
++                      )}
++                      {sc.shots && sc.shots.length > 0 && (
++                        <ul className="mt-1 space-y-0.5 text-xs">
++                          {sc.shots.map((o: any, j: number) => (
++                            <li key={j}>
++                              Shot <b>{o.id || ""}</b>
++                              <FieldList data={o} skip={["id", "line"]} />
++                            </li>
++                          ))}
++                        </ul>
++                      )}
++                      {sc.action_cues && sc.action_cues.length > 0 && (
++                        <p className="text-xs">
++                          Action cues: {sc.action_cues.join(", ")}
++                          {sc.dropped_action_cues &&
++                          sc.dropped_action_cues.length > 0
++                            ? ` (bị loại: ${sc.dropped_action_cues.join(", ")})`
++                            : ""}
++                        </p>
++                      )}
++                      {cues.length > 0 && (
++                        <ul className="mt-1 space-y-0.5 text-xs">
++                          {cues.map((c: any, j: number) => (
++                            <li key={j}>
++                              <CueLine cue={c} />
++                            </li>
++                          ))}
++                        </ul>
++                      )}
++                    </div>
++                  );
++                })}
++              </section>
++              <section>
++                <h4 className="font-black">Âm thanh</h4>
++                <ul className="space-y-0.5 text-xs">
++                  {Object.keys(audioGroups).map((k) => (
++                    <li key={k}>
++                      <b>{k}</b> ({(audioGroups[k] || []).length}):{" "}
++                      {(audioGroups[k] || [])
++                        .map((c: any) => c.name || "")
++                        .join("; ")}
++                    </li>
++                  ))}
++                </ul>
++              </section>
++              {review.constraints && review.constraints.length > 0 && (
++                <section>
++                  <h4 className="font-black">Ràng buộc (constraints)</h4>
++                  <ul className="space-y-0.5 text-xs">
++                    {review.constraints.map((c: string, i: number) => (
++                      <li key={i}>{c}</li>
++                    ))}
++                  </ul>
++                </section>
++              )}
++              {review.unsupported_fields &&
++                review.unsupported_fields.length > 0 && (
++                  <section>
++                    <h4 className="font-black">
++                      Trường không hỗ trợ (được giữ lại, không bị loại bỏ
++                      âm thầm)
++                    </h4>
++                    <ul className="space-y-0.5 text-xs">
++                      {review.unsupported_fields.map((u: any, i: number) => (
++                        <li key={i}>
++                          Dòng {u.line} [{u.context || ""}] {u.key || ""}:{" "}
++                          {u.value || ""}
++                        </li>
++                      ))}
++                    </ul>
++                  </section>
++                )}
++              {review.end_card && (
++                <section>
++                  <h4 className="font-black">End card</h4>
++                  <FieldList data={review.end_card} skip={["line"]} />
++                </section>
++              )}
++              {review.qa && (
++                <section>
++                  <h4 className="font-black">QA (số lượng kỳ vọng)</h4>
++                  <FieldList data={review.qa} />
++                </section>
++              )}
++              {review.output && (
++                <section>
++                  <h4 className="font-black">OUTPUT (xuất bản và Drive)</h4>
++                  <FieldList data={review.output} />
++                </section>
++              )}
++              {review.global_audio && (
++                <section>
++                  <h4 className="font-black">Âm thanh tổng (global audio)</h4>
++                  <FieldList data={review.global_audio} />
++                </section>
++              )}
++              {extraKeys.length > 0 && (
++                <section>
++                  <h4 className="font-black">Thông tin khác</h4>
++                  <ul className="space-y-0.5 text-xs">
++                    {extraKeys.map((k) => (
++                      <li key={k}>
++                        <b>{labelFor(k)}:</b> {renderValue(review[k], 0)}
++                      </li>
++                    ))}
++                  </ul>
++                </section>
++              )}
++            </div>
++          )}
++        </div>
++      )}
++    </div>
++  );
++};

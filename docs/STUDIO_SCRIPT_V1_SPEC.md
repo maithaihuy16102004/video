@@ -42,6 +42,7 @@ conflicting script format.
 13. Machine-readable schema reference
 14. Versioning and changelog
 15. Planner trait contract (Gemini sketcher)
+16. First-person prerequisite rule
 Appendix A. Rules defined by this specification where the brief was silent
 Appendix B. Open questions for the coordinator / Phase B
 
@@ -59,9 +60,9 @@ storyboard review, preflight, scene package, character design, rig,
 animation, Vietnamese TTS, audio timeline, SFX/music, subtitles, rendering,
 Technical QA, Creative QA, and Drive upload.
 
-One format serves all genres: historical documentaries, comedy, educational
-videos, fictional stories, biographies, first-person storytelling,
-third-person storytelling, and others. Nothing in this specification is
+One format serves all genres: historical documentaries, comedy,
+educational videos, fictional stories, biographies — all told in the
+first person (§16) — and others. Nothing in this specification is
 specific to any one story, character, or location.
 
 ### 1.2 Design principles
@@ -97,6 +98,12 @@ specific to any one story, character, or location.
    approval, never automatically (§5.9).
 9. **One immutable snapshot.** One SHA-256 hash of the exact raw input is
    used end to end, unchanged (§9).
+10. **First person, never an external narrator.** All scripts are told
+    in the first person by the character(s); an external narrator is
+    forbidden. This is a prerequisite rule (§16): `NARRATION` lines are
+    spoken by the primary character in that character's voice, never by
+    a narrator voice, and every spoken line MUST resolve to a declared
+    CHARACTER in documents that declare first-person mode.
 
 ### 1.3 Scope
 
@@ -150,19 +157,38 @@ required for deviation; MAY / OPTIONAL state truly optional behaviour.
 - Block headers take one of these forms:
   - `BLOCK:` — for example `GLOBAL_AUDIO:`, `QA:`, `OUTPUT:`, `END_CARD:`,
     `GLOBAL_NEGATIVE_CONSTRAINTS:`.
+  - `BLOCK` (bare header, new dialect) — for example `PROJECT`,
+    `VISUAL_STYLE`, `GLOBAL_AUDIO`, `QA`, `OUTPUT`, `END_CARD`,
+    `GLOBAL_NEGATIVE_CONSTRAINTS`. A bare header is exactly the block
+    keyword alone on the line; it opens the same block as the `BLOCK:`
+    form. The bare forms `PROJECT` and `VISUAL_STYLE` have no legacy
+    `BLOCK:` equivalent with the same meaning (see §§4.1–4.2).
   - `BLOCK <id>:` — for example `CHARACTER: <name>`, `LOCATION: <id>`,
     `PROP: <name>`, `SCENE <n>: <title>`, `SHOT <id>:`.
-  - The colon is REQUIRED on every block header. A block header without
-    its required name, id, number, or title part is a syntax error
-    (V1E019, §8), except that a `SCENE` title may be empty.
-- A block identifier (character name, location id, prop name, shot id)
-  is the full trimmed remainder of the header line. Identifiers may
-  contain spaces. Matching of identifiers against references is done on
-  the trimmed value, case-insensitively (§2.4).
+  - `BLOCK: <id>` (new dialect) — for example `SCENE: SC01`,
+    `SHOT: SC01_SH01`. The id is a single token (letters, digits,
+    underscore, starting with a letter); see §§5.4–5.5.
+  - The colon is REQUIRED on every block header except the bare-header
+    form above. A block header without its required name, id, number,
+    or title part is a syntax error (V1E019, §8), except that a `SCENE`
+    title may be empty.
+- A block identifier (character id or name, location id, prop name, shot
+  id) is the full trimmed remainder of the header line. In the legacy
+  dialect identifiers may contain spaces; in the new dialect `SCENE:` /
+  `SHOT:` ids are single tokens. Matching of identifiers against
+  references is done on the trimmed value, case-insensitively (§2.4).
+  In the new dialect a CHARACTER block's id and its display `NAME` are
+  distinct: the id (after `CHARACTER:`) is the reference key, and `NAME`
+  is the display name (§5.1).
 - `END_SCENE` and `END_SCRIPT` are legacy terminators: accepted, carrying
   no data and producing no parsed nodes. `END_SCENE` additionally closes
   the current SCENE/SHOT context (§2.5). `END_SCRIPT` is a pure no-op
   marker. Neither is required.
+- `END STUDIO SCRIPT V1` (new dialect, optional trailing colon) is the
+  document terminator: it ends the document. Blank lines and comment
+  lines after it are ignored; any other content after it is a syntax
+  error (V1E019, §8.2) and is not parsed. The terminator itself
+  produces no parsed node.
 
 ### 2.4 Case rules and value preservation
 
@@ -183,7 +209,10 @@ required for deviation; MAY / OPTIONAL state truly optional behaviour.
   normalise by trimming, collapsing internal runs of whitespace to a single
   space, and Unicode casefolding, so that a dialogue speaker written in a
   different case from its CHARACTER declaration still resolves. The
-  canonical stored speaker is the declared CHARACTER name (or `Narrator`).
+  canonical stored speaker is the declared CHARACTER display name (or
+  `Narrator` for legacy narrator lines). In the new dialect a speaker
+  reference matches a CHARACTER by block id OR by display name; the
+  stored `speaker_id` is the block id (§§5.1, 6.1–6.2).
 
 ### 2.5 Blocks, context, and termination
 
@@ -208,14 +237,15 @@ required for deviation; MAY / OPTIONAL state truly optional behaviour.
     `VISUAL`) appearing in SHOT context are recorded under §8.3.
   - A document-level block header (`CHARACTER:`, `LOCATION:`, `PROP:`,
     `GLOBAL_AUDIO:`, `GLOBAL_NEGATIVE_CONSTRAINTS:`, `QA:`, `OUTPUT:`,
-    `END_CARD:`) appearing inside a scene implicitly ends that scene.
+    `END_CARD:`, or any bare header in §2.3, including `PROJECT` and
+    `VISUAL_STYLE`) appearing inside a scene implicitly ends that scene.
     Authors SHOULD write `END_SCENE` explicitly; parsers MUST NOT fail
     merely because it is absent.
-- Non-scene blocks (CHARACTER, LOCATION, PROP, GLOBAL_AUDIO,
-  GLOBAL_NEGATIVE_CONSTRAINTS, QA, OUTPUT, END_CARD) MAY appear before or
-  after scenes. References (speakers, LOCATION ids, OWNER, SUBJECT,
-  COSTUME_CHANGE scenes, PROP scenes) are resolved over the whole
-  document, so forward references are allowed.
+- Non-scene blocks (PROJECT, VISUAL_STYLE, CHARACTER, LOCATION, PROP,
+  GLOBAL_AUDIO, GLOBAL_NEGATIVE_CONSTRAINTS, QA, OUTPUT, END_CARD) MAY
+  appear before or after scenes. References (speakers, LOCATION ids,
+  OWNER, SUBJECT, COSTUME_CHANGE scenes, PROP scenes) are resolved over
+  the whole document, so forward references are allowed.
 - A block header ends the previous block of any kind. There is no
   `END_CHARACTER`, `END_LOCATION`, or `END_SHOT` terminator.
 
@@ -234,6 +264,35 @@ frontend and all error reports use these line numbers.
   fields (stored as the empty string) and for SCENE titles (stored empty).
 - An absent `PROJECT:` header is treated as "no project name", not as an
   error, when the document is detected as V1 by its marker (§3).
+- An empty `KEY:` line MAY also open a list or sub-block: bullet lines
+  following it attach to the key (§2.8), and empty `NARRATION:` /
+  `DIALOGUE:` / `SFX:` lines inside a scene open spoken / SFX sub-blocks
+  (§§6.1–6.2, 6.6).
+
+### 2.8 Bullet lists and separator lines
+
+- A bullet line starts (after optional whitespace) with `* ` or `- `
+  followed by item text. Bullet lines attach to the preceding context:
+  - to the preceding `KEY:` field with an empty value (the field's value
+    becomes the list of bullet items, in order); or, when the preceding
+    `KEY:` line carries an inline value, the list becomes that value
+    followed by the bullet items;
+  - to a bare block header that takes a list (for example
+    `GLOBAL_NEGATIVE_CONSTRAINTS`, §5.7), where the bullets are the
+    block's list;
+  - inside an `SFX:` sub-block, bullets are `SUBKEY: value` pairs
+    (§6.6), not plain list items.
+- Blank lines and comment lines between a key and its bullets do NOT
+  break the attachment. Any other non-blank, non-comment line ends the
+  list context, as does a separator line (below).
+- A bullet line with no attachable context (no preceding key or list
+  block in the current block) is recorded under §8.3 with its line
+  number — never dropped, never a crash, never spoken text.
+- A separator line consists solely of one or more `⸻` characters
+  (U+2E3B, THREE-EM DASH). Separator lines are skipped: they carry no
+  content, produce no parsed nodes, and never cause errors. They close
+  any open sub-block or list context. Authors use them to separate
+  blocks visually; parsers MUST ignore them.
 
 ---
 
@@ -242,10 +301,14 @@ frontend and all error reports use these line numbers.
 ### 3.1 Detection rule
 
 A document is a STUDIO SCRIPT V1 document if and only if it satisfies
-either condition:
+any of these conditions:
 
 1. it contains a `# STUDIO SCRIPT V1` marker line (§3.2); OR
-2. it contains a `PROJECT:` header AND at least one `SCENE <n>:` header.
+2. it contains a bare `STUDIO SCRIPT V1` marker line (§3.2); OR
+3. it contains a `PROJECT:` header AND at least one `SCENE <n>:` header;
+   OR
+4. it contains a bare `PROJECT` header, a `SCENE: <id>` header, or a
+   `SHOT: <id>` header.
 
 Otherwise the document is a free-form script, handled by the existing
 free-form parser. Detection MUST happen before V1 parsing, and the two
@@ -253,21 +316,43 @@ paths MUST NOT be mixed for a single document.
 
 ### 3.2 Marker matching
 
-The marker is a comment line whose trimmed text, after the leading `#`,
-begins with `STUDIO SCRIPT V1`, matched case-insensitively, with trailing
-text allowed (for example `# STUDIO SCRIPT V1 — UNIVERSAL VIDEO FORMAT`).
-The marker SHOULD be the first non-blank line, but MAY appear anywhere;
-detection scans the whole document.
+The marker is either a comment line whose trimmed text, after the
+leading `#`, begins with `STUDIO SCRIPT V1`, or a bare line whose
+trimmed text is exactly `STUDIO SCRIPT V1` (matched case-insensitively,
+with an optional trailing colon on the terminator form only, §2.3).
+Trailing text is allowed after the comment form (for example
+`# STUDIO SCRIPT V1 — UNIVERSAL VIDEO FORMAT`). The marker SHOULD be
+the first non-blank line, but MAY appear anywhere; detection scans the
+whole document. A bare marker line inside the document is skipped
+during parsing, like a comment line.
 
 ### 3.3 Backward compatibility
 
-- Free-form scripts (no marker, and no `PROJECT:` + `SCENE` combination)
-  continue to work through the existing free-form parser, unchanged.
+- Free-form scripts (no marker, and no `PROJECT:` + `SCENE` combination,
+  and no bare `PROJECT` / `SCENE:` / `SHOT:` header) continue to work
+  through the existing free-form parser, unchanged.
 - A document detected as V1 stays V1: V1 syntax or validation failures
   MUST be reported as V1 errors (§8) and MUST NOT silently fall back to
   the free-form parser.
 - There is exactly one V1 parser. This specification extends the existing
   parser; it does not create a second parser or a second pipeline.
+- **Document-wide dialect determination.** A V1 document is classified
+  once, before parsing, as either legacy-dialect or new-dialect: the
+  presence of ANY new-dialect marker — a bare `STUDIO SCRIPT V1` line,
+  a bare block header (§2.3), a `SCENE: <id>` / `SHOT: <id>` header, or
+  the `END STUDIO SCRIPT V1` terminator — makes the whole document
+  new-dialect. Three rules differ by dialect, and ONLY these three:
+  (a) `TRANSITION` values are preserved verbatim in new-dialect
+  documents but validated against the §5.4 enum in legacy documents
+  (§6.11); (b) a SHOT with `CAMERA` but no `TYPE` is valid in
+  new-dialect documents (`type` null) but a V1E013 error in legacy
+  documents (§5.5); (c) `END_CARD` `DURATION` accepts `3s`-style
+  values in new-dialect documents but plain numbers only in legacy
+  documents (§5.10). Every other rule in this specification applies
+  identically to both dialects, including the `CAMERA_MOVEMENT` prose
+  rule (§5.5), `TARGET_DURATION` ranges (§4), per-block duplicate
+  scoping (§8.2, V1E006), scoped `NONE` semantics (§10.2), and
+  per-scope cue limits (§§6.7–6.9).
 
 ### 3.4 Legacy constructs preserved in V1
 
@@ -284,6 +369,13 @@ The following legacy forms remain valid V1 and MUST be parsed as specified:
 | `MEME_NOTE:` lines | Supported legacy scene field: the author's note justifying or forbidding memes in the scene, kept as data, never spoken (§6.13) |
 | `END_SCENE` / `END_SCRIPT` | Legacy terminators, no data (§2.3) |
 
+New-dialect forms (bare marker line, bare block headers, `SCENE:` /
+`SHOT:` headers, spoken and SFX sub-blocks, bullet lists, separator
+lines, the `END STUDIO SCRIPT V1` terminator) are defined alongside the
+legacy forms in §§2–6 and are equally valid V1. A document MAY mix
+legacy and new-dialect forms; the document-wide dialect classification
+(§3.3) governs only the three rules listed there.
+
 ### 3.5 Validation fixture
 
 `examples/hitler_ep01.studio.md` is the first complete test fixture for
@@ -294,6 +386,13 @@ timeline, and preflight VALIDATION ONLY and MUST NOT be rendered into a
 video without ATLAS approval. Generality is proven by running at least two
 unrelated scripts through the same schema and pipeline — never by
 special-casing the fixture.
+
+The authoritative new-dialect validation document is
+`examples/hitler_ep01_munich_1914.studio.md` (supplied verbatim by the
+author; read-only): 6 scenes, 17 shots, 9 spoken lines, 0 external
+narrator lines, 7 SFX events, 6 locations, 4 props, end card, QA and
+OUTPUT blocks. It exercises the new-dialect forms and the first-person
+rule (§16) and MUST parse with 0 errors.
 
 ---
 
@@ -311,7 +410,7 @@ key appearing twice is a validation error (V1E006, §8.2).
 | `STYLE` | No | — (absent) | Free text; legacy alias of `VISUAL_STYLE` | See alias rule below |
 | `VISUAL_STYLE` | No | — (absent) | Free text | See alias rule below |
 | `ASPECT_RATIO` | No | `16:9` | Enum: `16:9`, `9:16` | Any other value: V1E007 |
-| `TARGET_DURATION` | No | `AUTO` | `AUTO`, or seconds (non-negative number) | Otherwise: V1E012 |
+| `TARGET_DURATION` | No | `AUTO` | `AUTO`, seconds (non-negative number), or a range such as `85–100 seconds` | Otherwise: V1E012 |
 | `TONE` | No | — (absent) | Free text | — |
 | `MEME_POLICY` | No | `CONTEXTUAL` | Enum: `CONTEXTUAL`, `NONE`, `ALWAYS` | Any other value: V1E007 |
 | `MEME_MAX_PER_MINUTE` | No | `2` | Integer, 0 or greater | Non-integer or negative: V1E008 |
@@ -325,9 +424,19 @@ Notes:
   and the `STYLE` value is recorded under §8.3 with its line number.
 - **Duration values.** `TARGET_DURATION`, and every `DURATION` field in
   §§5.4–5.5 and §5.10, accept `AUTO` (case-insensitive) or a plain
-  non-negative decimal number meaning seconds. No unit suffix is defined;
-  a value such as `30s` is invalid (V1E012). `END_CARD` `DURATION` does
-  not accept `AUTO` (§5.10).
+  non-negative decimal number meaning seconds. `TARGET_DURATION`
+  additionally accepts a range `N–M` (en dash, em dash, or hyphen,
+  with an optional `seconds` / `s` suffix), stored verbatim with parsed
+  lower and upper bounds. No unit suffix is defined for other duration
+  fields; a value such as `30s` is invalid (V1E012) — EXCEPT that
+  `END_CARD` `DURATION` in new-dialect documents (§3.3) and the shot
+  pause fields `POST_DIALOGUE_PAUSE` / `END_HOLD` (§5.5) accept
+  `Ns`-style values, parsed to seconds and stored verbatim alongside.
+  `END_CARD` `DURATION` does not accept `AUTO` (§5.10).
+- **Duplicate detection is per-block-context.** A key appearing twice
+  in the SAME block (or twice among the header keys) is V1E006; the
+  same key in DIFFERENT blocks (for example `LANGUAGE` in the PROJECT
+  block and in `GLOBAL_AUDIO`) is legal. See §8.2, V1E006.
 - **No upstream defaults are inherited.** The upstream V5.1 parser filled
   in its own defaults for project name, genre, style, and tone. STUDIO
   SCRIPT V1 defines no defaults for `PROJECT`, `GENRE`, `STYLE` /
@@ -349,6 +458,102 @@ MEME_POLICY: CONTEXTUAL
 MEME_MAX_PER_MINUTE: 2
 ```
 
+### 4.1 PROJECT block (new dialect)
+
+Header: bare `PROJECT` (§2.3).
+
+The PROJECT block is the new-dialect form of the header: it carries the
+project identity and the first-person declarations (§16). Its fields
+are preserved verbatim in the parsed output (`project_fields`); the
+recognised fields below also populate the parsed `meta` object. Header
+keys (§4 table) and PROJECT-block fields share meanings: `LANGUAGE`,
+`GENRE`, `ASPECT_RATIO`, `TARGET_DURATION` in the block behave exactly
+as the header keys of the same name. At most one `PROJECT` block per
+document; a second block is a validation error (V1E006).
+
+| Field | Required | Default | Values | Validation |
+|---|---|---|---|---|
+| `PROJECT_ID` | No | — (absent) | Free text (project / Drive folder id) | — |
+| `TITLE` | No | — (absent) | Free text | — |
+| `EPISODE` | No | — (absent) | Free text | — |
+| `GENRE` | No | — (absent) | Free text | — |
+| `LANGUAGE` | No | `vi-VN` | Language tag, free text | Non-empty if present |
+| `STORYTELLING_MODE` | No | — (absent) | Free text; first-person modes start with `FIRST_PERSON` | See §16 |
+| `PRIMARY_CHARACTER` | No | — (absent) | A declared CHARACTER id | Unknown id: V1E018 (§16) |
+| `EXTERNAL_NARRATOR` | No | — (absent) | `NONE` | Any other value: V1E025 (§16) |
+| `PLATFORM` | No | — (absent) | Free text | — |
+| `ASPECT_RATIO` | No | `16:9` | Enum: `16:9`, `9:16` | Any other value: V1E007 |
+| `RESOLUTION` | No | — (absent) | Free text | — |
+| `FPS` | No | — (absent) | Free text | — |
+| `DURATION_MODE` | No | — (absent) | Free text | — |
+| `TARGET_DURATION` | No | `AUTO` | `AUTO`, seconds, or a range (see §4) | Otherwise: V1E012 |
+| `HISTORICAL_PERIOD` | No | — (absent) | Free text | — |
+| `CONTENT_PURPOSE` | No | — (absent) | Free text | — |
+| `HISTORICAL_DISCLAIMER` | No | — (absent) | Free text | — |
+| `MYTHOLOGY_DISCLAIMER` | No | — (absent) | Free text | — |
+| `MYTHOLOGY_SOURCE` | No | — (absent) | Free text | — |
+| `SERIES` | No | — (absent) | Free text | — |
+
+```text
+PROJECT
+PROJECT_ID: DU_AN_MAU
+TITLE: Tiêu đề mẫu
+STORYTELLING_MODE: FIRST_PERSON_ROLEPLAY
+PRIMARY_CHARACTER: CHAR_NHAN_VAT_A
+EXTERNAL_NARRATOR: NONE
+TARGET_DURATION: 85–100 seconds
+```
+
+### 4.2 VISUAL_STYLE block (new dialect)
+
+Header: bare `VISUAL_STYLE` (§2.3).
+
+The VISUAL_STYLE block carries the visual design policy for the whole
+production. Its fields are preserved verbatim in the parsed output
+(`visual_style_fields`); `STYLE` in this block also populates the
+parsed `visual_style` meta field under the §4 alias rule (a
+document-level `VISUAL_STYLE` header key still wins on conflict). At
+most one `VISUAL_STYLE` block per document; a second block is a
+validation error (V1E006).
+
+| Field | Required | Default | Values | Validation |
+|---|---|---|---|---|
+| `STYLE` | No | — (absent) | Free text | — |
+| `QUALITY_REFERENCE` | No | — (absent) | Free text | — |
+| `VISUAL_TARGET_SCORE` | No | — (absent) | Free text | — |
+| `DESIGN_POLICY` | No | — (absent) | Free text | — |
+| `HEAD_RATIO` | No | `0.34` | Float, 0.33–0.35 inclusive | Non-numeric: V1E008; out of range (including 0.42): V1E009 |
+| `BODY_STYLE` | No | — (absent) | Free text | — |
+| `OUTLINE` | No | — (absent) | Free text | — |
+| `SHADING` | No | — (absent) | Free text | — |
+| `LIGHTING` | No | — (absent) | Free text | — |
+| `BACKGROUND` | No | — (absent) | Free text | — |
+| `DEPTH` | No | — (absent) | Free text | — |
+| `ANIMATION` | No | — (absent) | Free text | — |
+| `FACIAL_ANIMATION` | No | — (absent) | Free text | — |
+| `LIP_SYNC` | No | — (absent) | Free text | — |
+| `EYE_TRACKING` | No | — (absent) | Free text | — |
+| `CAMERA_STYLE` | No | — (absent) | Free text | — |
+| `COLOR_PROGRESSION` | No | — (absent) | Bullet list (§2.8) | — |
+| `STATIC_SLIDESHOW` | No | — (absent) | Free text (typically `FORBIDDEN`) | — |
+| `PREGENERATED_AI_VIDEO` | No | — (absent) | Free text (typically `FORBIDDEN`) | — |
+| `COMEDY_STYLE` | No | — (absent) | Free text | — |
+| `CHARACTER_AGE_PROGRESSION` | No | — (absent) | Free text | — |
+| `CHARACTER_SCALE_VARIATION` | No | — (absent) | Free text | — |
+| `BACKGROUND_STYLE` | No | — (absent) | Free text | — |
+| `CAMERA_ONLY_ANIMATION` | No | — (absent) | Free text (typically `FORBIDDEN`) | — |
+| `GRAPHIC_GORE` | No | — (absent) | Free text | — |
+
+```text
+VISUAL_STYLE
+STYLE: Phong cách hình ảnh mẫu
+HEAD_RATIO: 0.34
+COLOR_PROGRESSION:
+* Cảnh mở đầu: màu ấm, ánh sáng dịu.
+STATIC_SLIDESHOW: FORBIDDEN
+PREGENERATED_AI_VIDEO: FORBIDDEN
+```
+
 
 ---
 
@@ -363,24 +568,83 @@ recorded under §8.3, never discarded.
 
 ### 5.1 CHARACTER
 
-Header: `CHARACTER: <name>`
+Header: `CHARACTER: <id>` (new dialect) or `CHARACTER: <name>` (legacy).
 
-Declares one character. The name is the character's display name and, by
-default, its identity (§12). Duplicate names (compared with the §2.4
-normalisation) are a validation error (V1E001). A character need not speak;
-visual-only characters are valid.
+Declares one character. In the new dialect the header carries a stable
+block id (for example `CHAR_HITLER`) and the display name comes from
+the `NAME` field; id and name are distinct, and references (speakers,
+`PRIMARY_CHARACTER`, `OWNER`, `SUBJECT`) match by id OR by display
+name. In the legacy dialect the header carries the name itself, which
+is both id and display name. Duplicate ids (compared with the §2.4
+normalisation) are a validation error (V1E001). A character need not
+speak; visual-only characters are valid.
+
+Every field in the block is preserved verbatim in the parsed output
+(`fields` dict: all `KEY:` values plus bullet lists keyed by key name).
+The recognised fields below also populate the mapped character object:
+`role` ← `ROLE`, `appearance` ← legacy `APPEARANCE` (empty in the new
+dialect), `traits` ← `TRAITS`, `costume` ← `COSTUME`, `voice` ←
+`VOICE_ID`, else `VOICE`, else legacy `VOICE`, `voice_style` ←
+`VOICE_TONE`, else legacy `VOICE_STYLE`, `identity_id` ← block id
+(unless `IDENTITY_ID` is given).
+
+A character is an EXTRA (`is_extra`) when `VOICE: NONE` or when `ROLE`
+is `Background extras` (case-insensitive, §2.4 normalisation). Extras
+have no spoken lines; the pipeline MUST NOT invent speech for them.
 
 | Field | Required | Default | Values | Validation |
 |---|---|---|---|---|
+| `NAME` | No | Block id | Free text (display name) | — |
 | `ROLE` | No | — (absent) | Free text | — |
-| `APPEARANCE` | No | — (absent) | Free text | — |
-| `TRAITS` | No | — (absent) | `;`-separated distinctive traits | Empty segments ignored |
-| `COSTUME` | No | — (absent) | Free text (default outfit) | — |
-| `COSTUME_CHANGE` | No, repeatable | — (none) | `SCENE <n>: <outfit>` | Bad format: V1E019; unknown scene: V1E018 |
-| `VOICE` | No | `AUTO` | Voice id, or `AUTO` | Non-empty if present |
-| `VOICE_STYLE` | No | — (absent) | Free text | — |
+| `AGE` | No | — (absent) | Free text | — |
+| `GENDER` | No | — (absent) | Free text | — |
+| `NATIONALITY` | No | — (absent) | Free text | — |
+| `YEAR` | No | — (absent) | Free text | — |
+| `SPECIES` | No | — (absent) | Free text | — |
+| `BODY_TYPE` | No | — (absent) | Free text | — |
+| `BODY_COLOR` | No | — (absent) | Free text | — |
 | `HEAD_RATIO` | No | `0.34` | Float, 0.33–0.35 inclusive | Non-numeric: V1E008; out of range (including 0.42): V1E009 |
-| `IDENTITY_ID` | No | The character name | Free text, stable identity key | Non-empty if present; duplicates across characters: V1E001 |
+| `FACE_SHAPE` | No | — (absent) | Free text | — |
+| `HAIR` | No | — (absent) | Free text | — |
+| `BEARD` | No | — (absent) | Free text | — |
+| `MOUSTACHE` | No | — (absent) | Free text | — |
+| `EYEBROWS` | No | — (absent) | Free text | — |
+| `EYES` | No | — (absent) | Free text | — |
+| `HORNS` | No | — (absent) | Free text | — |
+| `SKIN_TONE` | No | — (absent) | Free text | — |
+| `DEFAULT_EXPRESSION` | No | — (absent) | Free text | — |
+| `PERSONALITY_PRESENTATION` | No | — (absent) | Free text | — |
+| `FACIAL_FEATURES` | No | — (absent) | Free text | — |
+| `DISTINCTIVE_FEATURES` | No | — (absent) | Bullet list (§2.8) | — |
+| `APPEARANCE` | No | — (absent) | Free text (legacy) | — |
+| `TRAITS` | No | — (absent) | `;`-separated distinctive traits, or bullet list | Empty segments ignored |
+| `COSTUME` | No | — (absent) | Free text (default outfit), or bullet list | — |
+| `COSTUME_*` | No | — (absent) | Bullet list per variant (e.g. `COSTUME_CIVILIAN`, `COSTUME_MILITARY`, `COSTUME_ADULT`, `COSTUME_CHILD`, `COSTUME_KING`) | — |
+| `COSTUME_CHANGE` | No, repeatable | — (none) | `SCENE <n>: <outfit>` | Bad format: V1E019; unknown scene: V1E018 |
+| `VOICE` | No | `AUTO` | Voice id, `AUTO`, or `NONE` (extras) | Non-empty if present |
+| `VOICE_ENGINE` | No | — (absent) | Free text | — |
+| `VOICE_ID` | No | — (absent) | Free text (voice id; wins over `VOICE`) | — |
+| `VOICE_SPEED` | No | — (absent) | Free text | — |
+| `VOICE_TONE` | No | — (absent) | Free text | — |
+| `VOICE_STYLE` | No | — (absent) | Free text (legacy) | — |
+| `NARRATION_VOICE` | No | — (absent) | Free text | — |
+| `ANIMATION_CAPABILITIES` | No | — (absent) | Bullet list (§2.8) | — |
+| `ANIMATION` | No | — (absent) | Bullet list (§2.8) | — |
+| `AGE_VARIANTS` | No | — (absent) | Free text | — |
+| `HEIGHT_RATIO*` | No | — (absent) | Free text (scale-ratio traits, e.g. `HEIGHT_RATIO_TO_ADULT_ZEUS`) | — |
+| `RIG_REQUIREMENT` | No | — (absent) | Free text | — |
+| `SIGNATURE_PROP` | No | — (absent) | Free text | — |
+| `PROPS` | No | — (absent) | Free text | — |
+| `NAMES` | No | — (absent) | Free text | — |
+| `COUNT` | No | — (absent) | Free text | — |
+| `IDENTITY_LOCK` | No | — (absent) | Free text | — |
+| `IDENTITY_ID` | No | The block id | Free text, stable identity key | Non-empty if present; duplicates across characters: V1E001 |
+
+`COSTUME_*` is a PATTERN, not a closed list: any key starting with
+`COSTUME_` (other than the repeatable `COSTUME_CHANGE`) declares a
+per-variant costume list. Likewise any key starting with `HEIGHT_RATIO`
+declares a scale-ratio trait. Both patterns exist so that per-script
+distinctive traits (§15) need no specification amendment per story.
 
 `COSTUME_CHANGE` format: the value MUST start with `SCENE <n>:` where
 `<n>` is a scene number that exists in the document, followed by the
@@ -390,16 +654,21 @@ same scene. Multiple `COSTUME_CHANGE` lines are allowed; two changes for
 the same scene are a validation error (V1E006).
 
 ```text
-CHARACTER: NHÂN VẬT A
+CHARACTER: CHAR_NHAN_VAT_A
+NAME: Nhân vật A
 ROLE: Vai trò mẫu
-APPEARANCE: Ngoại hình mẫu riêng biệt
-TRAITS: Nét riêng mẫu một; nét riêng mẫu hai
-COSTUME: Trang phục mặc định mẫu
-COSTUME_CHANGE: SCENE 1: Trang phục mẫu cho cảnh 1
-VOICE: AUTO
-VOICE_STYLE: Phong cách giọng mẫu
+AGE: 25
 HEAD_RATIO: 0.34
-IDENTITY_ID: NHAN_VAT_A
+FACE_SHAPE: Tròn
+HAIR: Tóc ngắn đen
+EYES: Mắt tròn
+COSTUME_CIVILIAN:
+* Áo sơ mi trắng
+* Quần dài sẫm màu
+VOICE_ENGINE: VieNeu-TTS
+VOICE_ID: GIONG_DOC_MAU_A
+VOICE_TONE: Ấm, rõ ràng
+IDENTITY_LOCK: TRUE
 ```
 
 ### 5.2 LOCATION
@@ -412,50 +681,88 @@ normalisation) are a validation error (V1E002). All fields are OPTIONAL;
 an absent field means "unspecified", never "use another location's value"
 (§11).
 
+Every field in the block is preserved verbatim in the parsed output
+(`fields` dict). The recognised fields below also populate the mapped
+location object: `period` ← `PERIOD`, else `YEAR`, else
+`HISTORICAL_PERIOD`; `geography` ← `GEOGRAPHY`, else
+`HISTORICAL_REFERENCE`; `features` ← `DISTINCTIVE_FEATURES`, else
+`FEATURES`; `palette` ← `COLOR_PALETTE` (comma/semicolon-split), else
+`PALETTE`; `foreground` / `midground` / `background` ← bullet lists
+(new dialect) or single values (legacy).
+
 | Field | Required | Default | Values | Validation |
 |---|---|---|---|---|
 | `NAME` | No | — (absent) | Free text (display name) | — |
+| `TYPE` | No | — (absent) | Free text (e.g. `INTERIOR`, `EXTERIOR`) | — |
 | `PERIOD` | No | — (absent) | Free text (historical period / era) | — |
+| `HISTORICAL_PERIOD` | No | — (absent) | Free text | — |
+| `HISTORICAL_REFERENCE` | No | — (absent) | Free text | — |
+| `HISTORICAL_STATUS` | No | — (absent) | Free text | — |
+| `YEAR` | No | — (absent) | Free text | — |
+| `TIME_OF_DAY` | No | — (absent) | Free text | — |
 | `GEOGRAPHY` | No | — (absent) | Free text | — |
 | `ARCHITECTURE` | No | — (absent) | Free text | — |
-| `FEATURES` | No | — (absent) | `;`-separated distinctive features | Empty segments ignored |
-| `FOREGROUND` | No | — (absent) | Free text | — |
-| `MIDGROUND` | No | — (absent) | Free text | — |
-| `BACKGROUND` | No | — (absent) | Free text | — |
+| `FEATURES` | No | — (absent) | `;`-separated distinctive features (legacy) | Empty segments ignored |
+| `DISTINCTIVE_FEATURES` | No | — (absent) | Bullet list (§2.8) | — |
+| `FOREGROUND` | No | — (absent) | Free text, or bullet list | — |
+| `MIDGROUND` | No | — (absent) | Free text, or bullet list | — |
+| `BACKGROUND` | No | — (absent) | Free text, or bullet list | — |
 | `LIGHTING` | No | — (absent) | Free text | — |
 | `WEATHER` | No | — (absent) | Free text | — |
-| `PALETTE` | No | — (absent) | `;`-separated colours | Empty segments ignored |
-| `FORBIDDEN` | No | — (absent) | `;`-separated forbidden elements | Empty segments ignored |
+| `PALETTE` | No | — (absent) | `;`-separated colours (legacy) | Empty segments ignored |
+| `COLOR_PALETTE` | No | — (absent) | Comma/semicolon-separated colours | Empty segments ignored |
+| `FORBIDDEN` | No | — (absent) | `;`-separated forbidden elements, or bullet list | Empty segments ignored |
+| `AMBIENCE` | No | — (absent) | Free text | — |
+| `MAP_STYLE` | No | — (absent) | Free text | — |
+| `LABEL_LANGUAGE` | No | — (absent) | Free text | — |
+| `ANIMATION` | No | — (absent) | Bullet list (§2.8) | — |
+| `REFERENCE_RESEARCH` | No | — (absent) | Free text | — |
 
 ```text
-LOCATION: ĐỊA ĐIỂM X
+LOCATION: LOC_DIA_DIEM_X
 NAME: Tên địa điểm mẫu
-PERIOD: Thời kỳ mẫu
-GEOGRAPHY: Địa lý mẫu
-ARCHITECTURE: Kiến trúc mẫu
-FEATURES: Đặc điểm riêng mẫu một; đặc điểm riêng mẫu hai
-FOREGROUND: Tiền cảnh mẫu
-MIDGROUND: Trung cảnh mẫu
-BACKGROUND: Hậu cảnh mẫu
+TYPE: EXTERIOR
+YEAR: 2024
+TIME_OF_DAY: MORNING
+WEATHER: Nắng nhẹ
+HISTORICAL_REFERENCE: Tham chiếu mẫu
+DISTINCTIVE_FEATURES:
+* Đặc điểm riêng mẫu một
+* Đặc điểm riêng mẫu hai
+FOREGROUND:
+* Tiền cảnh mẫu
+MIDGROUND:
+* Trung cảnh mẫu
+BACKGROUND:
+* Hậu cảnh mẫu
 LIGHTING: Ánh sáng mẫu
-WEATHER: Thời tiết mẫu
-PALETTE: Màu mẫu một; màu mẫu hai
-FORBIDDEN: Yếu tố cấm mẫu một; yếu tố cấm mẫu hai
+COLOR_PALETTE: Màu mẫu một, màu mẫu hai
+FORBIDDEN:
+* Yếu tố cấm mẫu
 ```
 
 ### 5.3 PROP
 
-Header: `PROP: <name>`
+Header: `PROP: <id>` (new dialect) or `PROP: <name>` (legacy).
 
-Declares one prop (object). Duplicate names (compared with the §2.4
-normalisation) are a validation error (V1E001). All fields are OPTIONAL.
+Declares one prop (object). In the new dialect the header carries a
+block id and the display name comes from `NAME` when present; in the
+legacy dialect the header carries the name itself, which is both id
+and name. Duplicate ids (compared with the §2.4 normalisation) are a
+validation error (V1E001). All fields are OPTIONAL. Every field is
+preserved verbatim in the parsed output (`fields` dict).
 
 | Field | Required | Default | Values | Validation |
 |---|---|---|---|---|
+| `NAME` | No | Block id | Free text (display name) | — |
+| `TYPE` | No | — (absent) | Free text (e.g. `DOCUMENT`, `WEAPON`) | — |
+| `COLOR` | No | — (absent) | Free text | — |
+| `MATERIAL` | No | — (absent) | Free text | — |
+| `VFX` | No | — (absent) | Free text | — |
 | `DESCRIPTION` | No | — (absent) | Free text | — |
-| `OWNER` | No | — (unspecified) | A declared CHARACTER name, or `NONE` | Unknown character: V1E018 |
+| `OWNER` | No | — (unspecified) | A declared CHARACTER id or name, or `NONE` | Unknown character: V1E018 |
 | `SCENES` | No | — (unspecified) | Comma-separated scene numbers, or `ALL` | Bad format: V1E019; unknown scene: V1E018 |
-| `INTERACTION` | No | — (absent) | `;`-separated verbs (how the prop is handled) | Empty segments ignored |
+| `INTERACTION` | No | — (absent) | Comma/semicolon-separated verbs (how the prop is handled) | Empty segments ignored |
 
 `OWNER: NONE` means the prop belongs to no character. An absent `OWNER`
 means ownership is unspecified. `SCENES: ALL` means the prop may appear
@@ -472,30 +779,53 @@ INTERACTION: Cầm; đưa; đặt xuống
 
 ### 5.4 SCENE
 
-Header: `SCENE <n>: <title>`
+Header: `SCENE: <id>` (new dialect) or `SCENE <n>: <title>` (legacy).
 
-Declares one scene. `<n>` is a positive integer; leading zeros are
-allowed (`SCENE 01` is scene 1). Duplicate scene numbers (by numeric
-value) are a validation error (V1E003). Scene numbers need not be
-consecutive. The production order of scenes is DOCUMENT ORDER, not
-numeric order. A V1 document MUST contain at least one SCENE (V1E020).
-A scene contains SHOT blocks (§5.5) and content lines (§6).
+Declares one scene. In the legacy form `<n>` is a positive integer;
+leading zeros are allowed (`SCENE 01` is scene 1). Duplicate scene
+numbers (by numeric value) are a validation error (V1E003). In the new
+dialect the header carries a single-token id (for example `SC01`); the
+scene NUMBER is its 1-based ordinal in document order, and the id is
+kept alongside (`id` in the parsed output; empty in the legacy
+dialect). Duplicate new-dialect scene ids are a validation error
+(V1E003). Scene numbers need not be consecutive. The production order
+of scenes is DOCUMENT ORDER, not numeric order. A V1 document MUST
+contain at least one SCENE (V1E020). A scene contains SHOT blocks
+(§5.5) and content lines (§6). The scene `TITLE` in the new dialect is
+a `TITLE:` field inside the block (the header carries only the id).
+
+Every field in the block is preserved verbatim in the parsed output
+(`fields` dict).
 
 | Field | Required | Default | Values | Validation |
 |---|---|---|---|---|
+| `TITLE` | No | — (absent) | Free text | — |
 | `LOCATION` | No | — (absent) | A LOCATION id (reference), or inline free text (legacy) | Never an error: non-matching values are inline text (§11.4) |
+| `CHARACTERS` | No | — (absent) | Comma-separated CHARACTER ids, or `NONE` | — |
+| `COSTUME` | No | — (absent) | Free text (e.g. `CIVILIAN`, `MILITARY`) | — |
 | `TIME_OF_DAY` | No | — (absent) | Free text | — |
 | `MOOD` | No | — (absent) | Free text | — |
+| `STORY_PURPOSE` | No | — (absent) | Free text | — |
+| `HISTORICAL_PROVENANCE` | No | — (absent) | Free text | — |
 | `DURATION` | No | `AUTO` | `AUTO`, or seconds (non-negative number) | Otherwise: V1E012 |
 | `VISUAL` | No | — (absent) | Free text (scene description) | — |
-| `TRANSITION` | No | `CUT` | Enum: `CUT`, `DISSOLVE`, `FADE`, `FADE_TO_BLACK`, `MATCH_CUT`, `WIPE` | Any other value: V1E007 |
+| `TRANSITION` | No | `CUT` | Enum in legacy documents; verbatim free text in new-dialect documents (§6.11) | Legacy only, any other value: V1E007 |
+
+`CHARACTERS: NONE` means the scene declares no characters (stored as an
+empty list). Character references in `CHARACTERS` are NOT validated
+against declared CHARACTER blocks: the list is casting data, and an
+unknown entry is preserved, not an error. (Speaker references ARE
+validated, §6.2; `LOCATION_OVERRIDE` references ARE validated, §5.5.)
 
 `LOCATION` resolution: if the trimmed value matches a declared LOCATION
 id (§2.4 normalisation), the scene references that LOCATION block; the
 structured environment specification governs the render (§11). Otherwise
 the value is legacy inline free text and is kept verbatim. Matching is
 checked against ALL declared LOCATION blocks in the document, regardless
-of block order.
+of block order. A `LOCATION:` line INSIDE a scene is always a reference
+or inline text — never a LOCATION declaration (a document-level
+`LOCATION: <id>` header declares, §5.2); the V1E002 duplicate-location
+error MUST NOT fire for scene LOCATION references.
 
 `TRANSITION` MAY appear among the scene fields (as in the example) or as
 a content line at the end of the scene (§6.11); both positions mean the
@@ -503,38 +833,84 @@ same field. If it appears in both positions with different values, that
 is a duplicate-field error (V1E006).
 
 ```text
-SCENE 1: Tiêu đề cảnh mẫu
-LOCATION: ĐỊA ĐIỂM X
-TIME_OF_DAY: Thời điểm mẫu
+SCENE: SC01
+TITLE: Tiêu đề cảnh mẫu
+LOCATION: LOC_DIA_DIEM_X
+CHARACTERS: CHAR_NHAN_VAT_A, CHAR_NHAN_VAT_B
 MOOD: Tâm trạng mẫu
-DURATION: AUTO
-VISUAL: Mô tả hình ảnh mẫu
+STORY_PURPOSE: Mục đích truyện mẫu
 TRANSITION: CUT
-NARRATION: Lời dẫn mẫu.
-SFX: Hiệu ứng âm thanh mẫu | TRIGGER: L001 | PRIORITY: REQUIRED
-END_SCENE
+NARRATION:
+SPEAKER: CHAR_NHAN_VAT_A
+LINE_ID: MAU_001
+TEXT: “Lời dẫn mẫu.”
 ```
 
 ### 5.5 SHOT
 
-Header: `SHOT <id>:` — inside a SCENE only.
+Header: `SHOT: <id>` (new dialect) or `SHOT <id>:` (legacy) — inside a
+SCENE only.
 
 Declares one shot (camera setup) within its scene. A `SHOT` header
 outside any SCENE is a validation error (V1E019). Shot ids MUST be
 unique within their scene (V1E004); the same id MAY be reused in a
 different scene. A shot contains its fields plus, optionally, content
-lines scoped to the shot (§2.5, §6).
+lines scoped to the shot (§2.5, §6). Every field is preserved verbatim
+in the parsed output (`fields` dict).
+
+**CAMERA vs TYPE.** `CAMERA` is a FREE-TEXT description of the shot
+(what the camera sees); it is NEVER validated against the nine
+`TYPE` values. `TYPE` is the closed enum below. The two fields are
+independent: a shot MAY declare both, either, or — in legacy documents
+only — neither (see the `TYPE` rule below). Consumers MUST NOT treat
+`CAMERA` text as a `TYPE` value.
 
 | Field | Required | Default | Values | Validation |
 |---|---|---|---|---|
-| `TYPE` | **YES** | — (none) | Enum, see table below | Missing: V1E013; unknown: V1E014 |
-| `CAMERA` | No | — (absent) | Free text | — |
-| `CAMERA_MOVEMENT` | No | `STATIC` | Enum, see below | Any other value: V1E007 |
-| `SUBJECT` | No | — (absent) | A CHARACTER or PROP name | Unknown name: V1E018 |
+| `TYPE` | See rule below | — (none) | Enum, see table below | Missing (when required): V1E013; unknown: V1E014 |
+| `CAMERA` | No | — (absent) | Free text, never enum-validated | — |
+| `CAMERA_MOVEMENT` | No | `STATIC` | Enum (below), or descriptive prose (see rule below) | Failed enum attempt: V1E007 |
+| `SUBJECT` | No | — (absent) | A CHARACTER or PROP id or name | Unknown name: V1E018 |
 | `DURATION` | No | `AUTO` | `AUTO`, or seconds (non-negative number) | Otherwise: V1E012 |
-| `ACTION` | No | — (absent) | Free text, kept verbatim | — |
+| `ACTION` | No | — (absent) | Free text, kept verbatim, or bullet list (§2.8) | — |
 | `EXPRESSION` | No | — (absent) | Same two forms as §6.4 | Unknown character prefix: V1E018 |
-| `VFX` | No | — (absent) | `;`-separated VFX names | Empty segments ignored |
+| `VFX` | No | — (absent) | `;`-separated VFX names, or bullet list | Empty segments ignored |
+| `LOCATION_OVERRIDE` | No | — (absent) | A declared LOCATION id | Unknown id: V1E018 |
+| `TRIGGER` | No | — (absent) | Free text, typically `LINE_ID — "quote"` | — |
+| `COMPOSITION` | No | — (absent) | Free text | — |
+| `POST_DIALOGUE_PAUSE` | No | — (absent) | `Ns` seconds (e.g. `0.6s`) | Unparseable: V1E012 |
+| `END_HOLD` | No | — (absent) | `Ns` seconds (e.g. `1.5s`) | Unparseable: V1E012 |
+| `FLASH_SAFETY` | No | — (absent) | Free text | — |
+
+**`TYPE` rule.** When `TYPE` is present it is validated as the enum
+below (V1E013/V1E014 as in the legacy dialect). When `TYPE` is ABSENT:
+in new-dialect documents (§3.3) the shot is valid if `CAMERA` is
+present, and its parsed `type` is null; in legacy documents, or when
+neither `TYPE` nor `CAMERA` is present, the missing `TYPE` is a
+validation error (V1E013).
+
+**`CAMERA_MOVEMENT` rule (both dialects).** The value is first matched
+against the enum below (case-insensitive, spaces/hyphens as
+underscores). If it matches, the enum value is stored. If it does NOT
+match: a value containing lowercase letters or spaces is DESCRIPTIVE
+PROSE — accepted verbatim, stored in `camera_movement_text`, with the
+enum movement null; an UPPER_SNAKE_CASE value that matches no enum
+entry is a FAILED ENUM ATTEMPT and a validation error (V1E007).
+`camera_movement_text` always holds the verbatim line whenever a
+`CAMERA_MOVEMENT` line is present, and is empty otherwise.
+
+`LOCATION_OVERRIDE` MUST match a declared LOCATION id (or, by §2.4
+normalisation, a LOCATION display name); otherwise V1E018. It
+overrides the scene LOCATION for this shot only.
+
+`TRIGGER` is preserved verbatim; when it starts with a LINE_ID token
+(letters/digits/underscore, followed by a dash or colon), that token
+is also stored as `trigger_line_id`. Trigger resolution is V1E022 at
+the timeline stage (§8.2), never a parse-time error.
+
+`POST_DIALOGUE_PAUSE` and `END_HOLD` are parsed to seconds (float) and
+stored verbatim alongside (`post_dialogue_pause_raw` / `end_hold_raw`).
+Plain numbers without a unit are also accepted.
 
 `TYPE` enum (canonical form lower_snake_case; UPPER_SNAKE_CASE input is
 accepted and normalised to the canonical form; matching is
@@ -575,11 +951,16 @@ VFX: Hiệu ứng mẫu một; hiệu ứng mẫu hai
 
 ### 5.6 GLOBAL_AUDIO
 
-Header: `GLOBAL_AUDIO:`
+Header: `GLOBAL_AUDIO:` (legacy) or bare `GLOBAL_AUDIO` (new dialect).
 
-Sets mix levels for the six audio buses (§10). All fields are OPTIONAL
-floats in decibels (dB). At most one `GLOBAL_AUDIO:` block per document;
-a second block is a validation error (V1E006).
+Sets mix levels for the six audio buses (§10) and the global audio
+policy. All fields are OPTIONAL. Every field is preserved verbatim in
+the parsed output (`fields` dict). At most one `GLOBAL_AUDIO` block per
+document; a second block is a validation error (V1E006).
+
+Gain fields are floats in decibels (dB); non-numeric values are V1E008.
+No range validation is defined for gain values: any finite float is
+accepted.
 
 | Field | Required | Default | Values | Validation |
 |---|---|---|---|---|
@@ -591,9 +972,29 @@ a second block is a validation error (V1E006).
 | `BGM_GAIN_DB` | No | `-18` | Float (dB) | Non-numeric: V1E008 |
 | `BGM_DUCKING_DB` | No | `-6` | Float (dB) | Non-numeric: V1E008 |
 | `MASTER_LIMIT_DB` | No | `-1.0` | Float (dB) | Non-numeric: V1E008 |
+| `TTS_ENGINE` | No | — (absent) | Free text | — |
+| `LANGUAGE` | No | — (absent) | Language tag, free text | — |
+| `TTS_SPEED` | No | — (absent) | Free text | — |
+| `VOICE_FALLBACK` | No | — (absent) | Free text (typically `NONE`) | — |
+| `VOICE_PRIORITY` | No | — (absent) | Free text | — |
+| `BGM_DUCKING` | No | — (absent) | Free text, e.g. a range `12–18 dB` | — |
+| `SFX_DENSITY` | No | — (absent) | Free text | — |
+| `SFX_TRIGGER_MODE` | No | — (absent) | Free text | — |
+| `AMBIENCE_MODE` | No | — (absent) | Free text | — |
+| `SUBTITLE_LANGUAGE` | No | — (absent) | Free text | — |
+| `SUBTITLE_SYNC` | No | — (absent) | Free text | — |
+| `SUBTITLE_STYLE` | No | — (absent) | Free text | — |
+| `AUDIO_TRUNCATION` | No | — (absent) | Free text (typically `FORBIDDEN`) | — |
+| `UNNATURAL_AUDIO_SPEEDUP` | No | — (absent) | Free text (typically `FORBIDDEN`) | — |
+| `MEME_SOUND` | No | — (absent) | Free text (typically `DISABLED`) | — |
+| `AUTOMATIC_TRANSITION_WHOOSH` | No | — (absent) | Free text (typically `DISABLED`) | — |
+| `PRONUNCIATION_POLICY` | No | — (absent) | Free text | — |
+| `PRONUNCIATION_REVIEW` | No | — (absent) | Free text | — |
 
-No range validation is defined for gain values: any finite float is
-accepted.
+`BGM_DUCKING` (free text, often a range) and `BGM_DUCKING_DB` (a single
+numeric gain) are distinct fields; both are preserved when present.
+`LANGUAGE` here is scoped to this block: the same key in the PROJECT
+block is legal (§4, per-block duplicate scoping).
 
 ```text
 GLOBAL_AUDIO:
@@ -609,13 +1010,16 @@ MASTER_LIMIT_DB: -1.0
 
 ### 5.7 GLOBAL_NEGATIVE_CONSTRAINTS
 
-Header: `GLOBAL_NEGATIVE_CONSTRAINTS:`
+Header: `GLOBAL_NEGATIVE_CONSTRAINTS:` (legacy) or bare
+`GLOBAL_NEGATIVE_CONSTRAINTS` (new dialect).
 
 Lists production-wide prohibitions. The block contains one constraint
-per line, in either of two forms. Lines in any other form inside this
+per line, in any of three forms. Lines in any other form inside this
 block are recorded under §8.3.
 
 - `- <text>` — a dash followed by the constraint text.
+- `* <text>` — an asterisk bullet followed by the constraint text
+  (§2.8).
 - `NO: <text>` — the key `NO:` followed by the constraint text.
 
 Constraints are kept verbatim and in document order. They apply to the
@@ -630,23 +1034,45 @@ NO: Điều cấm mẫu hai
 
 ### 5.8 QA
 
-Header: `QA:`
+Header: `QA:` (legacy) or bare `QA` (new dialect).
 
 Sets quality-gate requirements for the production. All fields are
-OPTIONAL. At most one `QA:` block per document; a second block is a
-validation error (V1E006).
+OPTIONAL. Every field is preserved verbatim in the parsed output
+(`fields` dict). At most one `QA` block per document; a second block
+is a validation error (V1E006).
 
 | Field | Required | Default | Values | Validation |
 |---|---|---|---|---|
 | `MIN_SCORE` | No | `8.0` | Float, 0–10 inclusive | Non-numeric: V1E008; out of range: V1E010 |
+| `MIN_OVERALL_SCORE` | No | — (absent) | `8.0/10`-style score text | Parsed to `min_score` when numeric |
+| `MIN_*` | No | — (absent) | Free text (further minimum thresholds) | — |
+| `TARGET_*` | No | — (absent) | Free text (target scores) | — |
+| `HARD_FAIL_COUNT` | No | — (absent) | Integer, 0 or greater | Parsed to `max_hard_fails` when numeric |
+| `EXPECTED_*` | No | — (absent) | Integer counts (e.g. `EXPECTED_SCENES`, `EXPECTED_SHOTS`, `EXPECTED_SPOKEN_LINES`, `EXPECTED_NARRATION_LINES`, `EXPECTED_DIALOGUE_LINES`, `EXPECTED_EXTERNAL_NARRATOR_LINES`, `EXPECTED_EXPLICIT_SFX_EVENTS`) | Parsed ints in `expected_counts`; non-numeric values preserved verbatim only |
+| `*_CHECK` | No | — (absent) | Free text (typically `REQUIRED`) | — |
+| `*_REVIEW` | No | — (absent) | Free text (typically `REQUIRED`) | — |
 | `REQUIRE_TECHNICAL` | No | `true` | Boolean `true` / `false` | Otherwise: V1E011 |
 | `REQUIRE_CREATIVE_REVIEW` | No | `true` | Boolean `true` / `false` | Otherwise: V1E011 |
 | `LANGUAGE_GATE` | No | `true` | Boolean `true` / `false` | Otherwise: V1E011 |
 | `MAX_HARD_FAILS` | No | `0` | Integer, 0 or greater | Non-integer or negative: V1E008 |
+| `HUMAN_VISUAL_REVIEW` | No | — (absent) | Free text | — |
+| `VOICE_LISTENING_REVIEW` | No | — (absent) | Free text | — |
+| `MP4_VALIDATION` | No | — (absent) | Free text | — |
+| `UNSUPPORTED_ANIMATION_POLICY` | No | — (absent) | Free text | — |
+| `FAILED_QA_POLICY` | No | — (absent) | Free text (typically `BLOCK_MASTER`) | — |
 
 Boolean values are matched case-insensitively (`true`, `TRUE`, `True`
 are the same). No other spelling (such as `yes` / `no` / `1` / `0`) is
 accepted.
+
+`MIN_*`, `TARGET_*`, `EXPECTED_*`, `*_CHECK`, and `*_REVIEW` are
+PATTERNS, not closed lists. `EXPECTED_*` counts are preserved verbatim
+and, when numeric, parsed into `expected_counts` (keyed by lowercase
+name, e.g. `expected_scenes`). The parser performs NO cross-check of
+`EXPECTED_*` counts against the parsed document: the QA block is
+preserved data for the QA stage, and a mismatch between a QA count and
+the document body is never a parse error — the body is always rendered
+in full, never truncated to match a QA count.
 
 ```text
 QA:
@@ -659,10 +1085,11 @@ MAX_HARD_FAILS: 0
 
 ### 5.9 OUTPUT
 
-Header: `OUTPUT:`
+Header: `OUTPUT:` (legacy) or bare `OUTPUT` (new dialect).
 
-Sets render output parameters. All fields are OPTIONAL. At most one
-`OUTPUT:` block per document; a second block is a validation error
+Sets render output parameters. All fields are OPTIONAL. Every field is
+preserved verbatim in the parsed output (`fields` dict). At most one
+`OUTPUT` block per document; a second block is a validation error
 (V1E006).
 
 | Field | Required | Default | Values | Validation |
@@ -670,8 +1097,22 @@ Sets render output parameters. All fields are OPTIONAL. At most one
 | `RESOLUTION` | No | `1920x1080` | Enum: `1920x1080`, `1280x720` | Any other value: V1E007 |
 | `FPS` | No | `24` | Enum: `24`, `25`, `30` | Any other value: V1E007 |
 | `FORMAT` | No | `MP4` | Enum: `MP4` | Any other value: V1E007 |
+| `VIDEO_FORMAT` | No | — (absent) | Enum: `MP4` (alias of `FORMAT`) | Any other value: V1E007 |
+| `VIDEO_CODEC` | No | — (absent) | Free text | — |
+| `AUDIO_CODEC` | No | — (absent) | Free text | — |
+| `PIXEL_FORMAT` | No | — (absent) | Free text | — |
+| `EXPORT_*` | No | — (absent) | Free text (export flags, e.g. `EXPORT_DRAFT`, `EXPORT_MASTER`, `EXPORT_SUBTITLES`) | — |
+| `UPLOAD_GOOGLE_DRIVE` | No | — (absent) | Free text | — |
+| `DRIVE_ROOT_ID` | No | — (absent) | Free text | — |
+| `DRIVE_PROJECT_FOLDER` | No | — (absent) | Free text | — |
+| `DRIVE_SUBFOLDERS` | No | — (absent) | Bullet list (§2.8) | — |
+| `MASTER_APPROVAL` | No | — (absent) | Free text | — |
 | `DRAFT_FOLDER` | No | `drive:drafts` | Free text | — |
 | `MASTER` | No | `MANUAL_ONLY` | Enum: `MANUAL_ONLY` | Any other value: V1E017 |
+
+`EXPORT_*` is a PATTERN, not a closed list. `VIDEO_FORMAT` is an alias
+of `FORMAT`: both populate the parsed `format` field, and both must be
+`MP4` when present.
 
 **Master is never automatic.** `MASTER` accepts exactly one value,
 `MANUAL_ONLY`: a Master render happens only after explicit user approval.
@@ -689,26 +1130,38 @@ MASTER: MANUAL_ONLY
 
 ### 5.10 END_CARD
 
-Header: `END_CARD:`
+Header: `END_CARD:` (legacy) or bare `END_CARD` (new dialect).
 
 Describes the closing card shown at the end of the video. All fields are
-OPTIONAL. At most one `END_CARD:` block per document; a second block is
-a validation error (V1E006).
+OPTIONAL. Every field is preserved verbatim in the parsed output
+(`fields` dict). At most one `END_CARD` block per document; a second
+block is a validation error (V1E006).
 
 | Field | Required | Default | Values | Validation |
 |---|---|---|---|---|
-| `TEXT` | No | — (absent) | Free text | — |
-| `DURATION` | No | `3.0` | Seconds (non-negative number); `AUTO` is NOT accepted | Otherwise: V1E012 |
+| `TEXT` | No | — (absent) | Free text, kept verbatim (quotes NOT stripped) | — |
+| `SECONDARY_TEXT` | No | — (absent) | Free text | — |
+| `TEXT_LANGUAGE` | No | — (absent) | Free text | — |
+| `BACKGROUND` | No | — (absent) | Free text | — |
+| `DURATION` | No | `3.0` | Seconds (non-negative number); `AUTO` is NOT accepted; `3s`-style values accepted in new-dialect documents (§3.3) | Otherwise: V1E012 |
 | `STYLE` | No | — (absent) | Free text | — |
+| `BGM` | No | — (absent) | Free text, or `NONE` | — |
+| `SFX` | No | — (absent) | Free text, or `NONE` | — |
 
-An absent `END_CARD:` block means no end card is specified; consumers
-MUST NOT invent one.
+`DURATION` is stored both verbatim (`duration_raw`, e.g. `3s`) and
+parsed (`duration` / `duration_sec`, float seconds). An absent
+`END_CARD` block means no end card is specified; consumers MUST NOT
+invent one.
 
 ```text
-END_CARD:
-TEXT: Nội dung thẻ kết mẫu
-DURATION: 3.0
-STYLE: Phong cách thẻ kết mẫu
+END_CARD
+BACKGROUND: Đen
+TEXT: HẾT
+SECONDARY_TEXT: Cảm ơn bạn đã xem
+TEXT_LANGUAGE: vi-VN
+DURATION: 3s
+BGM: NONE
+SFX: NONE
 ```
 
 ---
@@ -729,20 +1182,44 @@ twice on one line is a validation error (V1E006).
 
 ### 6.1 NARRATION
 
-Syntax:
+Syntax (legacy one-line form):
 
 ```text
 NARRATION: <text>
 NARRATION [Lnn]: <text>
 ```
 
-A spoken narration line. The speaker is `Narrator` (§7). The `[Lnn]`
-form carries an explicit LINE_ID (§7.1). Spoken text is kept verbatim
-(§7.2).
+Syntax (new-dialect sub-block form):
+
+```text
+NARRATION:
+SPEAKER: <CHARACTER id or name>
+LINE_ID: <verbatim id>
+TEXT: <spoken text, optionally quoted>
+LIP_SYNC: <value>
+```
+
+A spoken narration line. In the legacy form the speaker is `Narrator`
+(§7). In the sub-block form the speaker is the `SPEAKER:` value,
+resolved to a declared CHARACTER (§6.2); a sub-block `NARRATION`
+without a `SPEAKER` resolving to a declared CHARACTER is a narrator
+line, which is a V1E025 error in first-person documents (§16) and a
+legacy narrator line otherwise. The `[Lnn]` form carries an explicit
+LINE_ID (§7.1); in the sub-block form `LINE_ID:` carries it verbatim.
+`SPEAKER:`, `LINE_ID:`, `TEXT:`, and `LIP_SYNC:` may appear in any
+order; any other line ends the sub-block. A sub-block with no `TEXT:`
+is a syntax error (V1E019). Spoken text is kept verbatim (§7.2),
+except that `TEXT:` strips ONE layer of matching surrounding quotes
+(straight `"` or curly `“”`); inner quotes are preserved.
+
+A `LIP_SYNC:` line appearing at shot/scene level AFTER a spoken
+sub-block (rather than inside it) applies to the most recent spoken
+line in that shot (or scene) that has no `LIP_SYNC` yet, and is also
+preserved in the shot/scene fields.
 
 ### 6.2 DIALOGUE and bare speaker lines
 
-Syntax:
+Syntax (legacy one-line forms):
 
 ```text
 DIALOGUE: <Speaker>: <text>
@@ -750,11 +1227,26 @@ DIALOGUE [Lnn]: <Speaker>: <text>
 <SPEAKER>: <text>
 ```
 
-A spoken dialogue line. The speaker is the text between the key (or the
-start of the line, for the bare form) and the next colon; the spoken
-text is the remainder. The speaker MUST be a declared CHARACTER,
-compared with the §2.4 normalisation, otherwise it is a validation
-error with the line number (V1E015).
+Syntax (new-dialect sub-block form):
+
+```text
+DIALOGUE:
+SPEAKER: <CHARACTER id or name>
+LINE_ID: <verbatim id>
+TEXT: <spoken text, optionally quoted>
+LIP_SYNC: <value>
+```
+
+A spoken dialogue line. In the one-line forms the speaker is the text
+between the key (or the start of the line, for the bare form) and the
+next colon; the spoken text is the remainder. In the sub-block form the
+speaker is the `SPEAKER:` value and the text is the `TEXT:` value
+(one quote layer stripped, §6.1); a `DIALOGUE` sub-block without a
+`SPEAKER:` is a syntax error (V1E019). The speaker MUST be a declared
+CHARACTER, matched by block id or display name with the §2.4
+normalisation, otherwise it is a validation error with the line number
+(V1E015). The stored speaker is the CHARACTER display name, and
+`speaker_id` is the block id.
 
 Narrator aliases: the speaker names `NARRATOR`, `NGƯỜI KỂ CHUYỆN`, and
 `DẪN CHUYỆN` (matched case-insensitively, §2.4 normalisation) map to the
@@ -771,7 +1263,7 @@ never treated as spoken text.
 
 ### 6.3 ACTION
 
-Syntax: `ACTION: <text>`
+Syntax: `ACTION: <text>`, or `ACTION:` followed by bullet lines (§2.8).
 
 Free text describing an action, kept verbatim. Multiple `ACTION:` lines
 are allowed and are ordered. Scene-level `ACTION:` lines describe the
@@ -809,24 +1301,50 @@ CAMERA_MOVEMENT: <enum>
 At scene level, these two lines define the scene's DEFAULT shot: the
 camera description and movement used for scene content that is not
 inside an explicit SHOT block. `CAMERA:` is free text. `CAMERA_MOVEMENT:`
-uses the §5.5 enum (default `STATIC`). Inside a SHOT block, the same
-keys are SHOT fields (§5.5). Neither line is ever spoken.
+follows the §5.5 rule: an enum value, or descriptive prose stored
+verbatim (an UPPER_SNAKE value outside the enum is V1E007); default
+`STATIC`. Inside a SHOT block, the same keys are SHOT fields (§5.5).
+Neither line is ever spoken.
 
 ### 6.6 SFX
 
-Syntax:
+Syntax (legacy one-line form):
 
 ```text
 SFX: <name> | TRIGGER: <LINE_ID or action text> | PRIORITY: <REQUIRED|OPTIONAL>
 SFX: NONE
 ```
 
-Multiple `SFX:` lines are allowed per scene (and per shot). Subkeys:
+Syntax (new-dialect structured sub-block form):
+
+```text
+SFX:
+* ID: SFX_001
+* EVENT: <event name>
+* TRIGGER: <LINE_ID or action text>
+* TYPE: <free text>
+* INTENSITY: <LOW|MEDIUM|HIGH>
+* DURATION: <e.g. 0.4s>
+* DURATION_MODE: <free text>
+```
+
+Multiple `SFX:` lines are allowed per scene (and per shot). Subkeys
+(one-line form):
 
 | Subkey | Required | Default | Values |
 |---|---|---|---|
 | `TRIGGER` | No | — (absent) | A LINE_ID (e.g. `L001`) or free action text |
 | `PRIORITY` | No | `REQUIRED` | Enum: `REQUIRED`, `OPTIONAL` |
+
+In the sub-block form, each bullet is a `SUBKEY: value` pair; all
+sub-fields are preserved verbatim in the audio cue (`cue_id`, `event`,
+`trigger`, `cue_type_text`, `intensity`, `duration`, `duration_mode`,
+plus `duration_seconds` when the duration parses). The cue name is the
+`EVENT` value (or the `ID` when no `EVENT` is given); the cue records
+its scene, shot, and line. A bullet without a colon inside an `SFX`
+sub-block is recorded under §8.3; a repeated subkey is a validation
+error (V1E006). An empty `SFX:` sub-block (no bullets) produces no cue
+and no error.
 
 `TRIGGER` resolution happens against the generated speech timeline
 (LINE_ID triggers) or the animation timeline (action-text triggers).
@@ -834,13 +1352,14 @@ A trigger that cannot be resolved is a validation error or an explicit
 review requirement at the timeline stage (V1E022, §8.2); a timestamp
 MUST NEVER be silently invented (§10.3).
 
-`SFX: NONE` means this scene has NO sound effects. It MUST be recorded
-as an explicit none (§10.2) and MUST NOT be treated as "no SFX line
-present". A `NONE` line MUST NOT carry `|` segments; segments on a
-`NONE` line are a validation error (V1E021). `NONE` is matched
-case-insensitively. A `NONE` line does not count toward the at-most-one
-limit in §§6.7–6.9; a `NONE` line coexisting with real cues of the same
-type in the same scene is a validation error (V1E024, §8.2).
+`SFX: NONE` means this scope (scene or shot, §10.2) has NO sound
+effects. It MUST be recorded as an explicit none (§10.2) and MUST NOT
+be treated as "no SFX line present". A `NONE` line MUST NOT carry `|`
+segments; segments on a `NONE` line are a validation error (V1E021).
+`NONE` is matched case-insensitively. A `NONE` line does not count
+toward the at-most-one limit in §§6.7–6.9; a `NONE` line coexisting
+with real cues of the same type in the SAME scope is a validation
+error (V1E024, §8.2, §10.2).
 
 ### 6.7 AMBIENCE
 
@@ -851,9 +1370,11 @@ AMBIENCE: <name> | MODE: <LOOP|ONCE>
 AMBIENCE: NONE
 ```
 
-At most one `AMBIENCE:` line per scene; a second line is a validation
-error (V1E006). `MODE` defaults to `LOOP`. `AMBIENCE: NONE` (no segments,
-§6.6) means the scene has no ambience. `NONE` is matched
+At most one `AMBIENCE:` line per SCOPE: one per scene for scene-level
+lines, one per shot for shot-level lines; a second line in the same
+scope is a validation error (V1E006). Lines in different shots of one
+scene do not conflict. `MODE` defaults to `LOOP`. `AMBIENCE: NONE` (no
+segments, §6.6) means the scope has no ambience. `NONE` is matched
 case-insensitively.
 
 ### 6.8 BGM and MUSIC
@@ -867,11 +1388,12 @@ BGM: NONE
 ```
 
 `MUSIC:` is a legacy alias of `BGM:` (§3.4): both keys write the same
-scene field. At most one BGM/MUSIC line per scene in total; a second
-line under either key is a validation error (V1E006). `INTENSITY`
-defaults to `MEDIUM`. `BGM: NONE` (equivalently `MUSIC: NONE`; no
-segments, §6.6) means the scene has no background music. `NONE` is
-matched case-insensitively.
+scene field. At most one BGM/MUSIC line per SCOPE (one per scene for
+scene-level lines, one per shot for shot-level lines); a second line
+under either key in the same scope is a validation error (V1E006).
+`INTENSITY` defaults to `MEDIUM`. `BGM: NONE` (equivalently
+`MUSIC: NONE`; no segments, §6.6) means the scope has no background
+music. `NONE` is matched case-insensitively.
 
 ### 6.9 MEME
 
@@ -892,8 +1414,10 @@ error. Subkeys:
 | `GAIN_DB` | No | — (absent; no default defined) | Float (dB); non-numeric: V1E008 |
 | `PRIORITY` | No | `OPTIONAL` | Enum: `REQUIRED`, `OPTIONAL` |
 
-At most one `MEME:` line per scene; a second line is a validation error
-(V1E006). `MEME: NONE` (no segments, §6.6) means the scene has no meme.
+At most one `MEME:` line per SCOPE (one per scene for scene-level
+lines, one per shot for shot-level lines); a second line in the same
+scope is a validation error (V1E006). `MEME: NONE` (no segments, §6.6)
+means the scope has no meme.
 Whether and how recorded meme cues are rendered is governed by the
 header `MEME_POLICY` and `MEME_MAX_PER_MINUTE` at the audio stage
 (§10.4). `MEME: NONE` is the explicit way to forbid memes in a scene
@@ -917,16 +1441,25 @@ VFX names separated by `;`. When `;`-separated names are used, no
 `TRIGGER` segment may be present on that line (a trigger applies to a
 single named effect); combining `;` names with a `TRIGGER` segment is a
 validation error (V1E019). `TRIGGER` follows the §6.6 resolution rule.
-The SHOT `VFX` field (§5.5) accepts only the `;`-separated names form.
+The SHOT `VFX` field (§5.5) accepts the `;`-separated names form or a
+bullet list (§2.8).
 
 ### 6.11 TRANSITION
 
-Syntax: `TRANSITION: <enum>`
+Syntax: `TRANSITION: <value>`
 
-The scene transition, using the §5.4 enum. This is the SAME field as the
-SCENE `TRANSITION` field: it MAY appear among the scene fields or as a
-content line at the end of the scene, with identical meaning (§5.4).
-Inside SHOT context it still attaches to the enclosing scene (§2.5).
+The scene transition. This is the SAME field as the SCENE `TRANSITION`
+field: it MAY appear among the scene fields or as a content line at the
+end of the scene, with identical meaning (§5.4). Inside SHOT context it
+still attaches to the enclosing scene (§2.5).
+
+In legacy documents the value MUST be one of the §5.4 enum
+(`CUT`, `DISSOLVE`, `FADE`, `FADE_TO_BLACK`, `MATCH_CUT`, `WIPE`); any
+other value is V1E007. In new-dialect documents (§3.3) the value is
+preserved VERBATIM with no enum validation (for example `HARD_CUT`,
+`CUT_TO_BLACK`). In both dialects, the same value written twice is
+allowed; two DIFFERENT values are a duplicate-field error (V1E006),
+with the first value kept.
 
 ### 6.12 VOICE_NOTE
 
@@ -961,19 +1494,23 @@ any meme cue; meme rendering is governed by §10.4.
 - Every spoken line (every `NARRATION:`, `DIALOGUE:`, and bare-speaker
   line, in any scene or shot) gets exactly one LINE_ID.
 - Explicit form: `NARRATION [Lnn]: ...` or `DIALOGUE [Lnn]: ...`, where
-  `Lnn` is the letter `L` followed by digits. Bare speaker lines cannot
-  carry an explicit LINE_ID. The canonical form is `L` followed by the
+  `Lnn` is the letter `L` followed by digits; or `LINE_ID: <id>` in a
+  spoken sub-block (§§6.1–6.2), where `<id>` is kept VERBATIM (for
+  example `EP01_FP_01`). Bare speaker lines cannot carry an explicit
+  LINE_ID. The canonical form for `L`-ids is `L` followed by the
   number zero-padded to three digits (`L001`, `L002`, ...); numbers
-  above 999 keep all their digits (`L1000`). Explicit ids are normalised
-  to canonical form (`[L2]` becomes `L002`).
+  above 999 keep all their digits (`L1000`). Explicit `L`-ids are
+  normalised to canonical form (`[L2]` becomes `L002`). Non-`L` ids
+  are never normalised.
 - Automatic form: spoken lines without an explicit id receive `L001`,
   `L002`, ... in DOCUMENT ORDER across the whole document (not
   per-scene). The auto counter starts at 1 and skips numbers already
   claimed by earlier explicit ids; an explicit id that equals an
   already-assigned id is a duplicate-LINE_ID error (V1E005).
-- LINE_IDs are unique across the whole document. Duplicate explicit ids
-  are a validation error (V1E005). A malformed explicit id (for example
-  `[LX]` or a missing closing bracket) is a validation error (V1E019).
+- LINE_IDs are unique across the whole document (compared
+  case-insensitively). Duplicate explicit ids are a validation error
+  (V1E005). A malformed explicit id (for example `[LX]` or a missing
+  closing bracket) is a validation error (V1E019).
 - LINE_IDs are the stable keys that bind spoken lines to generated
   speech timing (§1.2 principle 7) and to `TRIGGER` references (§6.6,
   §6.9, §6.10). They MUST be preserved unchanged from parse through
@@ -983,9 +1520,12 @@ any meme cue; meme rendering is governed by §10.4.
 
 - Spoken text is NEVER rewritten: no case changes, no punctuation fixes,
   no word substitutions, no translation, no trimming beyond the §2.4
-  line-level trim. The text sent to TTS and the text shown in subtitles
-  MUST be the parsed spoken text, byte for byte apart from subtitle
-  phrase-splitting that preserves the words.
+  line-level trim. The ONE exception is the sub-block `TEXT:` quote
+  rule (§6.1): exactly one layer of matching surrounding quotes is
+  stripped, and the inner text is then verbatim. The text sent to TTS
+  and the text shown in subtitles MUST be the parsed spoken text, byte
+  for byte apart from subtitle phrase-splitting that preserves the
+  words.
 - Only spoken lines (§7.1) are ever sent to TTS. No other line kind —
   `VISUAL:`, `ACTION:`, `CAMERA:`, `VOICE_NOTE:`, audio cues, headers,
   block fields — is spoken content.
@@ -1032,32 +1572,34 @@ the offending value and the expected values or range.
 | V1E003 | Duplicate SCENE number (by numeric value) |
 | V1E004 | Duplicate SHOT id within the same scene |
 | V1E005 | Duplicate LINE_ID |
-| V1E006 | Duplicate single-valued field in the same block, duplicate header key, duplicate singleton block (GLOBAL_AUDIO, GLOBAL_NEGATIVE_CONSTRAINTS, QA, OUTPUT, END_CARD), duplicate subkey on one pipe-segment line, or duplicate COSTUME_CHANGE for the same scene |
-| V1E007 | Invalid enum value (ASPECT_RATIO, MEME_POLICY, TRANSITION, CAMERA_MOVEMENT, SFX/MEME PRIORITY, AMBIENCE MODE, BGM INTENSITY, RESOLUTION, FPS, FORMAT) |
+| V1E006 | Duplicate single-valued field in the SAME block-context (the same key in different blocks is legal, §4), duplicate header key, duplicate singleton block (PROJECT, VISUAL_STYLE, GLOBAL_AUDIO, GLOBAL_NEGATIVE_CONSTRAINTS, QA, OUTPUT, END_CARD), duplicate subkey on one pipe-segment line or in one SFX sub-block, duplicate COSTUME_CHANGE for the same scene, second AMBIENCE/BGM/MEME line in the same scope (§§6.7–6.9), or conflicting TRANSITION values (§6.11) |
+| V1E007 | Invalid enum value (ASPECT_RATIO, MEME_POLICY, TRANSITION in legacy documents, CAMERA_MOVEMENT failed enum attempt, SFX/MEME PRIORITY, AMBIENCE MODE, BGM INTENSITY, RESOLUTION, FPS, FORMAT) |
 | V1E008 | Invalid number (non-numeric value, or negative value where 0 or greater is required: MEME_MAX_PER_MINUTE, MAX_HARD_FAILS, gains) |
 | V1E009 | HEAD_RATIO outside 0.33–0.35 inclusive (including the forbidden upstream default 0.42) |
 | V1E010 | MIN_SCORE outside 0–10 inclusive |
 | V1E011 | Invalid boolean value (QA flags) |
-| V1E012 | Invalid duration value (not AUTO — where AUTO is allowed — nor a non-negative number of seconds) |
-| V1E013 | Missing required SHOT TYPE |
+| V1E012 | Invalid duration value (not AUTO — where AUTO is allowed — nor a non-negative number of seconds, nor a TARGET_DURATION range, nor an `Ns` value where `Ns` is accepted: END_CARD DURATION in new-dialect documents, POST_DIALOGUE_PAUSE, END_HOLD) |
+| V1E013 | Missing required SHOT TYPE (legacy documents, or new-dialect shots with neither TYPE nor CAMERA) |
 | V1E014 | Unknown SHOT TYPE value |
-| V1E015 | Undeclared speaker in a DIALOGUE or bare-speaker line |
+| V1E015 | Undeclared speaker in a DIALOGUE, bare-speaker, or spoken sub-block line |
 | V1E016 | Production tag inside spoken text (§7.2) |
 | V1E017 | OUTPUT MASTER value other than MANUAL_ONLY |
-| V1E018 | Unresolvable reference (PROP OWNER, SHOT SUBJECT, EXPRESSION character prefix, COSTUME_CHANGE scene, PROP SCENES entry) |
-| V1E019 | Malformed syntax (block header missing its name/id/number, SHOT outside a SCENE, COSTUME_CHANGE bad format, PROP SCENES bad format, malformed LINE_ID, malformed DIALOGUE form, empty spoken line, multiple VFX names combined with one TRIGGER, empty block name) |
+| V1E018 | Unresolvable reference (PROP OWNER, SHOT SUBJECT, EXPRESSION character prefix, COSTUME_CHANGE scene, PROP SCENES entry, SHOT LOCATION_OVERRIDE, PRIMARY_CHARACTER) |
+| V1E019 | Malformed syntax (block header missing its name/id/number, SHOT outside a SCENE, COSTUME_CHANGE bad format, PROP SCENES bad format, malformed LINE_ID, malformed DIALOGUE form, empty spoken line, multiple VFX names combined with one TRIGGER, empty block name, spoken sub-block missing TEXT or (for DIALOGUE) SPEAKER, non-blank content after the END STUDIO SCRIPT V1 terminator) |
 | V1E020 | V1 document contains no SCENE |
 | V1E021 | NONE line carrying pipe segments (SFX / AMBIENCE / BGM / MEME) |
 | V1E022 | Unresolvable TRIGGER (LINE_ID or action text) — raised at the timeline stage, not at parse time; parse records the trigger verbatim |
 | V1E023 | V1 document contains no spoken lines |
-| V1E024 | NONE directive coexists with real cues of the same type in the same scene |
+| V1E024 | NONE directive coexists with real cues of the same type in the SAME scope (scene-level NONE forbids cues anywhere in the scene; shot-level NONE forbids cues only in that shot, §10.2) |
+| V1E025 | First-person prerequisite rule violated (§16): an external-narrator spoken line in a document that declares first-person mode, or an EXTERNAL_NARRATOR declaration other than NONE. In legacy documents that do NOT declare first-person mode, narrator lines are allowed and produce exactly one V1E025 WARNING (line 0) noting the rule |
 
 ### 8.3 Unsupported-field policy
 
 - Any `KEY: value` line whose key is not defined for its context, any
-  unknown pipe-segment subkey, any content line outside a SCENE, and any
-  other non-blank, non-comment line that matches no rule in this
-  specification MUST be recorded in the parse result's
+  unknown pipe-segment subkey, any content line outside a SCENE, any
+  bullet line with no attachable context (§2.8), and any other
+  non-blank, non-comment, non-separator line that matches no rule in
+  this specification MUST be recorded in the parse result's
   `unsupported_fields` list, with the key (if any), the full line text,
   the block context, and the 1-based source line number.
 - Unsupported fields are NEVER silently discarded. They MUST be surfaced
@@ -1125,14 +1667,18 @@ Appendix B.)
   EXPLICIT prohibitions, recorded as explicit-none values in the parsed
   scene — distinct from "no line present". An explicit none MUST survive
   into the storyboard review display and the audio timeline, and MUST
-  forbid even pipeline-default sounds of that kind in that scene.
+  forbid even pipeline-default sounds of that kind in its scope.
+- NONE directives are SCOPED. A scene-level NONE (written outside any
+  SHOT) forbids cues of that type anywhere in the scene. A shot-level
+  NONE (written inside a SHOT) forbids cues of that type ONLY in that
+  shot; cues of the same type in other shots of the same scene are
+  unaffected. A scene that declares an explicit none AND contains real
+  cues of the same type in the SAME scope is invalid (V1E024, §8.2):
+  the author must remove either the none or the cues.
 - An absent line means "nothing scripted". It likewise results in no
   sound of that kind (§10.3); the difference from explicit none is one
   of author intent, preserved for review and for any future feature that
-  might add default sounds: explicit none always wins.
-- A scene that declares an explicit none AND contains real cues of the
-  same type is invalid (V1E024, §8.2): the author must remove either
-  the none or the cues.
+  might add default sounds: explicit none always wins within its scope.
 
 ### 10.3 No invented sound
 
@@ -1233,9 +1779,10 @@ reported with the scene and line numbers involved.
 
 ### 12.1 Identity preserved across scenes
 
-- A CHARACTER's identity is its `IDENTITY_ID` (default: its name, §5.1).
-  The same identity MUST look like the same character in every scene:
-  same proportions, same face system, same `APPEARANCE` and `TRAITS`
+- A CHARACTER's identity is its `IDENTITY_ID` (default: its block id,
+  §5.1; in the legacy dialect the block id equals the name). The same
+  identity MUST look like the same character in every scene: same
+  proportions, same face system, same `APPEARANCE` and `TRAITS`
   rendering, same voice. Identity MUST NOT drift between scenes.
 - Distinct CHARACTER blocks MUST produce visibly distinct characters.
   `TRAITS`, `APPEARANCE`, and `COSTUME` are the data that make
@@ -1276,12 +1823,14 @@ NOT an error.
 
 ### 12.4 Voice
 
-`VOICE` (`AUTO` by default) and `VOICE_STYLE` drive TTS voice selection
-and delivery for that character's spoken lines. The same character MUST
-sound like the same voice across scenes. Voice resolution for the
-`Narrator` speaker is a pipeline concern (see Appendix B); the parser
-records the speaker as `Narrator` and preserves `VOICE_NOTE:` lines
-verbatim.
+`VOICE_ID` (else `VOICE`, else legacy `VOICE`) and `VOICE_TONE` (else
+legacy `VOICE_STYLE`) drive TTS voice selection and delivery for that
+character's spoken lines. The same character MUST sound like the same
+voice across scenes. In first-person documents (§16) `NARRATION` lines
+are spoken by the primary character in that character's voice; there
+is no narrator voice. Voice resolution for legacy `Narrator` lines is
+a pipeline concern (see Appendix B); the parser records the speaker as
+`Narrator` and preserves `VOICE_NOTE:` lines verbatim.
 
 ---
 
@@ -1336,6 +1885,7 @@ verbatim.
 | V1 | 2026-11-12 | Initial specification: full grammar (headers, CHARACTER, LOCATION, PROP, SCENE, SHOT, GLOBAL_AUDIO, GLOBAL_NEGATIVE_CONSTRAINTS, QA, OUTPUT, END_CARD), content lines, LINE_ID and spoken-text integrity rules, validation error codes V1E001–V1E022, unsupported-field policy, snapshot/SHA-256 rule, six-bus audio model, LOCATION/CHARACTER semantics, head-ratio lock at 0.34 (0.33–0.35). Derived from the standing directive in `docs/DIRECTIVE_STUDIO_SCRIPT_V1.md`. |
 | V1 | 2026-11-12 | Phase A reconciliation: parser emits exactly the §8.2 codes (V1E001–V1E024); new codes V1E023 (no spoken lines) and V1E024 (NONE coexists with real cues, an error); V1E019 row extended (empty spoken line, malformed DIALOGUE, PROP SCENES format, multiple VFX names + one TRIGGER); header defaults removed (absent PROJECT/GENRE/VISUAL_STYLE/TONE = unspecified); STYLE/VISUAL_STYLE single `visual_style` field; `MEME_NOTE` promoted to a defined legacy scene field (§6.13, Appendix B item 1 resolved); duration unit suffixes rejected (V1E012) and END_CARD DURATION rejects AUTO; V1E006 duplicate detection and V1E021 defined in the parser; TRIGGERs recorded verbatim at parse time (V1E022 timeline-stage only); unresolvable references (V1E018) are errors, per this specification. Schema updated to match (nullable unspecified headers, no `style` field, V1E code pattern). |
 | V1 | 2026-11-12 | New §15, planner trait contract (Gemini sketcher): structured trait-block shapes the planner must emit and the pipeline must consume, grounded in the V1 parsed-output shapes and the existing planner / scene-package / animation-primitive vocabulary. Phase B interface requirement; no planner-output JSON Schema is defined in Phase A. |
+| V1 | 2026-11-12 | Phase B Stage 3 dialect extension: new-dialect forms (bare marker line, bare block headers, `SCENE:` / `SHOT:` headers, `⸻` separators, `END STUDIO SCRIPT V1` terminator, bullet lists, spoken and SFX sub-blocks, PROJECT and VISUAL_STYLE blocks, extended CHARACTER / LOCATION / PROP / SCENE / SHOT / GLOBAL_AUDIO / QA / OUTPUT / END_CARD vocabularies); document-wide dialect determination with exactly three dialect-gated rules (§3.3: verbatim TRANSITION, TYPE-optional-with-CAMERA shots, `3s` END_CARD durations); per-block duplicate scoping (V1E006); CAMERA-vs-TYPE distinction and the CAMERA_MOVEMENT prose rule (§5.5); TARGET_DURATION ranges; scoped NONE semantics (§10.2) and per-scope AMBIENCE/BGM/MEME limits (§§6.7–6.9); verbatim non-L LINE_IDs; new §16 first-person prerequisite rule with error V1E025 (error in first-person documents, one line-0 warning in legacy documents with narrator lines); LOCATION ref-vs-declare fix; `to_dict()` additions (`id`/`name`/`is_extra`/`fields` on blocks, `speaker_id`/`lip_sync`, structured SFX sub-fields, `duration_sec`, `expected_counts`, first-person meta). Schema and template updated to match. The head-ratio lock (0.33–0.35, default 0.34) is unchanged. All Phase A documents that were valid remain valid; the sole behaviour adjustment is the V1E025 legacy-narrator warning. |
 
 ---
 
@@ -1671,6 +2221,72 @@ and none of them may be papered over by inventing a second vocabulary.
 
 ---
 
+## 16. First-person prerequisite rule
+
+This rule is a PREREQUISITE ("rules tiên quyết", Mai, 2026-11-12
+10:20): **all scripts are told in the first person; NEVER an external
+narrator** ("không cần người dẫn truyện"). It overrides any
+narrator-default behaviour in consumers: `NARRATION` blocks are spoken
+by the primary character in first-person voice (that character's
+`VOICE_ID`), never by a narrator voice, and no consumer may inject a
+narrator sentinel, a narrator voice, or narrator lines into a
+first-person production.
+
+### 16.1 Declaring first-person mode
+
+A document declares first-person mode when ANY of these holds:
+
+- `STORYTELLING_MODE` (PROJECT block, §4.1) starts with `FIRST_PERSON`
+  (case-insensitive); OR
+- `EXTERNAL_NARRATOR` is `NONE`; OR
+- `PRIMARY_CHARACTER` is present and is not `NONE` or empty.
+
+New scripts MUST declare first-person mode: the template
+(`docs/STUDIO_SCRIPT_V1_TEMPLATE.md`) declares all three. Documents
+that declare none of the three are legacy documents (§16.3).
+
+### 16.2 Validation in first-person documents (V1E025)
+
+In a document that declares first-person mode:
+
+- (a) ANY spoken line whose speaker is an external narrator is a
+  validation error (V1E025): a line whose speaker is a narrator alias
+  (§6.2), or a `NARRATION` line with no `SPEAKER` resolving to a
+  declared CHARACTER. The error message MUST cite the prerequisite
+  rule ("all scripts are first-person; an external narrator is
+  forbidden").
+- (b) `EXTERNAL_NARRATOR` declaring anything other than `NONE` is a
+  validation error (V1E025, same citation), reported at the
+  declaration's line.
+- (c) `PRIMARY_CHARACTER` MUST reference a declared CHARACTER id (or,
+  by §2.4 normalisation, a display name); otherwise it is an
+  unresolvable-reference error (V1E018) at the declaration's line.
+
+### 16.3 Legacy documents
+
+When a document does NOT declare first-person mode, legacy behaviour is
+preserved: narrator lines (speaker `Narrator`) are allowed and the
+document may still be valid. The parser MUST emit exactly ONE warning
+(code V1E025, line 0) noting the prerequisite rule, so that authors
+see that new scripts must declare first-person mode. A legacy document
+with no narrator lines gets no warning. The warning never fails
+validation.
+
+### 16.4 Consumer obligations
+
+- TTS MUST read `NARRATION` lines in first-person documents with the
+  speaking character's voice (`VOICE_ID`), on the narration bus
+  (§10.1) with that character's delivery. It MUST NOT substitute a
+  narrator voice.
+- The adapter/pipeline MUST NOT inject a narrator character, narrator
+  lines, or a narrator sentinel for first-person documents, and MUST
+  NOT re-label character narration as narrator content.
+- QA `EXPECTED_EXTERNAL_NARRATOR_LINES` (§5.8) MUST be `0` in
+  first-person documents; the QA stage verifies the count from the
+  parsed document.
+
+---
+
 ## Appendix A. Rules defined by this specification where the brief was silent
 
 The canonical grammar brief defined the format but left the following
@@ -1679,10 +2295,11 @@ parser, schema, tests, and frontend can implement one consistent
 behaviour. The coordinator SHOULD confirm each item; any change requires
 a specification amendment (§14), not a unilateral parser deviation.
 
-1. **Error code values** (V1E001–V1E024, §8.2): the brief required codes
+1. **Error code values** (V1E001–V1E025, §8.2): the brief required codes
    but did not enumerate them. The code list in §8.2 is normative.
    V1E023–V1E024 were added by the 2026-11-12 Phase A reconciliation;
-   see §14.
+   V1E025 (first-person prerequisite rule, §16) was added by the
+   Phase B Stage 3 dialect extension; see §14.
 2. **Enum case-insensitivity** (§2.4): the brief normalised only SHOT
    `TYPE`. This specification matches ALL enums case-insensitively.
 3. **Speaker/identifier normalisation** (§2.4): trim, collapse
@@ -1743,6 +2360,23 @@ a specification amendment (§14), not a unilateral parser deviation.
     (V1E024) are validation ERRORS, not warnings — this specification
     is authoritative over the original brief's "warning" wording for
     these conditions. Duplicate SHOT ids (V1E004) are likewise errors.
+27. **Document-wide dialect determination** (§3.3, Stage 3): exactly
+    three rules differ between the legacy and new dialects (verbatim
+    TRANSITION, TYPE-optional-with-CAMERA, `3s` END_CARD durations);
+    every other rule applies identically to both dialects.
+28. **`CAMERA_MOVEMENT` prose rule** (§5.5, Stage 3): the lexical test
+    (lowercase letters or spaces → prose; UPPER_SNAKE non-enum →
+    V1E007) applies in both dialects.
+29. **Scoped NONE semantics and per-scope cue limits** (§10.2,
+    §§6.7–6.9, Stage 3): NONE directives and at-most-one limits apply
+    per scope (scene vs shot), in both dialects.
+30. **Per-block duplicate scoping** (§4, §8.2 V1E006, Stage 3): the
+    same key in different blocks is legal; duplicates are errors only
+    within one block-context.
+31. **First-person rule severity split** (§16, Stage 3): V1E025 is an
+    error in documents declaring first-person mode and a single line-0
+    warning in legacy documents with narrator lines, preserving
+    backward compatibility for the fixture and legacy scripts.
 
 ## Appendix B. Open questions for the coordinator / Phase B
 
