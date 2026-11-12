@@ -992,7 +992,7 @@ def _spherical_offset(azimuth_deg, elevation_deg,
 
 def viewpoint_for_shot(shot_type="medium", camera_angle=None,
                        subject_pos=(0.0, 1.2, 0.0), counterpart_x=None,
-                       srs_side=0):
+                       srs_side=0, radius_scale=1.0):
     """Resolve a shot's REAL viewpoint: a PerspectiveCamera.
 
     ``subject_pos`` is the world target point (usually the subject's
@@ -1003,6 +1003,12 @@ def viewpoint_for_shot(shot_type="medium", camera_angle=None,
     angle always gets that angle's camera — never silently the fixed
     legacy camera; only the eye_level default reproduces it exactly.
 
+    ``radius_scale`` (scale-variant rule): multiplies the viewpoint
+    radius, dollying the camera out along the same azimuth/elevation
+    so a scaled (taller) subject's standing box fits the frame. 1.0
+    (default) reproduces the exact legacy geometry; non-positive or
+    non-finite values fall back to 1.0.
+
     Returns a PerspectiveCamera (fov 46, aspect 16:9) positioned on
     the viewpoint sphere around ``subject_pos``. Establishing shots
     use the wide radius (_VIEWPOINT_RADIUS_BY_SHOT); all other types
@@ -1011,8 +1017,15 @@ def viewpoint_for_shot(shot_type="medium", camera_angle=None,
     angle = resolve_viewpoint_angle(shot_type, camera_angle)
     tx, ty, tz = (float(v) for v in subject_pos)
     elev = _ANGLE_ELEV_DEG.get(angle, _BASE_ELEV_DEG)
+    try:
+        rscale = float(radius_scale)
+    except (TypeError, ValueError):
+        rscale = 1.0
+    if not (rscale > 0) or rscale != rscale or rscale in (
+            float("inf"), float("-inf")):
+        rscale = 1.0
     radius = _VIEWPOINT_RADIUS_BY_SHOT.get(shot_type,
-                                           _VIEWPOINT_RADIUS)
+                                           _VIEWPOINT_RADIUS) * rscale
     azimuth = 0.0
     if angle == "over_shoulder" or shot_type == "over_the_shoulder":
         if counterpart_x is not None and tx is not None:

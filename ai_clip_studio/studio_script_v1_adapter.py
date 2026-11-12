@@ -173,6 +173,8 @@ from .gemini_client import (
 )
 from .planner_fallback import ACTION_LEAD_SECONDS, CHARACTER_HEIGHTS
 from .studio_script_v1 import (
+    HEAD_RATIO_MAX,
+    HEAD_RATIO_MIN,
     NARRATOR_ALIASES,
     NARRATOR_SPEAKER,
     StudioScriptV1Document,
@@ -262,6 +264,113 @@ class V1AdapterError(ValueError):
     def __init__(self, message: str, errors=None):
         super().__init__(message)
         self.errors = list(errors or [])
+
+
+# --- Scale-variant rule (Zeus Ep1 fallback, 2026-11-12) ---------------
+# The parser's head-ratio lock (0.33-0.35) is deliberately NOT relaxed:
+# an out-of-range HEAD_RATIO stays V1E009 (pinned by
+# test_only_head_ratio_lock_error). Production may still render a
+# document whose ONLY validation errors are V1E009, when every
+# out-of-range character declares a HEIGHT_RATIO* scale trait (SPEC
+# §5.1): the character renders at the locked 0.34 with its body
+# scaled, and the deviation is recorded (v1_scale_deviations +
+# v1_notes + planner detail) — never silently. Any other error
+# combination still refuses. No parser change, no schema change: the
+# rule reads only the parsed document's existing fields.
+SCALE_RATIO_MIN = 0.2
+SCALE_RATIO_MAX = 3.0
+# Standard adult height for scaled characters: the trait_derivation
+# default and the §15.2 height_px baseline. A scaled character gets
+# round(540 * scale_ratio) instead of the CHARACTER_HEIGHTS cycle.
+SCALE_BASE_HEIGHT_PX = 540
+
+
+def _parse_scale_ratio(value) -> float | None:
+    """Parse a HEIGHT_RATIO* field value to a scale ratio, or None.
+
+    Accepts numbers and strings (\"1.8\", \"1.8x\"); rejects anything
+    unparseable, non-finite, or outside [SCALE_RATIO_MIN,
+    SCALE_RATIO_MAX]. The range check alone rejects NaN/inf.
+    """
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        ratio = float(value)
+    elif isinstance(value, str):
+        text = value.strip()
+        if text[-1:].lower() == "x":
+            text = text[:-1].strip()
+        try:
+            ratio = float(text)
+        except ValueError:
+            return None
+    else:
+        return None
+    if not (SCALE_RATIO_MIN <= ratio <= SCALE_RATIO_MAX):
+        return None
+    return ratio
+
+
+def _scale_ratio_from_fields(fields) -> tuple[float | None, str | None]:
+    """First parseable HEIGHT_RATIO* trait in a fields dict.
+
+    Returns (ratio, key) or (None, None). Field order is the
+    document's declaration order (dict insertion order).
+    """
+    if not isinstance(fields, dict):
+        return None, None
+    for key, value in fields.items():
+        if str(key).upper().startswith("HEIGHT_RATIO"):
+            ratio = _parse_scale_ratio(value)
+            if ratio is not None:
+                return ratio, str(key)
+    return None, None
+
+
+def _scale_variant_deviations(data: dict, errors: list) -> list | None:
+    """Scale-variant deviations for an invalid document, or None.
+
+    Returns a list of deviation records when the document may proceed
+    under the scale-variant rule, else None (must still refuse).
+    Proceeds only when: every validation error is V1E009; every
+    character whose head_ratio is outside the locked range declares a
+    parseable HEIGHT_RATIO* scale trait; and the V1E009 error count
+    equals the out-of-range character count (so a global VISUAL_STYLE
+    HEAD_RATIO error, or a duplicate HEAD_RATIO line, can never slip
+    through on another character's trait). Error lines pair to
+    characters in document order (blocks are sequential, so HEAD_RATIO
+    lines increase with declaration order).
+    """
+    if not errors or any(e.get("code") != "V1E009" for e in errors):
+        return None
+    bad: list[tuple[dict, float, float, str]] = []
+    for char in data.get("characters") or []:
+        try:
+            head = float(char.get("head_ratio", HEAD_RATIO_LOCKED))
+        except (TypeError, ValueError):
+            return None
+        if HEAD_RATIO_MIN <= head <= HEAD_RATIO_MAX:
+            continue
+        scale, key = _scale_ratio_from_fields(char.get("fields"))
+        if scale is None:
+            return None
+        bad.append((char, head, scale, key))
+    if len(errors) != len(bad):
+        return None
+    ordered_errors = sorted(errors, key=lambda e: e.get("line", 0))
+    deviations = []
+    for (char, head, scale, key), err in zip(bad, ordered_errors):
+        deviations.append({
+            "character": char.get("name", ""),
+            "identity_id": (char.get("identity_id") or char.get("id")
+                            or char.get("name", "")),
+            "declared_head_ratio": head,
+            "rendered_head_ratio": HEAD_RATIO_LOCKED,
+            "scale_ratio": scale,
+            "scale_key": key,
+            "error_line": err.get("line", 0),
+        })
+    return deviations
 
 
 def _clear_enrichment_cache() -> None:
@@ -722,13 +831,30 @@ def _adapt_document(doc) -> tuple[dict, dict]:
     maps the Gemini enrichment overlay needs."""
     data = doc.to_dict()
     errors = data.get("validation_errors") or []
+    scale_deviations: list[dict] = []
     if errors:
-        detail = "\n".join(
-            f"line {e['line']} [{e['code']}]: {e['message']}"
-            for e in errors)
-        raise V1AdapterError(
-            "STUDIO SCRIPT V1 document is invalid; refusing to render:\n"
-            + detail, errors=errors)
+        maybe_deviations = _scale_variant_deviations(data, errors)
+        if not maybe_deviations:
+            detail = "\n".join(
+                f"line {e['line']} [{e['code']}]: {e['message']}"
+                for e in errors)
+            raise V1AdapterError(
+                "STUDIO SCRIPT V1 document is invalid; refusing to render:\n"
+                + detail, errors=errors)
+        scale_deviations = maybe_deviations
+        # Clamp + annotate the deviating characters in this local copy
+        # (to_dict() is fresh per call; the parsed document and its
+        # validation errors are untouched). Downstream stages see the
+        # locked 0.34 and the scale ratio; the declared value survives
+        # in the deviation records and in the verbatim fields dict.
+        by_identity = {d["identity_id"]: d for d in scale_deviations}
+        for char in data.get("characters") or []:
+            key = (char.get("identity_id") or char.get("id")
+                   or char.get("name", ""))
+            dev = by_identity.get(key)
+            if dev is not None:
+                char["head_ratio"] = HEAD_RATIO_LOCKED
+                char["scale_ratio"] = dev["scale_ratio"]
 
     scenes_data = data.get("scenes") or []
     all_lines = [ln for sc in scenes_data
@@ -773,6 +899,15 @@ def _adapt_document(doc) -> tuple[dict, dict]:
     narrator_entries: list[dict] = []
     extra_entries: list[dict] = []
     v1_notes: list[str] = []
+    for dev in scale_deviations:
+        v1_notes.append(
+            f"character {dev['character']!r}: HEAD_RATIO "
+            f"{dev['declared_head_ratio']} outside the locked "
+            f"{HEAD_RATIO_MIN}-{HEAD_RATIO_MAX} range, clamped to "
+            f"{HEAD_RATIO_LOCKED} for rendering; body scale "
+            f"{dev['scale_ratio']}x from {dev['scale_key']} "
+            f"(scale-variant rule; parser V1E009 at line "
+            f"{dev['error_line']} retained in v1_scale_deviations)")
     # Per-declared-character trait context, in declaration order:
     # {char, fields, render_traits, voice_id, in_cast}
     trait_context: list[dict] = []
@@ -789,8 +924,23 @@ def _adapt_document(doc) -> tuple[dict, dict]:
         is_narrator = (not first_person["enabled"]
                        and _is_narrator_character(name))
         is_extra = _is_extra_character(char, fields)
-        height = CHARACTER_HEIGHTS[len(cast) % len(CHARACTER_HEIGHTS)] \
-            if not (is_narrator or is_extra) else 540
+        raw_scale = char.get("scale_ratio")
+        if raw_scale is None:
+            # Valid documents too: a HEIGHT_RATIO* trait is a general
+            # scale declaration (SPEC §5.1), honoured whether or not
+            # the head ratio needed clamping. The deviation path above
+            # already set scale_ratio on clamped characters.
+            raw_scale, _scale_key = _scale_ratio_from_fields(fields)
+        scale_value = None
+        if (isinstance(raw_scale, (int, float))
+                and not isinstance(raw_scale, bool)
+                and SCALE_RATIO_MIN <= float(raw_scale) <= SCALE_RATIO_MAX):
+            scale_value = float(raw_scale)
+        if scale_value is not None and not (is_narrator or is_extra):
+            height = int(round(SCALE_BASE_HEIGHT_PX * scale_value))
+        else:
+            height = CHARACTER_HEIGHTS[len(cast) % len(CHARACTER_HEIGHTS)] \
+                if not (is_narrator or is_extra) else 540
         render_traits = derive_render_traits(
             name, role, appearance, costume_text, trait_list,
             voice_style, fields=fields, gender=gender, height_px=height)
@@ -826,6 +976,7 @@ def _adapt_document(doc) -> tuple[dict, dict]:
             "costume_text": costume_text,
             "costume_changes": list(char.get("costume_changes") or []),
             "head_ratio": char.get("head_ratio", HEAD_RATIO_LOCKED),
+            "scale_ratio": scale_value,
             "identity_id": char.get("identity_id") or name,
             "id": char.get("id") or char.get("identity_id") or name,
             "voice_id": voice_id,
@@ -860,6 +1011,7 @@ def _adapt_document(doc) -> tuple[dict, dict]:
                 "appearance": "", "role": "", "traits": [],
                 "costume_text": "", "costume_changes": [],
                 "head_ratio": HEAD_RATIO_LOCKED, "identity_id": speaker,
+                "scale_ratio": None,
                 "id": speaker, "voice_id": "",
                 "render_traits": traits,
                 "template": traits["template"],
@@ -1407,6 +1559,7 @@ def _adapt_document(doc) -> tuple[dict, dict]:
         "v1_extras": extra_entries,
         "v1_first_person": first_person,
         "v1_notes": v1_notes,
+        "v1_scale_deviations": scale_deviations,
         "v1_audio_cues": audio_cues,
         "v1_unsupported_fields": data.get("unsupported_fields") or [],
         "v1_dropped_cues": dropped_cues,
@@ -1469,7 +1622,10 @@ def adapt_document(doc: StudioScriptV1Document) -> dict:
     """Map a parsed STUDIO SCRIPT V1 document to a scene package.
 
     Raises V1AdapterError when the document is invalid or has no
-    spoken lines. Pure and deterministic.
+    spoken lines, except for the scale-variant rule (V1E009-only
+    documents whose out-of-range characters declare a HEIGHT_RATIO*
+    scale trait proceed, clamped to 0.34, with the deviation
+    recorded). Pure and deterministic.
     """
     package, _context = _adapt_document(doc)
     return package
@@ -1794,7 +1950,12 @@ def resolve_v1_plan(script_text: str, *, enrich_with_gemini: bool = False,
     connector helper / env key default).
 
     Raises V1AdapterError when the text is not a V1 document, when
-    the document is invalid, or when it has no spoken lines.
+    the document is invalid, or when it has no spoken lines. The one
+    exception to invalidity is the scale-variant rule: a document
+    whose only validation errors are V1E009, where every out-of-range
+    character declares a HEIGHT_RATIO* scale trait, proceeds with
+    head_ratio clamped to 0.34 and the deviation recorded in the
+    package (v1_scale_deviations), the notes, and this detail string.
     """
     if detect_format(script_text) != "studio_v1":
         raise V1AdapterError(
@@ -1808,6 +1969,14 @@ def resolve_v1_plan(script_text: str, *, enrich_with_gemini: bool = False,
         f"STUDIO SCRIPT V1: {len(package['scenes'])} scenes, "
         f"{len(package['characters'])} characters, {n_lines} spoken "
         f"lines; deterministic V1 adapter, no Gemini enrichment")
+    deviations = package.get("v1_scale_deviations") or []
+    if deviations:
+        dev_text = "; ".join(
+            f"{d['character']}: HEAD_RATIO {d['declared_head_ratio']} "
+            f"clamped to {d['rendered_head_ratio']}, body scale "
+            f"{d['scale_ratio']}x ({d['scale_key']})"
+            for d in deviations)
+        base_detail += f"; scale-variant deviation(s): {dev_text}"
     if not enrich_with_gemini:
         return package, ADAPTER_LABEL, base_detail
     snapshot = package["v1_snapshot_hash"]

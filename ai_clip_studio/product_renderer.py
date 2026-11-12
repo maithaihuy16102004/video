@@ -704,7 +704,8 @@ def ws(screen_x: float, cam=None, z: float = WORLD_Z) -> float:
 OTS_FOREGROUND_Z_OFFSET = 0.9
 
 
-def char_metrics(cam, world_x: float, world_z: float = WORLD_Z):
+def char_metrics(cam, world_x: float, world_z: float = WORLD_Z,
+                 base_scale: float = 1.0):
     """Per-character screen metrics under a shot camera.
 
     Returns (screen_x, ground_y, height_px): the feet position from
@@ -719,14 +720,29 @@ def char_metrics(cam, world_x: float, world_z: float = WORLD_Z):
     measured 189 px), which reads as a shrunken person, not a
     viewpoint change. Characters are billboards: scale by depth,
     feet on the projected ground line.
+
+    ``base_scale`` (scale-variant rule): a per-character body scale
+    from the package (``scale_ratio``; 1.8 for a Titan declared at
+    HEIGHT_RATIO 1.8). The drawn height multiplies by it, so the
+    character is genuinely taller while its head RATIO stays locked
+    (the rig scales all proportions from height). Default 1.0 keeps
+    every existing render identical; non-positive/non-finite values
+    fall back to 1.0.
     """
+    try:
+        scale = float(base_scale)
+    except (TypeError, ValueError):
+        scale = 1.0
+    if not (scale > 0) or scale != scale or scale in (float("inf"),
+                                                      float("-inf")):
+        scale = 1.0
     gx, gy, _, _ = cam.project((world_x, 0.0, world_z), W, H)
     _, _, s_shot, _ = cam.project((world_x, 1.2, world_z), 1, H)
     _, _, s_base, _ = CAM.project((world_x, 1.2, world_z), 1, H)
     if s_base and s_shot:
-        height_px = int(round(CHAR_H * s_shot / s_base))
+        height_px = int(round(CHAR_H * scale * s_shot / s_base))
     else:
-        height_px = CHAR_H
+        height_px = int(round(CHAR_H * scale))
     return int(round(gx)), int(round(gy)), height_px
 
 
@@ -2815,6 +2831,18 @@ def _render_shot(args: dict) -> dict:
         shot["shot_type"], _angle,
         subject_pos=(_target_x, 1.2, _target_z),
         counterpart_x=_counterpart_x, srs_side=shot.get("srs_side", 0))
+    # Per-character body scales (scale-variant rule): the package
+    # carries scale_ratio on cast entries; default 1.0. Invalid
+    # values fall back to 1.0 (char_metrics guards too).
+    char_scales = {}
+    for n in names:
+        _entry = _char_by_name.get(n)
+        _ratio = _entry[1].get("scale_ratio") if _entry else None
+        try:
+            _ratio = float(_ratio)
+        except (TypeError, ValueError):
+            _ratio = 1.0
+        char_scales[n] = _ratio if _ratio > 0 else 1.0
     # OTS foreground fit (Stage 3 / F9): the shoulder azimuth swings
     # the listener toward the frame edge, and the unadjusted staging
     # slot put their head ~60% out of frame (F9 probe). Pull the
@@ -2831,7 +2859,8 @@ def _render_shot(args: dict) -> dict:
         _side = 1.0 if _lx >= _subj_x else -1.0
         for _step in range(12):
             _gx, _gy, _gh = char_metrics(
-                shot_cam, _lx, world_zs[_ots_listener])
+                shot_cam, _lx, world_zs[_ots_listener],
+                base_scale=char_scales[_ots_listener])
             _hr = 0.34 * _gh / 2.0
             if 40.0 + _hr <= _gx <= W - 40.0 - _hr:
                 break
@@ -2842,7 +2871,8 @@ def _render_shot(args: dict) -> dict:
                 break
             _lx = _next
         world_xs[_ots_listener] = _lx
-    metrics = {n: char_metrics(shot_cam, world_xs[n], world_zs[n])
+    metrics = {n: char_metrics(shot_cam, world_xs[n], world_zs[n],
+                              base_scale=char_scales[n])
                for n in names}
     staging = {n: metrics[n][0] for n in names}
     ground_ys = {n: metrics[n][1] for n in names}
