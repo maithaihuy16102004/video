@@ -1047,6 +1047,7 @@ def audio_event_to_synth_job(event: AudioEvent, gains: dict[str, Any],
             "end": round(total_sec, 3), "gain_db": gain,
             "method": spec["method"], "cue_name": event.sfx,
             "cue_id": None, "scene": event.scene,
+            "shot_id": None,
             "fade_down": False, "source": "legacy_event",
         }, "")
     gain = round(event.gain_db + _bus_offset(gains, "foley"), 2)
@@ -1059,6 +1060,7 @@ def audio_event_to_synth_job(event: AudioEvent, gains: dict[str, Any],
         "category": "foley", "gain_db": gain,
         "synth_kind": synth_kind, "method": spec["method"],
         "cue_name": event.sfx, "cue_id": None, "scene": event.scene,
+        "shot_id": None,
         "source": "legacy_event",
     }, "")
 
@@ -1115,7 +1117,8 @@ def resolve_v1_cues(cues: list[Any] | None, *, package: dict | None,
     Returns a JSON-serializable report: per-cue decisions (verbatim
     cue fields, mapping, trigger, render status, reasons), timed
     ``segments`` (foley) and ``beds`` (ambience/music) for the
-    mixer, unmapped/unresolved/NONE lists, scene NONE spans, and
+    mixer (every job carries ``cue_id``/``shot_id``/``scene``
+    provenance so NONE-shot attribution is auditable), unmapped/unresolved/NONE lists, scene NONE spans, and
     the resolved mix gains. ``script_text`` is accepted for the
     meme-guard context and recorded in the report header; meme
     decisions do not depend on it (memes never render here).
@@ -1592,7 +1595,8 @@ def resolve_v1_cues(cues: list[Any] | None, *, package: dict | None,
                     "start": timing["start"], "end": timing["end"],
                     "gain_db": gain, "method": spec["method"],
                     "cue_name": name, "cue_id": cue_id,
-                    "scene": scene_no, "fade_down": fade_down,
+                    "scene": scene_no, "shot_id": shot_id,
+                    "fade_down": fade_down,
                     "source": mapping["source"]})
                 produced += 1
         elif kind_key == "ambience":
@@ -1629,7 +1633,8 @@ def resolve_v1_cues(cues: list[Any] | None, *, package: dict | None,
                     "start": timing["start"], "end": timing["end"],
                     "gain_db": gain, "method": spec["method"],
                     "cue_name": name, "cue_id": cue_id,
-                    "scene": scene_no, "fade_down": False,
+                    "scene": scene_no, "shot_id": shot_id,
+                    "fade_down": False,
                     "source": mapping["source"]})
                 produced += 1
         else:  # SFX
@@ -1665,7 +1670,7 @@ def resolve_v1_cues(cues: list[Any] | None, *, package: dict | None,
                         "start": start, "end": end, "gain_db": gain,
                         "method": spec["method"], "cue_name": name,
                         "cue_id": cue_id, "scene": scene_no,
-                        "fade_down": False,
+                        "shot_id": shot_id, "fade_down": False,
                         "source": mapping["source"]})
                     produced += 1
                     continue
@@ -1706,6 +1711,7 @@ def resolve_v1_cues(cues: list[Any] | None, *, package: dict | None,
                     "gain_db": gain, "synth_kind": kind,
                     "method": spec["method"], "cue_name": name,
                     "cue_id": cue_id, "scene": scene_no,
+                    "shot_id": shot_id,
                     "source": ("v1_cue+trait"
                                if mapping["source"] == "trait_blocks"
                                else "v1_cue")})

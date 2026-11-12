@@ -295,6 +295,16 @@ class TestExpressionMapping(unittest.TestCase):
         self.assertEqual(map_expression_text("hoài nghi"), "doubtful")
         self.assertEqual(map_expression_text("bình thản"), "neutral")
 
+    def test_bare_sung_frozen_startled(self):
+        # Bare "sững" (frozen/startled) maps to "surprised", alone or
+        # in a sentence; word boundaries still apply, so "sững" glued
+        # inside a longer token does not fire.
+        self.assertEqual(map_expression_text("sững"), "surprised")
+        self.assertEqual(map_expression_text("Sững"), "surprised")
+        self.assertEqual(map_expression_text("Bà cụ sững người."),
+                         "surprised")
+        self.assertIsNone(map_expression_text("sữngsờ"))
+
     def test_word_boundary_ua(self):
         # "ủa" never fires inside "của".
         self.assertIsNone(map_expression_text("của cháu"))

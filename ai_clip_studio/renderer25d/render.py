@@ -268,6 +268,25 @@ def _draw_character_marker(img: Image.Image, scene: Scene25D,
     d.line([(fx - r, fy), (fx + r, fy)], fill=(245, 240, 230, 255), width=3)
 
 
+def _paint_depth(cam: PerspectiveCamera, kind: str, obj) -> float:
+    """Painter's-order depth for an object: the FARTHEST corner depth
+    for a box, the anchor depth for a character.
+
+    Centre depth mis-orders a large flat board and the small boxes
+    mounted on its face: with a tilted camera the board's centre
+    (high up) measures NEARER along the view axis than a low mounted
+    box's centre, so the board paints after — and covers — the box
+    (measured on the map panel: paper centre 9.634 < region centre
+    9.650, so the "Anh" region vanished under the paper). The
+    farthest-corner depth keeps the board behind everything mounted
+    on it (paper 10.119 > region 9.823) while preserving the order
+    for ordinary separated boxes. This is the standard painter's
+    heuristic for convex objects."""
+    if kind == "box":
+        return max(cam.depth_of(c) for c in obj.corners())
+    return cam.depth_of(obj.world_pos)
+
+
 def render_frame(scene: Scene25D, width: int = 1920, height: int = 1080,
                  draw_character=None) -> Image.Image:
     """Render one frame of ``scene`` at 24fps-pipeline resolution.
@@ -295,8 +314,8 @@ def render_frame(scene: Scene25D, width: int = 1920, height: int = 1080,
         _draw_contact_shadow(img, scene, cam, ch.world_pos, 0.0, 0.35,
                              horizon_y=horizon)
     # far-to-near painter's order across boxes + characters together
-    items = [(cam.depth_of(b.center), "box", b) for b in scene.boxes]
-    items += [(cam.depth_of(c.world_pos), "character", c)
+    items = [(_paint_depth(cam, "box", b), "box", b) for b in scene.boxes]
+    items += [(_paint_depth(cam, "character", c), "character", c)
               for c in scene.characters]
     for _, kind, obj in sorted(items, key=lambda t: -t[0]):
         if kind == "box":
@@ -324,7 +343,8 @@ def render_boxes_layer(scene: Scene25D, width: int = 1920,
     cam = scene.camera
     img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     draw_boxes = list(scene.boxes if boxes is None else boxes)
-    for box in sorted(draw_boxes, key=lambda b: -cam.depth_of(b.center)):
+    for box in sorted(draw_boxes,
+                      key=lambda b: -_paint_depth(cam, "box", b)):
         _draw_box(img, scene, cam, box)
     return img
 

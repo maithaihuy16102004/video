@@ -277,6 +277,32 @@ class TestResolvePlanWithFakeClient(unittest.TestCase):
         self.assertIn("Gemini", detail)
         self.assertEqual(package["trait_blocks"]["planner"], "fallback")
 
+    def test_connector_flag_prefers_helper_over_env_key(self):
+        # With use_gemini_connector=True, resolve_plan must construct
+        # GeminiClient WITHOUT turning GEMINI_API_KEY into an explicit
+        # key, so the client's helper-first resolution applies and the
+        # registered connection is used instead of the env var.
+        with mock.patch.dict(os.environ, {"GEMINI_API_KEY": "ENV-KEY"}):
+            with mock.patch(
+                    "ai_clip_studio.gemini_planner.GeminiClient") as maker:
+                maker.return_value.generate_json.side_effect = \
+                    GeminiError("no live call in this test")
+                _package, label, _detail = resolve_plan(
+                    self.text, use_gemini_connector=True)
+        self.assertEqual(label, "fallback")
+        maker.assert_called_once_with()
+
+    def test_env_key_used_without_connector_flag(self):
+        # Without the connector flag, a user-set env var remains the
+        # credential path (machines without the connector helper).
+        with mock.patch.dict(os.environ, {"GEMINI_API_KEY": "ENV-KEY"}):
+            with mock.patch(
+                    "ai_clip_studio.gemini_planner.GeminiClient") as maker:
+                maker.return_value.generate_json.side_effect = \
+                    GeminiError("no live call in this test")
+                resolve_plan(self.text)
+        maker.assert_called_once_with(api_key="ENV-KEY")
+
     def test_bad_json_falls_back(self):
         client = FakeClient(payload=None)
 

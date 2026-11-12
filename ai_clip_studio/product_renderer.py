@@ -55,7 +55,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 from .animation.character_art import (
-    EXPRESSION_NAMES, LEGACY_MOOD_TO_EXPRESSION,
+    EXPRESSION_NAMES, LEGACY_MOOD_TO_EXPRESSION, VIEWS,
     draw_character_v4, make_character, make_character_instance,
     resolve_view,
 )
@@ -68,7 +68,7 @@ from .animation.rig import check_bone_lengths, lerp, smoothstep
 from .camera_planner import (
     ANGLES, CAMERA_MOVEMENT, FULL_BODY_SHOT_TYPES,
     SHOT_TYPES as CAMERA_SHOT_TYPES, SHOT_SCALE as CAMERA_SHOT_SCALE,
-    CameraPlanner, normalize_movement, resolve_camera_angle,
+    CameraPlanner, normalize_movement, resolve_viewpoint_angle,
     viewpoint_for_shot,
 )
 from .renderer25d.camera import PerspectiveCamera
@@ -98,6 +98,7 @@ INK_RGB = (20, 34, 43)
 SHOT_SCALE = {
     "establishing": 1.0, "medium": 1.6, "close_up": 2.6,
     "reaction": 2.6, "object_insert": 3.4, "tracking": 1.6,
+    "medium_close_up": 1.6, "graphic_insert": 1.0,
 }
 
 # F7 (Stage 3): the general prop vocabulary. Every drawable prop kind
@@ -206,6 +207,155 @@ def _normalize_camera_angle(value):
     return angle if angle in ANGLES else None
 
 
+# Staging modes (Stage 3 / channel study R5): how characters share
+# the frame. "layered_depth" stages depth layers + a foreground
+# occlusion shape instead of shot-reverse-shot cutting; anything
+# else (including absent) is the standard staging. Only the
+# validated value is carried onto shots.
+STAGING_MODES = ("layered_depth",)
+OCCLUDER_SIDES = ("left", "right")
+OCCLUDER_STYLES = ("solid", "blurred")
+
+
+def _normalize_staging_mode(value):
+    """A directive staging-mode value -> "layered_depth" or None."""
+    if not isinstance(value, str):
+        return None
+    mode = value.strip().lower().replace("-", "_").replace(" ", "_")
+    return mode if mode in STAGING_MODES else None
+
+
+def _normalize_occluder_side(value):
+    """A directive foreground-occluder side -> "left"/"right"/None."""
+    if not isinstance(value, str):
+        return None
+    side = value.strip().lower()
+    return side if side in OCCLUDER_SIDES else None
+
+
+def _normalize_occluder_style(value):
+    """A directive foreground-occluder style -> "solid"/"blurred"/None."""
+    if not isinstance(value, str):
+        return None
+    style = value.strip().lower()
+    return style if style in OCCLUDER_STYLES else None
+
+
+def _normalize_character_view(value):
+    """A directive character-view value -> a VIEWS string or None
+    (the renderer then uses the default profile view, with turns
+    still animating through front/three-quarter)."""
+    if not isinstance(value, str):
+        return None
+    view = value.strip().lower().replace("-", "_").replace(" ", "_")
+    return view if view in VIEWS else None
+
+
+def _normalize_expression_name(value):
+    """An expression label -> a canonical EXPRESSION_NAMES member
+    (legacy mood spellings mapped), or None when invalid."""
+    if not isinstance(value, str):
+        return None
+    name = value.strip().lower().replace("-", "_").replace(" ", "_")
+    name = LEGACY_MOOD_TO_EXPRESSION.get(name, name)
+    return name if name in EXPRESSION_NAMES else None
+
+
+def _normalize_split_side(value):
+    """One split-screen side spec -> {"expression": ...} /
+    {"expressions": {name: ...}} with valid expression names only,
+    or None when the side carries no usable override."""
+    if not isinstance(value, dict):
+        return None
+    out = {}
+    expr = _normalize_expression_name(value.get("expression"))
+    if expr is not None:
+        out["expression"] = expr
+    exps = value.get("expressions")
+    if isinstance(exps, dict):
+        per_char = {}
+        for name, label in exps.items():
+            norm = _normalize_expression_name(label)
+            if norm is not None:
+                per_char[str(name)] = norm
+        if per_char:
+            out["expressions"] = per_char
+    return out or None
+
+
+def _normalize_split_screen(value):
+    """A directive split-screen spec -> {"left": side, "right": side}
+    with at least one usable expression override, or None. The two
+    viewports share one camera/staging; only the face expression
+    differs per side (the before/after mirror, channel study R10c)."""
+    if not isinstance(value, dict):
+        return None
+    left = _normalize_split_side(value.get("left"))
+    right = _normalize_split_side(value.get("right"))
+    if left is None and right is None:
+        return None
+    out = {}
+    if left is not None:
+        out["left"] = left
+    if right is not None:
+        out["right"] = right
+    return out
+
+
+def _normalize_clock_time(value):
+    """A "HH:MM" clock value -> (hour, minute), or None."""
+    if not isinstance(value, str):
+        return None
+    parts = value.strip().split(":")
+    if len(parts) != 2:
+        return None
+    try:
+        hour = int(parts[0])
+        minute = int(parts[1])
+    except ValueError:
+        return None
+    if 0 <= hour <= 23 and 0 <= minute <= 59:
+        return (hour, minute)
+    return None
+
+
+def _normalize_insert_card(value):
+    """A directive graphic-insert card spec -> a validated dict with
+    only known keys (title, subtitle, lines, prop_kind, tally_count,
+    clock_time, style), or None when the value is not a dict. An
+    empty dict is valid: the card renders with the shot text as its
+    title. Unknown/invalid fields are dropped, never a crash."""
+    if not isinstance(value, dict):
+        return None
+    out = {}
+    for key in ("title", "subtitle"):
+        if value.get(key) is not None:
+            out[key] = str(value[key])
+    lines = value.get("lines")
+    if isinstance(lines, (list, tuple)):
+        kept = [str(line) for line in lines
+                if str(line).strip()][:6]
+        if kept:
+            out["lines"] = kept
+    kind = str(value.get("prop_kind") or "").strip().lower()
+    if kind in PROP_KINDS:
+        out["prop_kind"] = kind
+    tally = value.get("tally_count")
+    if isinstance(tally, bool):
+        pass
+    elif isinstance(tally, (int, float)):
+        count = int(tally)
+        if 0 < count <= 99:
+            out["tally_count"] = count
+    clock = _normalize_clock_time(value.get("clock_time"))
+    if clock is not None:
+        out["clock_time"] = "%02d:%02d" % clock
+    style = str(value.get("style") or "").strip().lower()
+    if style in ("paper", "dark"):
+        out["style"] = style
+    return out
+
+
 def _location_block_index(package: dict) -> dict:
     """Location id -> trait block, from the package's location trait
     blocks (package["trait_blocks"]["locations"] first, then
@@ -272,6 +422,57 @@ def _block_location_fields(block: dict, fallback: dict) -> dict:
         if block.get(key):
             out[key] = block[key]
     return out
+
+
+def _raw_location_record(package: dict, loc_id) -> dict | None:
+    """The raw preserved V1 location record for an id (package
+    ["v1_locations"]), or None. The trait block is the renderer's
+    primary source; the raw record only SUPPLEMENTS it with fields
+    the trait-block builder does not carry (notably ``type``)."""
+    if loc_id is None:
+        return None
+    for rec in package.get("v1_locations") or []:
+        if not isinstance(rec, dict):
+            continue
+        if str(rec.get("id") or "") == str(loc_id) or \
+                str(rec.get("location_id") or "") == str(loc_id):
+            return rec
+    return None
+
+
+def _enrich_location_block(package: dict, block):
+    """A trait block supplemented with its raw V1 record's type/fields
+    text (a COPY — the package's block is never mutated). Returns the
+    block unchanged when there is nothing to add. General: any
+    location whose raw record carries a TYPE/MAP_STYLE the trait
+    block lacks gets it; blocks that already carry the data are
+    untouched. The adapter owning the trait-block shape should carry
+    ``type`` itself (contract gap, reported); until then the renderer
+    reads the preserved V1 data the package already ships."""
+    if not isinstance(block, dict):
+        return block
+    loc_id = block.get("location_id") or block.get("id")
+    raw = _raw_location_record(package, loc_id)
+    if raw is None:
+        return block
+    extra: dict = {}
+    if not block.get("type") and raw.get("type"):
+        extra["type"] = raw["type"]
+    raw_fields = raw.get("fields")
+    if isinstance(raw_fields, dict):
+        fields = dict(block.get("fields") or {})
+        changed = False
+        for key in ("TYPE", "MAP_STYLE", "LOCATION_TYPE"):
+            if key not in fields and raw_fields.get(key):
+                fields[key] = raw_fields[key]
+                changed = True
+        if changed:
+            extra["fields"] = fields
+    if not extra:
+        return block
+    enriched = dict(block)
+    enriched.update(extra)
+    return enriched
 
 
 def _scene_costume_overrides(scene: dict, package: dict,
@@ -1176,6 +1377,37 @@ def _trait_text(block: dict, *keys) -> str:
     return " ".join(parts)
 
 
+def _block_type_text(block: dict) -> str:
+    """Type/style text carried by a location block: the block's own
+    ``type`` / ``location_type`` / ``map_style`` fields plus a
+    verbatim ``fields`` dict's TYPE / MAP_STYLE / LOCATION_TYPE
+    values. A location whose TYPE says "map" must compose as a map
+    even when its feature list names only regions — the type is
+    script data carried by the package, never a substitution. (The
+    trait-block builder does not carry ``type``; plan_shots
+    supplements blocks from the preserved raw V1 record — see
+    _enrich_location_block — and blocks that already carry the data
+    work without it.)"""
+    parts = []
+    for key in ("type", "location_type", "map_style"):
+        value = block.get(key)
+        if isinstance(value, str) and value.strip():
+            parts.append(value)
+    fields = block.get("fields")
+    if isinstance(fields, dict):
+        for key in ("TYPE", "MAP_STYLE", "LOCATION_TYPE"):
+            value = fields.get(key)
+            if isinstance(value, str) and value.strip():
+                parts.append(value)
+    return " ".join(parts)
+
+
+# Map-region label filter: feature entries that DESCRIBE the map
+# (borders, boundaries) are not region names and must not label a
+# region patch. Generic map vocabulary, never story values.
+_MAP_LABEL_SKIP = ("biên giới", "border", "ranh giới", "boundary")
+
+
 def compose_location(location_data: dict, *, mood: str = "warm",
                      time_of_day: str = "day") -> dict:
     """Compose an environment FROM a §15.3 location trait block.
@@ -1213,6 +1445,7 @@ def compose_location(location_data: dict, *, mood: str = "warm",
     all_text = " ".join([
         _trait_text(block, "name", "geography", "architecture",
                     "lighting", "weather", "period"),
+        _block_type_text(block),
         layer_text,
         " ".join(str(f) for f in features),
         _trait_text(render_traits, "setting"),
@@ -1240,9 +1473,18 @@ def compose_location(location_data: dict, *, mood: str = "warm",
         (weather_text + " " + all_text).lower(), _RAIN_WORDS)
     sky_top, sky_bottom, ground = _sky_and_ground(
         kind, str(tod).lower(), str(mood_v).lower(), weather_text, rainy)
-    # Map labels and sign labels come ONLY from location data.
-    map_labels = "|".join(str(f) for f in features[:6]) \
-        if kind == "map_panel" else ""
+    # Map labels and sign labels come ONLY from location data. Map
+    # region labels skip description entries (borders are not region
+    # names) and strip trailing periods, so a region is labelled with
+    # a place name from the script's own feature list.
+    if kind == "map_panel":
+        label_entries = [str(f).strip().rstrip(".")
+                         for f in features
+                         if not _has_any_word(
+                             str(f).lower(), _MAP_LABEL_SKIP)]
+        map_labels = "|".join(label_entries[:6])
+    else:
+        map_labels = ""
     sign_label = ""
     for needle, text in SIGN_LABELS:
         if needle in all_text.lower():
@@ -1567,6 +1809,23 @@ def plan_shots(package: dict, timeline: list[dict]) -> list[dict]:
             or d.get("ots_counterpart"),
             "shot_id": d.get("shot_id"),
             "location_override": d.get("location_override"),
+            # Channel-study vocabulary (Stage 3): staging mode,
+            # foreground occluder, shot-level character view,
+            # split-screen sides, graphic-insert card spec. All
+            # validated; invalid values degrade to None (standard
+            # rendering), never a crash.
+            "staging_mode": _normalize_staging_mode(
+                d.get("staging_mode") or d.get("staging")),
+            "occluder_side": _normalize_occluder_side(
+                d.get("occluder_side")),
+            "occluder_style": _normalize_occluder_style(
+                d.get("occluder_style")),
+            "character_view": _normalize_character_view(
+                d.get("character_view")),
+            "split_screen": _normalize_split_screen(
+                d.get("split_screen")),
+            "insert_card": _normalize_insert_card(
+                d.get("insert_card")),
         }
         if line_idx is None:
             directives_by_scene.setdefault(scene_no, []).append(entry)
@@ -1615,8 +1874,9 @@ def plan_shots(package: dict, timeline: list[dict]) -> list[dict]:
             "setting": setting, "mood": loc.get("mood", "warm"),
             "time_of_day": loc.get("time_of_day", "day"),
         }
-        scene_v1_location = loc.get("v1_location") \
-            or scene.get("v1_location")
+        scene_v1_location = _enrich_location_block(
+            package,
+            loc.get("v1_location") or scene.get("v1_location"))
         scene_location_text = scene.get("location_text") \
             or loc.get("location_text") or ""
         scene_movement = _normalize_camera_movement(
@@ -1667,7 +1927,7 @@ def plan_shots(package: dict, timeline: list[dict]) -> list[dict]:
             if override:
                 block = _resolve_location_block(package, override)
                 if block is not None:
-                    v1_location = block
+                    v1_location = _enrich_location_block(package, block)
                     location_text = _block_location_text(block)
                     loc_fields = _block_location_fields(
                         block, scene_location)
@@ -1757,6 +2017,18 @@ def plan_shots(package: dict, timeline: list[dict]) -> list[dict]:
                                     if scene_directive else None),
                     "ots_counterpart": (scene_directive.get("counterpart")
                                         if scene_directive else None),
+                    "staging_mode": (scene_directive.get("staging_mode")
+                                     if scene_directive else None),
+                    "occluder_side": (scene_directive.get("occluder_side")
+                                      if scene_directive else None),
+                    "occluder_style": (scene_directive.get("occluder_style")
+                                       if scene_directive else None),
+                    "character_view": (scene_directive.get("character_view")
+                                       if scene_directive else None),
+                    "split_screen": (scene_directive.get("split_screen")
+                                     if scene_directive else None),
+                    "insert_card": (scene_directive.get("insert_card")
+                                    if scene_directive else None),
                     "expression": None,
                     "costume_overrides": dict(scene_costumes),
                 }
@@ -1813,6 +2085,18 @@ def plan_shots(package: dict, timeline: list[dict]) -> list[dict]:
                                 if directive else None),
                 "ots_counterpart": (directive.get("counterpart")
                                     if directive else None),
+                "staging_mode": (directive.get("staging_mode")
+                                 if directive else None),
+                "occluder_side": (directive.get("occluder_side")
+                                  if directive else None),
+                "occluder_style": (directive.get("occluder_style")
+                                   if directive else None),
+                "character_view": (directive.get("character_view")
+                                   if directive else None),
+                "split_screen": (directive.get("split_screen")
+                                 if directive else None),
+                "insert_card": (directive.get("insert_card")
+                                if directive else None),
                 "expression": line.get("expression"),
                 "costume_overrides": dict(scene_costumes),
             }
@@ -2155,6 +2439,150 @@ def _render_end_card_image(text: str, secondary: str) -> Image.Image:
     return img
 
 
+def _draw_clock_face(draw, cx, cy, radius, hour, minute, ink,
+                     face_fill):
+    """A flat clock face (graphic-insert time card): circle + ticks
+    + hands at (hour, minute). No text, no branding."""
+    draw.ellipse([cx - radius, cy - radius, cx + radius, cy + radius],
+                 fill=face_fill, outline=ink, width=8)
+    for tick in range(12):
+        ang = math.radians(tick * 30.0)
+        outer = (cx + radius * 0.92 * math.sin(ang),
+                 cy - radius * 0.92 * math.cos(ang))
+        inner = (cx + radius * 0.78 * math.sin(ang),
+                 cy - radius * 0.78 * math.cos(ang))
+        draw.line([inner, outer], fill=ink, width=6)
+    min_ang = math.radians(minute * 6.0)
+    hour_ang = math.radians((hour % 12 + minute / 60.0) * 30.0)
+    draw.line([(cx, cy),
+               (cx + radius * 0.72 * math.sin(min_ang),
+                cy - radius * 0.72 * math.cos(min_ang))],
+              fill=ink, width=7)
+    draw.line([(cx, cy),
+               (cx + radius * 0.48 * math.sin(hour_ang),
+                cy - radius * 0.48 * math.cos(hour_ang))],
+              fill=ink, width=9)
+    draw.ellipse([cx - 10, cy - 10, cx + 10, cy + 10], fill=ink)
+
+
+def _draw_tally(draw, cx, cy, count, ink, width_per=26, height=64):
+    """Tally marks in groups of five (four vertical + diagonal)."""
+    groups = (count + 4) // 5
+    total_w = groups * (4 * width_per + 18) - 18
+    x0 = cx - total_w / 2.0
+    remaining = count
+    for g in range(groups):
+        n = min(5, remaining)
+        gx = x0 + g * (4 * width_per + 18)
+        for i in range(min(n, 4)):
+            x = gx + i * width_per
+            draw.line([(x, cy - height / 2), (x, cy + height / 2)],
+                      fill=ink, width=6)
+        if n == 5:
+            draw.line([(gx - 6, cy + height / 2 - 8),
+                       (gx + 3 * width_per + 6, cy - height / 2 + 8)],
+                      fill=ink, width=6)
+        remaining -= n
+
+
+def _render_graphic_card_image(shot: dict) -> Image.Image:
+    """A flat, straight-on graphic insert card (channel study R2/R6):
+    a full-frame 2D card from the shot's insert_card spec — title,
+    subtitle, lines, an optional clock face (time insert), an
+    optional large prop drawing, optional tally marks. A card is a
+    RENDERING, not a crop of the scene: the shot has no camera, no
+    characters and no subtitle overlay (the card text IS the
+    on-screen text). Never crashes on a missing/empty spec: the
+    shot text becomes the title, and an empty spec yields a plain
+    card."""
+    card = shot.get("insert_card") or {}
+    if card.get("style") == "dark":
+        bg, ink, soft = (18, 24, 32), (240, 238, 228), (170, 175, 185)
+        clock_face = (30, 40, 54)
+    else:
+        bg, ink, soft = (240, 235, 220), (20, 34, 43), (90, 95, 100)
+        clock_face = (250, 247, 238)
+    img = Image.new("RGB", (W, H), bg)
+    d = ImageDraw.Draw(img)
+    title = (card.get("title") or "").strip() \
+        or (shot.get("text") or "").strip()
+    title_font = _font(88, bold=True)
+    title_lines = _wrap_text(d, title, title_font, W - 320)[:2]
+    y = 150
+    for line in title_lines:
+        d.text((W // 2, y), line, font=title_font, fill=ink, anchor="ma")
+        y += 108
+    subtitle = (card.get("subtitle") or "").strip()
+    if subtitle:
+        sub_font = _font(48)
+        for line in _wrap_text(d, subtitle, sub_font, W - 400)[:1]:
+            d.text((W // 2, y), line, font=sub_font, fill=soft,
+                   anchor="ma")
+            y += 62
+    # Middle zone: clock face (time insert) else a large prop.
+    clock = _normalize_clock_time(card.get("clock_time"))
+    prop_kind = card.get("prop_kind")
+    mid_cy = 600
+    if clock is not None:
+        _draw_clock_face(d, W // 2, mid_cy, 150, clock[0], clock[1],
+                         ink, clock_face)
+        d.text((W // 2, mid_cy + 175), "%02d:%02d" % clock,
+               font=_font(44, bold=True), fill=ink, anchor="ma")
+    elif prop_kind:
+        _draw_prop(d, W // 2, mid_cy, kind=prop_kind, w=300, h=200)
+    # Lines + tally below the middle zone.
+    line_font = _font(46)
+    ly = 810
+    for line in (card.get("lines") or [])[:3]:
+        d.text((W // 2, ly), str(line), font=line_font, fill=ink,
+               anchor="ma")
+        ly += 56
+    tally = card.get("tally_count")
+    if isinstance(tally, (int, float)) and not isinstance(tally, bool) \
+            and int(tally) > 0:
+        _draw_tally(d, W // 2, 1010, int(tally), ink)
+    return img
+
+
+def _render_occlusion_layer(side=None, style=None) -> Image.Image:
+    """Foreground occlusion layer (channel study R5/R10a): a dark
+    silhouette shape at one frame edge, solid or blurred. Screen
+    space — the renderer is a 2D layered renderer, and the
+    reference channel's occlusion is a flat foreground layer, not
+    3D geometry. The shape is a generic edge band with a gently
+    irregular inner edge, never a copied silhouette. Composited
+    after the characters (and after the split-screen composite),
+    before the crop."""
+    side = side if side in ("left", "right") else "left"
+    layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    d = ImageDraw.Draw(layer)
+    edge = [0, 300, 600, 900, H]
+    inner = [330, 295, 350, 305, 340]
+    if side == "left":
+        pts = [(0, 0)] + list(zip(inner, edge)) + [(0, H)]
+    else:
+        pts = [(W, 0)] + list(zip([W - v for v in inner], edge)) \
+            + [(W, H)]
+    d.polygon(pts, fill=(14, 20, 28, 255))
+    if (style or "solid") == "blurred":
+        layer = layer.filter(ImageFilter.GaussianBlur(24))
+    return layer
+
+
+def _split_composite(left_img, right_img, seam_px=4):
+    """Two viewports side by side + a centre seam (channel study
+    R10c): the left half of ``left_img`` and the right half of
+    ``right_img``. Both images are full frames of the same moment
+    (same camera, same crop); only the face expressions differ."""
+    out = left_img.copy()
+    half = W // 2
+    out.paste(right_img.crop((half, 0, W, H)), (half, 0))
+    d = ImageDraw.Draw(out)
+    d.rectangle([half - seam_px // 2, 0,
+                 half + seam_px // 2 - 1, H], fill=(20, 28, 36))
+    return out
+
+
 def _render_shot(args: dict) -> dict:
     """One shot -> PNG frames (+ optional single still). Top-level so
     multiprocessing can pickle it. Pure in the shot: every boundary
@@ -2211,6 +2639,46 @@ def _render_shot(args: dict) -> dict:
             "location_keyword": shot.get("location_keyword", "street"),
             "rainy": False,
         }
+    # ---- graphic insert: flat card, no camera, no cast --------------
+    # A graphic_insert shot renders its card image for every frame
+    # (the card is static by design — a flat insert has no camera
+    # to move). No characters, no scene, no subtitle overlay (the
+    # card text is the on-screen text); the SRT track still carries
+    # the line. Same return shape as the end card.
+    if shot["shot_type"] == "graphic_insert":
+        card_img = _render_graphic_card_image(shot)
+        if still_only:
+            still_path = shot_dir / "still.png"
+            card_img.save(still_path, compress_level=1)
+            return {
+                "index": shot["index"], "scene": shot["scene"],
+                "kind": shot["kind"], "speaker": shot.get("speaker"),
+                "shot_type": shot["shot_type"], "duration": duration,
+                "n_frames": 0, "applied_scale": 1.0, "frames": [],
+                "still": str(still_path), "violations": [],
+                "max_jump_px_per_frame": 0.0,
+                "camera_movement": "STATIC",
+                "location_keyword": shot.get("location_keyword", "street"),
+                "rainy": False,
+                "insert_card": shot.get("insert_card") or {},
+            }
+        frames_written = []
+        for fi in range(n_frames):
+            path = shot_dir / f"f{fi:04d}.png"
+            card_img.save(path, compress_level=1)
+            frames_written.append(str(path))
+        return {
+            "index": shot["index"], "scene": shot["scene"],
+            "kind": shot["kind"], "speaker": shot.get("speaker"),
+            "shot_type": shot["shot_type"], "duration": duration,
+            "n_frames": len(frames_written), "applied_scale": 1.0,
+            "frames": frames_written, "still": None,
+            "violations": [], "max_jump_px_per_frame": 0.0,
+            "camera_movement": "STATIC",
+            "location_keyword": shot.get("location_keyword", "street"),
+            "rainy": False,
+            "insert_card": shot.get("insert_card") or {},
+        }
     # ---- visible cast (names first: characters are built AFTER the
     # shot camera resolves, because their drawn height comes from
     # the camera's perspective scale — see char_metrics) ------------
@@ -2242,14 +2710,32 @@ def _render_shot(args: dict) -> dict:
     world_zs = {n: WORLD_Z for n in names}
     _ots_subject = shot.get("ots_subject")
     _ots_counterpart = shot.get("ots_counterpart")
+    _ots_listener = None
     if shot["shot_type"] == "over_the_shoulder":
         # OTS staging: the listener stands closer to the camera than
         # the character plane, so perspective scale makes them read
         # as a foreground shoulder; the speaker stays on the plane.
+        # The listener is ALSO drawn from behind (view "back" in the
+        # frame loop): the camera sits behind their shoulder, so a
+        # profile face would read as a second subject facing the
+        # viewer instead of a foreground shoulder.
         _listener = _ots_counterpart if _ots_counterpart in names \
             else other
         if _listener is not None:
+            _ots_listener = _listener
             world_zs[_listener] = WORLD_Z + OTS_FOREGROUND_Z_OFFSET
+    # Layered-depth staging (channel study R5): the subject stays on
+    # the character plane, everyone else stands a step BEHIND it, so
+    # perspective scale + ground-line separation read as depth
+    # layers instead of a flat line-up. The OTS listener keeps its
+    # foreground offset (a foreground shoulder is not a depth
+    # layer). The foreground occlusion shape is built after the
+    # background and composited per frame (see _occluder below).
+    _staging_mode = shot.get("staging_mode")
+    if _staging_mode == "layered_depth":
+        for _n in names:
+            if _n != actor and _n != _ots_listener:
+                world_zs[_n] = WORLD_Z - 0.6
     # ---- shot viewpoint (Stage 3 / F9, P0 camera redirect) --------
     # Every shot resolves its OWN PerspectiveCamera from shot_type +
     # camera_angle + subject/staging, and that camera — not the
@@ -2258,8 +2744,8 @@ def _render_shot(args: dict) -> dict:
     # is FIXED within the shot; the angle changes BY CUT. CAM remains
     # only as the default for legacy callers (and the scale anchor
     # for char_metrics).
-    _angle = resolve_camera_angle(shot["shot_type"],
-                                  shot.get("camera_angle"))
+    _angle = resolve_viewpoint_angle(shot["shot_type"],
+                                     shot.get("camera_angle"))
     if shot["shot_type"] == "over_the_shoulder" \
             and _ots_subject in names:
         _subject_name = _ots_subject
@@ -2283,6 +2769,33 @@ def _render_shot(args: dict) -> dict:
         shot["shot_type"], _angle,
         subject_pos=(_target_x, 1.2, _target_z),
         counterpart_x=_counterpart_x, srs_side=shot.get("srs_side", 0))
+    # OTS foreground fit (Stage 3 / F9): the shoulder azimuth swings
+    # the listener toward the frame edge, and the unadjusted staging
+    # slot put their head ~60% out of frame (F9 probe). Pull the
+    # listener's world x toward the subject in steps until the head
+    # circle fits horizontally (40 px margin absorbs the head-joint
+    # offset from the staging point). Only the horizontal head fit
+    # is constrained: the listener is a partial foreground figure,
+    # so feet below the frame are the OTS language, not a defect.
+    # The listener never crosses the subject (stops 0.4 short), so
+    # the azimuth side computed above stays valid.
+    if _ots_listener is not None and actor in world_xs:
+        _subj_x = world_xs[actor]
+        _lx = world_xs[_ots_listener]
+        _side = 1.0 if _lx >= _subj_x else -1.0
+        for _step in range(12):
+            _gx, _gy, _gh = char_metrics(
+                shot_cam, _lx, world_zs[_ots_listener])
+            _hr = 0.34 * _gh / 2.0
+            if 40.0 + _hr <= _gx <= W - 40.0 - _hr:
+                break
+            _next = _lx - _side * 0.2
+            if (_side > 0.0 and _next < _subj_x + 0.4) or \
+                    (_side < 0.0 and _next > _subj_x - 0.4):
+                _lx = _subj_x + _side * 0.4
+                break
+            _lx = _next
+        world_xs[_ots_listener] = _lx
     metrics = {n: char_metrics(shot_cam, world_xs[n], world_zs[n])
                for n in names}
     staging = {n: metrics[n][0] for n in names}
@@ -2370,6 +2883,14 @@ def _render_shot(args: dict) -> dict:
     _bg_boxes, _fg_boxes = split_foreground_boxes(boxes)
     fg_layer = render_boxes_layer(bg_scene, W, H, boxes=_fg_boxes) \
         if _fg_boxes else None
+    # Foreground occlusion shape for layered-depth staging (R5/R10a):
+    # built once per shot (static within the shot, like the camera),
+    # composited per frame after the characters and the split-screen
+    # composite, before the crop.
+    _occluder = None
+    if _staging_mode == "layered_depth":
+        _occluder = _render_occlusion_layer(
+            shot.get("occluder_side"), shot.get("occluder_style"))
     shadow_tile = Image.new("RGBA", (320, 48), (0, 0, 0, 0))
     _td = ImageDraw.Draw(shadow_tile)
     _td.ellipse([20, 8, 300, 40], fill=(0, 0, 0, 110))
@@ -2454,23 +2975,31 @@ def _render_shot(args: dict) -> dict:
     windows = phrase_windows(
         0.0, shot.get("voice_duration", duration), phrases) if phrases else []
     # ---- frame loop ---------------------------------------------------
-    violations: list[str] = []
-    max_jump = 0.0
-    prev_joints = None
-    foot_slide = 0.0
-    frames_written = []
-    still_path = None
-    for fi in range(n_frames):
-        t = (duration / 2.0) if still_only else fi / FPS
-        for n, fn in fns.items():
-            if n == actor and give_fn is not None:
-                give_fn(t)
-            else:
-                fn(t)
-        if talk_nod is not None:
-            talk_nod(t)
-        # Per frame: copy the static background, paste the soft contact
-        # shadows at the feet, draw the real rig characters on top.
+    # Shot-level character view (channel study R1: frontal hero):
+    # the directive's character_view is the default view for every
+    # character in this shot; turns still animate through
+    # front/three-quarter via resolve_view, and the OTS listener
+    # still renders from behind.
+    _shot_view = shot.get("character_view") \
+        if shot.get("character_view") in VIEWS else "profile"
+    # Split-screen spec (channel study R10c): per-side expression
+    # overrides; the two viewports share one camera/staging. A side
+    # without an override renders the normal expressions.
+    _split = shot.get("split_screen") \
+        if isinstance(shot.get("split_screen"), dict) else None
+    _split_left = (_split or {}).get("left") \
+        if isinstance((_split or {}).get("left"), dict) else None
+    _split_right = (_split or {}).get("right") \
+        if isinstance((_split or {}).get("right"), dict) else None
+
+    def _build_frame(t, fi, expr_overrides):
+        """One full frame: static background + contact shadows +
+        rig characters + foreground boxes + rain/puddle + prop.
+        Pure given the poses (the pose closures run once per frame
+        in the loop, before the build): calling it twice with
+        different expression overrides yields the two split-screen
+        viewports of the SAME moment. Returns (image, joints,
+        prop_xy)."""
         img = bg_img.copy()
         for n in names:
             fx = int(chars[n].pose["root_x"])
@@ -2480,15 +3009,31 @@ def _render_shot(args: dict) -> dict:
         joints_now: dict[str, dict] = {}
         for n in names:
             ch = chars[n]
-            # The line's explicit expression wins for the speaker
+            # Expression: a split-screen side override wins for
+            # that viewport (per-character, else whole-side); else
+            # the line's explicit expression wins for the speaker
             # when present and valid (Stage 3); everyone else is
             # neutral, and an invalid expression falls back to the
             # text-derived one (see resolve_expression).
-            expr = resolve_expression(shot.get("expression"),
-                                      shot.get("text", "")) \
-                if n == shot.get("speaker") else "neutral"
+            expr = None
+            if expr_overrides:
+                _per = expr_overrides.get("expressions") or {}
+                if n in _per:
+                    expr = _per[n]
+                elif expr_overrides.get("expression"):
+                    expr = expr_overrides["expression"]
+            if expr is None:
+                expr = resolve_expression(shot.get("expression"),
+                                          shot.get("text", "")) \
+                    if n == shot.get("speaker") else "neutral"
+            # F9: the over-the-shoulder foreground listener is drawn
+            # from behind (back of the head, no face — the art system
+            # renders view "back" with hair, never a face); everyone
+            # else keeps the pose-derived view (shot-level default).
+            _view = "back" if n == _ots_listener \
+                else resolve_view(ch, default=_shot_view)
             joints_now[n] = draw_character_v4(
-                d, ch, expression=expr, view=resolve_view(ch))
+                d, ch, expression=expr, view=_view)
         if fg_layer is not None:
             # Foreground boxes occlude the characters behind them.
             img.paste(fg_layer, (0, 0), fg_layer)
@@ -2534,6 +3079,27 @@ def _render_shot(args: dict) -> dict:
                        kind=shot.get("prop_kind") or "wallet")
         # prop position for the camera (object_insert frames the prop).
         _prop_xy = (wx, wy) if wx is not None else None
+        return img, joints_now, _prop_xy
+
+    violations: list[str] = []
+    max_jump = 0.0
+    prev_joints = None
+    foot_slide = 0.0
+    frames_written = []
+    still_path = None
+    for fi in range(n_frames):
+        t = (duration / 2.0) if still_only else fi / FPS
+        for n, fn in fns.items():
+            if n == actor and give_fn is not None:
+                give_fn(t)
+            else:
+                fn(t)
+        if talk_nod is not None:
+            talk_nod(t)
+        # Per frame: build the full frame (background, characters,
+        # foreground, rain, prop); the split-screen second viewport
+        # is built after the crop parameters resolve below.
+        img, joints_now, _prop_xy = _build_frame(t, fi, _split_left)
         # ---- 2D camera crop (safe_frame) ------------------------------
         # The subject box MUST be the DRAWN extent, not the joint:
         # J["head"] is the head-joint (centre of the head circle) but
@@ -2606,6 +3172,22 @@ def _render_shot(args: dict) -> dict:
                 "half_w": 0.8 * _hr + 15,
             }
 
+        def _mcu_box(n):
+            # medium_close_up (channel study R1): head + upper torso
+            # (chest-up), anchored at the head joint with fixed
+            # head-radius multiples, so the box SIZE is
+            # pose-independent and the applied scale stays constant
+            # within the shot (the standing-box principle, applied
+            # to the chest-up framing).
+            J = joints_now[n]
+            _hr = float(getattr(chars[n], "head_r", 133.0))
+            return {
+                "cx": J["head"][0],
+                "head_y": J["head"][1] - _hr,
+                "foot_y": J["head"][1] + 2.8 * _hr,
+                "half_w": _hr + 40,
+            }
+
         _st = shot["shot_type"]
         _full = {n: _full_box(n) for n in names}
         # F2: full-body shot types never zoom above 1.0x (belt and
@@ -2623,6 +3205,11 @@ def _render_shot(args: dict) -> dict:
         elif _st == "close_up":
             subjects = [_head_box(_lead)]
             others = [_full[n] for n in names if n != _lead]
+        elif _st == "medium_close_up":
+            # Chest-up on the lead; other heads must be fully in or
+            # fully out (never half-cut at the crop edge).
+            subjects = [_mcu_box(_lead)]
+            others = [_head_box(n) for n in names if n != _lead]
         elif _st == "extreme_close_up":
             subjects = [_tight_head_box(_lead)]
             others = [_head_box(n) for n in names if n != _lead]
@@ -2639,9 +3226,10 @@ def _render_shot(args: dict) -> dict:
             # Two-subject framing from behind the listener: both
             # characters framed, focus biased to the speaker. The
             # listener is staged closer to the shot camera (see
-            # world_zs above), so perspective scale makes them read
-            # as a foreground shoulder. No blur/depth treatment is
-            # applied to the foreground shoulder — the 2D crop
+            # world_zs above) and drawn from behind (view "back"),
+            # so perspective scale + the back of the head make them
+            # read as a foreground shoulder. No blur/depth treatment
+            # is applied to the foreground shoulder — the 2D crop
             # renderer cannot do it honestly, and a fake blur would
             # be a false effect (Stage 3 limitation, reported, not
             # faked).
@@ -2682,12 +3270,12 @@ def _render_shot(args: dict) -> dict:
         # The crop is FRAMING (shot scale), not the camera angle: the
         # angle is the shot camera (viewpoint_for_shot) that rendered
         # the background and projected the characters. The camera is
-        # FIXED within the shot (RicksClips rule); no time-varying
-        # crop is applied — a crop-zoom is not a camera move. A
-        # requested camera_movement is recorded on the shot report
-        # with a limitation (see the return below); camera_at() in
-        # camera_planner.py holds the tested camera-path geometry
-        # the follow-up round wires into the per-frame render.
+        # FIXED within the shot (RicksClips rule, channel study R9);
+        # no time-varying crop is applied — a crop-zoom is not a
+        # camera move. A requested camera_movement is recorded on
+        # the shot report with a limitation (see the return below);
+        # camera_at() in camera_planner.py holds the tested
+        # camera-path geometry for tooling use only.
         if safe_shot["camera"]["scale"] == 1.0:
             # Full-frame crop: skip the LANCZOS round-trip resize
             # (same pixels, ~0.3 s saved).
@@ -2697,6 +3285,23 @@ def _render_shot(args: dict) -> dict:
             # the crop on the subjects with headroom AND keeps every
             # `other` fully in or fully out.
             img = CameraPlanner.apply_camera(img, safe_shot, safe_focus)
+        if _split is not None:
+            # Split-screen (R10c): the right viewport is the same
+            # moment with the right-side expressions, cropped with
+            # the SAME parameters (expressions never move joints, so
+            # the crop is identical); the composite takes the left
+            # half from the first build and the right half from the
+            # second, with a centre seam.
+            img2, _, _ = _build_frame(t, fi, _split_right)
+            if safe_shot["camera"]["scale"] != 1.0:
+                img2 = CameraPlanner.apply_camera(img2, safe_shot,
+                                                  safe_focus)
+            img = _split_composite(img, img2)
+        if _occluder is not None:
+            # Foreground occlusion shape (layered-depth staging):
+            # the closest layer, composited after the split-screen
+            # composite, before subtitles.
+            img.paste(_occluder, (0, 0), _occluder)
         # ---- subtitles last, always at fixed 64 px --------------------
         if windows:
             d = ImageDraw.Draw(img, "RGBA")
@@ -2744,12 +3349,12 @@ def _render_shot(args: dict) -> dict:
     if _movement_req != "STATIC":
         _movement_limitation = (
             f"camera_movement {_movement_req} requested but not "
-            "executed: the camera is fixed within the shot "
-            "(RicksClips rule); within-shot camera-position movement "
-            "is not yet wired into the per-frame render "
-            "(camera_at() geometry in camera_planner.py is ready; "
-            "the follow-up round wires it). No crop-zoom substitute "
-            "was applied.")
+            "executed: the camera is fixed within the shot by design "
+            "(RicksClips rule, confirmed by the channel study R9); "
+            "framing changes only by hard cut. Within-shot "
+            "camera-position movement is intentionally not executed "
+            "(camera_at() geometry in camera_planner.py is retained "
+            "for tooling). No crop-zoom substitute was applied.")
     _camera_limitation = None
     if _angle == "dutch":
         _camera_limitation = (

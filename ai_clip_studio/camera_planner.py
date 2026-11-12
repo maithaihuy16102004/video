@@ -13,8 +13,9 @@ to 1920x1080 with LANCZOS. No clip is ever cropped out of existence:
 the crop box is clamped inside the frame.
 
 Shot scales (crop factor vs. the full frame):
-  establishing  1.0  (wide, whole frame)
-  medium / tracking / over_the_shoulder / shot_reverse_shot  1.6
+  establishing / graphic_insert  1.0  (wide, whole frame / flat card)
+  medium / tracking / over_the_shoulder / shot_reverse_shot /
+  medium_close_up  1.6
   close_up / reaction  2.6
   object_insert / extreme_close_up  3.4
 """
@@ -37,6 +38,13 @@ SHOT_TYPES = (
     "object_insert",
     "tracking",
     "shot_reverse_shot",
+    # Stage 3 / channel-study vocabulary (R1/R6): a chest-up
+    # medium close-up, and a flat full-frame graphic insert card
+    # (time / counting / object card, rendered as a card, not a
+    # crop). The planner/adapter selects them; the engine renders
+    # them. Neither is a full-body type.
+    "medium_close_up",
+    "graphic_insert",
 )
 
 SHOT_SCALE = {
@@ -49,16 +57,21 @@ SHOT_SCALE = {
     "object_insert": 3.4,
     "tracking": 1.6,
     "shot_reverse_shot": 1.6,
+    "medium_close_up": 1.6,
+    "graphic_insert": 1.0,
 }
 
 # Camera-movement vocabulary (Stage 3 / F9, redefined by the P0
 # camera redirect 2026-11-12). A movement is a CAMERA-POSITION path,
 # never a crop: see camera_at() for the geometry. The enum is
 # distinct from ShotDirector's lowercase CAMERA_MOVES below, which
-# are 3D camera-path labels. Within-shot movement is NOT yet executed
-# by the product renderer (the camera is FIXED within a shot, per the
-# RicksClips rule; movement values are recorded with a limitation) —
-# camera_at() is the tested geometry the follow-up round wires in.
+# are 3D camera-path labels. Within-shot movement is NOT executed by
+# the product renderer BY DESIGN: the camera is FIXED within a shot
+# and framing changes only by hard cut (the RicksClips rule, Mai's
+# verdict 2026-11-12, independently confirmed by the @giaothucngay30
+# channel study R9 — no pan/tilt/dolly/zoom/tracking was observed).
+# Movement values are recorded with a limitation; camera_at() keeps
+# the tested geometry for tooling/preview use only.
 CAMERA_MOVEMENT = (
     "STATIC",
     "PAN_LEFT",
@@ -98,6 +111,8 @@ SHOT_FOCUS = {
     "object_insert": "object",
     "tracking": "subject_full",
     "shot_reverse_shot": "subject_head",
+    "medium_close_up": "subject_head",
+    "graphic_insert": "full_frame",
 }
 
 COMPOSITION_RULES = {
@@ -111,6 +126,8 @@ COMPOSITION_RULES = {
     "object_insert": ["centered_object", "fill_frame", "detail_visible"],
     "tracking": ["subject_left_third", "headroom", "motion_continuity"],
     "shot_reverse_shot": ["eye_line_match", "rule_of_thirds", "headroom"],
+    "medium_close_up": ["chest_up", "headroom", "eye_line"],
+    "graphic_insert": ["flat_card", "centred_text", "straight_on"],
 }
 
 # Generic action-cue keywords (substrings, after lower-casing and
@@ -146,6 +163,8 @@ _REQUESTED_SUBJECT = {
     "over_the_shoulder": "speaker",
     "shot_reverse_shot": "receiver",
     "reaction": "speaker",
+    "medium_close_up": "speaker",
+    "graphic_insert": "scene",
 }
 _REQUESTED_PURPOSE = {
     "establishing": "wide establishing shot of the place",
@@ -157,6 +176,8 @@ _REQUESTED_PURPOSE = {
     "object_insert": "close-up insert of the object",
     "tracking": "camera tracks alongside the moving character",
     "shot_reverse_shot": "reverse angle on the other character",
+    "medium_close_up": "medium close-up on the speaking character",
+    "graphic_insert": "flat graphic insert card",
 }
 
 
@@ -344,6 +365,22 @@ def _crop_rect(scale, focus_xy, frame_w, frame_h):
     return left, top, left + cw, top + ch
 
 
+def _fit_shift(preferred, need_lo, need_hi, size, frame_size):
+    """Crop edge that contains a need window [need_lo, need_hi].
+
+    Keeps ``preferred`` when the window fits inside
+    [preferred, preferred + size]; otherwise the SMALLEST shift
+    that fits it, clamped inside the frame. The window fits the
+    crop (callers check), so the valid range
+    [need_hi - size, need_lo] ∩ [0, frame_size - size] is
+    non-empty. (Stage 3 / F9 framing fix: the old clamp ignored
+    the focus entirely and parked every close-up subject at the
+    crop's left/top edge, leaving an empty right half.)"""
+    lo = max(0.0, need_hi - size)
+    hi = min(need_lo, frame_size - size)
+    return min(max(preferred, lo), hi)
+
+
 def _other_status(other, rect):
     """'in' / 'out' / 'partial' for a character vs a crop rect.
 
@@ -404,10 +441,13 @@ def _fix_partial_others(shot, focus, subjects, others, frame_w, frame_h):
         need_t = min(s["head_y"] for s in boxes) - 0.05 * ch - 2
         need_b = max(s["foot_y"] for s in boxes) + 0.02 * ch + 2
         if need_r - need_l <= cw and need_b - need_t <= ch:
-            new_left = min(max(need_l, need_r - cw), frame_w - cw)
-            new_left = max(0.0, new_left)
-            new_top = min(max(need_t, need_b - ch), frame_h - ch)
-            new_top = max(0.0, new_top)
+            # Centre the union (two-shot balance), clamped so the
+            # need window still fits — the old clamp parked the
+            # union at the crop's left/top edge.
+            new_left = _fit_shift((need_l + need_r - cw) / 2.0,
+                                  need_l, need_r, cw, frame_w)
+            new_top = _fit_shift((need_t + need_b - ch) / 2.0,
+                                 need_t, need_b, ch, frame_h)
             focus = (new_left + cw / 2.0, new_top + ch / 2.0)
             notes.append("shifted crop to include a partially-overlapped "
                          "character fully (head-safe)")
@@ -566,11 +606,17 @@ class CameraPlanner:
                           "-- zoom out (smaller scale), do not just "
                           "shift the focus")
             return issues, (cx, cy)
-        # shift the crop so the required window fits inside it
-        new_left = min(max(need_l, need_r - cw), frame_w - cw)
-        new_left = max(0.0, new_left)
-        new_top = min(max(need_t, need_b - ch), frame_h - ch)
-        new_top = max(0.0, new_top)
+        # Shift the crop so the required window fits inside it,
+        # keeping the requested focus where possible: the crop
+        # stays centred on the focus when the need window fits
+        # around it, and otherwise shifts by the smallest amount
+        # that fits the window (never to an extreme edge — the old
+        # clamp put every close-up subject at the frame's left edge
+        # with an empty right half, Stage 3 / F9 framing fix).
+        new_left = _fit_shift(cx - cw / 2.0, need_l, need_r, cw,
+                              frame_w)
+        new_top = _fit_shift(cy - ch / 2.0, need_t, need_b, ch,
+                             frame_h)
         corrected = (new_left + cw / 2.0, new_top + ch / 2.0)
         return issues, corrected
 
@@ -813,6 +859,8 @@ _ANGLE_BY_SHOT = {
     "object_insert": "high_angle",
     "tracking": "eye_level",
     "shot_reverse_shot": "eye_level",
+    "medium_close_up": "eye_level",
+    "graphic_insert": "eye_level",
 }
 
 # ---------------------------------------------------------------------------
@@ -876,6 +924,25 @@ _SRS_AZIMUTH_DEG = 18.0
 DUTCH_TILT_DEG = 7.0
 
 
+# Executed viewpoint defaults (Stage 3 / F9 + channel study R3):
+# ShotDirector's _ANGLE_BY_SHOT labels stay as-is; the EXECUTED
+# viewpoint for an establishing shot with no explicit angle is
+# eye-level at a WIDER radius, so the place reads and the characters
+# sit small in the wide. (The F9 probe's establishing still used the
+# high_angle default: the frame was ~80% ground plane and the
+# buildings were cut at the top edge — a high angle looks at the
+# ground, it does not establish a place. R3: the reference channel's
+# wides are eye-level.) An explicit camera_angle always wins. Other
+# shot types keep the standard radius (same distance -> same head
+# size, the F2 rule).
+_VIEWPOINT_ANGLE_BY_SHOT = {
+    "establishing": "eye_level",
+}
+_VIEWPOINT_RADIUS_BY_SHOT = {
+    "establishing": 7.5,
+}
+
+
 def resolve_camera_angle(shot_type, camera_angle=None):
     """Resolve the ANGLES-vocabulary angle for a shot.
 
@@ -887,6 +954,21 @@ def resolve_camera_angle(shot_type, camera_angle=None):
         if angle in ANGLES:
             return angle
     return _ANGLE_BY_SHOT.get(shot_type, "eye_level")
+
+
+def resolve_viewpoint_angle(shot_type, camera_angle=None):
+    """The EXECUTED angle for a shot: an explicit valid
+    ``camera_angle`` wins; otherwise the viewpoint default for the
+    shot type (_VIEWPOINT_ANGLE_BY_SHOT, else _ANGLE_BY_SHOT);
+    unknown shot types and invalid angles degrade to "eye_level".
+    Never raises. The renderer reports this angle, so the report
+    matches the camera that actually rendered the shot."""
+    if isinstance(camera_angle, str):
+        angle = camera_angle.strip().lower().replace("-", "_")
+        if angle in ANGLES:
+            return angle
+    return _VIEWPOINT_ANGLE_BY_SHOT.get(
+        shot_type, _ANGLE_BY_SHOT.get(shot_type, "eye_level"))
 
 
 def tilt_deg_for(angle):
@@ -922,11 +1004,15 @@ def viewpoint_for_shot(shot_type="medium", camera_angle=None,
     legacy camera; only the eye_level default reproduces it exactly.
 
     Returns a PerspectiveCamera (fov 46, aspect 16:9) positioned on
-    the viewpoint sphere around ``subject_pos``.
+    the viewpoint sphere around ``subject_pos``. Establishing shots
+    use the wide radius (_VIEWPOINT_RADIUS_BY_SHOT); all other types
+    share the standard radius (same distance -> same head size).
     """
-    angle = resolve_camera_angle(shot_type, camera_angle)
+    angle = resolve_viewpoint_angle(shot_type, camera_angle)
     tx, ty, tz = (float(v) for v in subject_pos)
     elev = _ANGLE_ELEV_DEG.get(angle, _BASE_ELEV_DEG)
+    radius = _VIEWPOINT_RADIUS_BY_SHOT.get(shot_type,
+                                           _VIEWPOINT_RADIUS)
     azimuth = 0.0
     if angle == "over_shoulder" or shot_type == "over_the_shoulder":
         if counterpart_x is not None and tx is not None:
@@ -936,11 +1022,12 @@ def viewpoint_for_shot(shot_type="medium", camera_angle=None,
         azimuth = side * _OTS_AZIMUTH_DEG
     elif shot_type == "shot_reverse_shot":
         azimuth = _SRS_AZIMUTH_DEG if int(srs_side or 0) else -_SRS_AZIMUTH_DEG
-    if angle == "eye_level" and azimuth == 0.0:
+    if angle == "eye_level" and azimuth == 0.0 \
+            and radius == _VIEWPOINT_RADIUS:
         # Exact legacy offset: default shots stay pixel-identical.
         off = _EYE_OFFSET
     else:
-        off = _spherical_offset(azimuth, elev)
+        off = _spherical_offset(azimuth, elev, radius)
     position = (tx + off[0], ty + off[1], tz + off[2])
     return PerspectiveCamera(position=position, target=(tx, ty, tz),
                              fov_deg=DEFAULT_CAM_FOV, aspect=16.0 / 9.0)
@@ -956,11 +1043,11 @@ def camera_at(movement, t01, base_camera, direction=1):
     HANDHELD adds small deterministic offsets. STATIC returns the
     base camera unchanged.
 
-    NOTE (P0 redirect): the product renderer does not yet execute
-    within-shot movement (camera fixed within a shot, per RicksClips;
-    movement values render STATIC with a recorded limitation). This
-    resolver is the tested geometry the follow-up round wires into
-    the per-frame render (per-frame background + pose re-projection).
+    NOTE (P0 redirect + channel study R9): the product renderer
+    does not execute within-shot movement BY DESIGN (camera fixed
+    within a shot, framing changes by hard cut; movement values
+    render STATIC with a recorded limitation). This resolver is
+    the tested geometry for tooling/preview use only.
     """
     move = normalize_movement(movement)
     t = min(1.0, max(0.0, float(t01)))

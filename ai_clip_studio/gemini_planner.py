@@ -15,7 +15,10 @@ material is ever read from a file, logged, or stored by this module.
 Activation: resolve_plan() attempts a Gemini call for free-form
 scripts only when a key is available (explicit ``api_key`` argument
 or GEMINI_API_KEY) or when ``use_gemini_connector=True`` is passed
-(the server enables this once its wiring lands). Otherwise it
+(the server enables this once its wiring lands). When the connector
+flag is set, the registered helper subprocess is preferred over any
+GEMINI_API_KEY value (GeminiClient's resolution order); the env var
+is a credential path only on machines without the helper. Otherwise it
 returns the labelled fallback without a network call, so planning
 stays deterministic for tests and offline runs. The V1 route is
 likewise opt-in via ``enrich_v1=True`` (see resolve_v1_plan); the
@@ -398,7 +401,11 @@ def resolve_plan(script_text: str, *, api_key: str | None = None,
 
     Gemini is attempted for free-form scripts when ``api_key`` is
     given, GEMINI_API_KEY is set, ``gemini_client`` is injected, or
-    ``use_gemini_connector`` is True (connector helper path).
+    ``use_gemini_connector`` is True (connector helper path). When
+    ``use_gemini_connector`` is True the connector helper is
+    preferred over GEMINI_API_KEY: the client is constructed without
+    an explicit key, so GeminiClient's helper-first resolution
+    applies and the env var is used only when no helper exists.
     ``enrich_v1`` enables Gemini enrichment for V1 scripts (cached
     per snapshot hash; see resolve_v1_plan).
     """
@@ -418,11 +425,17 @@ def resolve_plan(script_text: str, *, api_key: str | None = None,
     base = deterministic_planner(script_text) if is_structured_vi_script(script_text) else _base_from_segmented(script_text)
     client = gemini_client
     if client is None:
-        key = api_key or os.environ.get("GEMINI_API_KEY", "")
-        if key:
-            client = GeminiClient(api_key=key)
+        if api_key:
+            client = GeminiClient(api_key=api_key)
         elif use_gemini_connector:
+            # Connector path: construct without a key so the client
+            # prefers the registered helper subprocess over any
+            # GEMINI_API_KEY value; the env var is consulted by the
+            # client only when no helper exists (other machines).
             client = GeminiClient()
+        elif os.environ.get("GEMINI_API_KEY", ""):
+            client = GeminiClient(
+                api_key=os.environ["GEMINI_API_KEY"])
     if client is None:
         return _ensure_hook_twist(base, parsed_lines), PLANNER_FALLBACK, (
             "No Gemini credential configured (no explicit key, "

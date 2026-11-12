@@ -9,6 +9,14 @@ and fade-out, the legacy _mix_audio contract, and the two Ep1 offline
 cue-resolution checks (old-dialect Stage 2 package + new-dialect
 authoritative script shapes). No live Gemini, no network, no video
 rendering — fixtures and synthetic wavs only.
+
+Stage 3 continuation additions (TestEp1V2Stage3Continuation,
+TestBgmDuckingMeasurement): all 7 Ep1 v2 SFX segments inside the
+timeline, SFX: NONE shots producing no SFX jobs on the real package,
+unresolvable triggers yielding no jobs plus a V1E022 review entry,
+BGM-bed dedup, no automatic sounds (no cues / no whooshes / no
+legacy events from V1 action-cue vocabulary), the BGM nominal gain
+chain, and the measured BGM ducking step on a synthetic mix.
 """
 from __future__ import annotations
 
@@ -23,11 +31,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from ai_clip_studio.audio_events import (  # noqa: E402
     DUCKING_DB,
+    EVENT_SFX_MAP,
     SYNTHESIS_MAP,
     AudioEvent,
     audio_event_to_synth_job,
     build_shot_clock,
     parse_cue_duration,
+    plan_audio_events,
     resolve_mix_gains,
     resolve_v1_cues,
 )
@@ -1274,6 +1284,265 @@ class TestEp1RealPackageOffline(unittest.TestCase):
                         if b["scene"] == 6}
         self.assertEqual(sc6_bed_ends, {content_end})
         json.dumps(rep, ensure_ascii=False)
+
+
+# Shots carrying an explicit "SFX: NONE" line in the authoritative
+# Ep1 v2 script (examples/hitler_ep01_munich_1914.studio.md):
+# SC01_SH03 (line 688), SC04_SH01 (883), SC04_SH02 (907),
+# SC04_SH03 (931), SC04_SH04 (958), SC06_SH04 (1153). The END_CARD
+# SFX: NONE (line 1179) is not a shot. The adapter collapses
+# shot-level NONE to the scene sfx_none flag and emits no per-shot
+# flag, so these tests pin the attribution the resolver CAN see:
+# no scripted SFX cue is attached to one of these shots, and no
+# segment job carries one of these shot ids.
+EP1_SFX_NONE_SHOTS = frozenset({
+    "SC01_SH03", "SC04_SH01", "SC04_SH02", "SC04_SH03",
+    "SC04_SH04", "SC06_SH04",
+})
+
+
+class TestEp1V2Stage3Continuation(unittest.TestCase):
+    """Stage 3 continuation requirements, checked on the real Ep1
+    v2 package (parser + adapter + plan_shots clock, no rendering)
+    and on the resolver fixture. rainy=True matches the real
+    product flow (scene 6 carries the 'rain' action cue)."""
+
+    def _real_ep1(self):
+        text = (REPO_ROOT / "examples"
+                / "hitler_ep01_munich_1914.studio.md").read_text(
+                    encoding="utf-8")
+        package, label, _detail = resolve_v1_plan(text)
+        self.assertEqual(label, "v1")
+        flat = []
+        for scene in package["scenes"]:
+            flat.extend(scene["lines"])
+        timeline = [{"line_index": i + 1, "duration": 4.0}
+                    for i in range(len(flat))]
+        shots = plan_shots(package, timeline)
+        clock = build_shot_clock(shots)
+        by_index = {e["line_index"]: dict(e) for e in timeline}
+        entries = []
+        for span in clock["shot_spans"]:
+            shot = span["shot"]
+            if shot["kind"] != "action" \
+                    and shot.get("line_index") is not None:
+                entry = by_index[shot["line_index"]]
+                entry["start"] = span["start"]
+                entry["end"] = round(span["start"] + entry["duration"],
+                                     3)
+                entries.append(entry)
+        entries.sort(key=lambda e: e["line_index"])
+        rep = resolve_v1_cues(
+            package["v1_audio_cues"], package=package, shots=shots,
+            timeline_entries=entries, rainy=True)
+        total_sec = clock["total_shot_sec"] + 0.5
+        content_end = max(
+            span["end"] for span in clock["shot_spans"]
+            if span["shot"].get("kind") != "end_card")
+        return package, shots, clock, entries, rep, total_sec, \
+            content_end
+
+    def test_all_seven_sfx_segments_inside_timeline(self):
+        _, _, clock, _, rep, total_sec, content_end = self._real_ep1()
+        self.assertEqual(len(rep["segments"]), 7)
+        cue_ids = [s["cue_id"] for s in rep["segments"]]
+        self.assertEqual(sorted(cue_ids),
+                         [f"SFX_00{i}" for i in range(1, 8)])
+        self.assertEqual(len(set(cue_ids)), 7)  # no duplicates
+        for seg in rep["segments"]:
+            with self.subTest(cue_id=seg["cue_id"]):
+                self.assertGreaterEqual(seg["at_seconds"], 0.0)
+                self.assertGreater(seg["end_seconds"],
+                                   seg["at_seconds"])
+                self.assertLessEqual(seg["end_seconds"], total_sec)
+                # No segment extends into the end card.
+                self.assertLessEqual(seg["end_seconds"],
+                                     content_end + 0.001)
+                self.assertGreater(seg["duration"], 0.0)
+                self.assertIn("shot_id", seg)
+        for bed in rep["beds"]:
+            with self.subTest(bed=(bed["stem"], bed["synth_kind"],
+                                   bed["scene"])):
+                self.assertGreaterEqual(bed["start"], 0.0)
+                self.assertGreater(bed["end"], bed["start"])
+                self.assertLessEqual(bed["end"], content_end + 0.001)
+                self.assertIn("shot_id", bed)
+
+    def test_sfx_none_shots_produce_no_sfx_jobs(self):
+        package, _, clock, _, rep, _, _ = self._real_ep1()
+        sfx_cues = [c for c in package["v1_audio_cues"]
+                    if c["cue_type"] == "SFX"]
+        self.assertEqual(len(sfx_cues), 7)
+        for cue in sfx_cues:
+            self.assertNotIn(cue["shot_id"], EP1_SFX_NONE_SHOTS)
+        self.assertEqual(
+            {s["shot_id"] for s in rep["segments"]},
+            {"SC01_SH02", "SC02_SH01", "SC03_SH02", "SC03_SH03",
+             "SC05_SH02", "SC06_SH02", "SC06_SH03"})
+        for seg in rep["segments"]:
+            self.assertNotIn(seg["shot_id"], EP1_SFX_NONE_SHOTS)
+        # Scene 4 (SFX: NONE on every shot, zero SFX cues) yields
+        # the scene-wide NONE span, muting legacy/rain SFX there.
+        scene_spans = clock["scene_spans"]
+        self.assertEqual(
+            rep["none_spans"]["sfx"],
+            [[scene_spans[4][0], scene_spans[4][1]]])
+        # Scoping: SFX: NONE does NOT prohibit ambience/BGM. The
+        # scene-1 ambience + BGM cues sit on SC01_SH03 (an SFX:NONE
+        # shot) and must still render.
+        for cue_type in ("AMBIENCE", "BGM"):
+            cue = next(c for c in rep["cues"]
+                       if c["cue_type"] == cue_type
+                       and c["shot_id"] == "SC01_SH03")
+            self.assertEqual(cue["render"], "rendered", cue_type)
+
+    def test_unresolvable_trigger_yields_no_jobs_and_v1e022(self):
+        package, shots, entries = _resolver_fixture()
+        cues = [
+            # Unknown LINE_ID (no underscores: an underscore-shaped
+            # token takes the documented SNAKE event-token path
+            # with a recorded scene-start fallback instead).
+            _cue(name="Heavy door knock on wood",
+                 trigger="L099"),
+            _cue(name="Heavy door knock on wood",
+                 trigger="zebra quantum flux"),
+        ]
+        rep = resolve_v1_cues(cues, package=package, shots=shots,
+                              timeline_entries=entries)
+        # A mappable sound with an unresolvable trigger: no guessed
+        # time, no job, and an explicit V1E022 review entry.
+        self.assertEqual(rep["segments"], [])
+        self.assertEqual(rep["beds"], [])
+        self.assertEqual(len(rep["unresolved_triggers"]), 2)
+        for cue_report in rep["cues"]:
+            self.assertEqual(cue_report["render"], "unrendered")
+            self.assertEqual(cue_report["trigger"]["status"],
+                             "unresolved")
+            self.assertIn("V1E022", cue_report["trigger"]["reason"])
+            self.assertTrue(any("V1E022" in r
+                                for r in cue_report["reasons"]))
+        for entry in rep["unresolved_triggers"]:
+            self.assertIn("V1E022", entry["reason"])
+
+    def test_duplicate_bgm_cues_deduplicate_to_one_bed(self):
+        package, shots, entries = _resolver_fixture()
+        cue = _cue("BGM", "Soft reflective instrumental", "",
+                   scene=1)
+        rep = resolve_v1_cues([cue, dict(cue)], package=package,
+                              shots=shots, timeline_entries=entries)
+        self.assertEqual(len(rep["beds"]), 1)
+        self.assertTrue(all(c["render"] == "rendered"
+                            for c in rep["cues"]))
+        self.assertTrue(any("deduplicated" in r
+                            for r in rep["cues"][1]["reasons"]))
+
+    def test_no_cues_no_sound_and_no_automatic_events(self):
+        package, shots, entries = _resolver_fixture()
+        rep = resolve_v1_cues([], package=package, shots=shots,
+                              timeline_entries=entries)
+        self.assertEqual(rep["total_cues"], 0)
+        self.assertEqual(rep["segments"], [])
+        self.assertEqual(rep["beds"], [])
+        # The V1 action-cue vocabulary (walk/open/take/...) shares
+        # no key with EVENT_SFX_MAP, so the legacy path invents no
+        # footsteps, impacts, knocks or rain beds for V1 packages:
+        # every planned event is refused as unknown.
+        visual_events = [
+            {"event": cue, "at_seconds": 0.0}
+            for cue in ("walk", "stop", "bend_pick", "take", "open",
+                        "put_away", "look", "sit", "stand", "rain")]
+        plan = plan_audio_events(visual_events, script_text="")
+        self.assertEqual(plan.events, [])
+        self.assertEqual(len(plan.blocked_memes),
+                         len(visual_events))
+        self.assertTrue(all("unknown visual event" in b["reason"]
+                            for b in plan.blocked_memes))
+        # No whoosh anywhere in the synthesis vocabulary: automatic
+        # transition whooshes are DISABLED in the script and have
+        # no synthesis, no event-map entry, no code path here.
+        for kind, spec in SYNTHESIS_MAP.items():
+            self.assertNotIn("whoosh", kind)
+            self.assertNotIn("whoosh", spec["method"].lower())
+        for spec in EVENT_SFX_MAP.values():
+            self.assertNotIn("WHOOSH", spec["sfx"])
+
+    def test_bgm_nominal_chain_is_spec_default(self):
+        # Nominal chain only: BGM bed gain -18 dB (SPEC default)
+        # with a further -6 dB duck under speech. The MEASURED
+        # RMS gap between the music stem and real VieNeu speech is
+        # NOT asserted here: it depends on source levels (the
+        # placeholder sine pad is far quieter than speech before
+        # gains), so a 12-18 dB measured-gap assertion would be
+        # fixture-fitting, not a design guarantee. The measured
+        # ducking step itself is proven in
+        # TestBgmDuckingMeasurement.
+        gains = resolve_mix_gains(
+            {"v1_global_audio": dict(SPEC_GAINS)})
+        self.assertEqual(gains["ducking_db"], -6.0)
+        self.assertEqual(gains["bus_gains"]["bgm_gain_db"], -18.0)
+        package, shots, entries = _resolver_fixture()
+        package["v1_global_audio"] = dict(SPEC_GAINS)
+        rep = resolve_v1_cues(
+            [_cue("BGM", "Soft reflective instrumental", "",
+                  scene=1)],
+            package=package, shots=shots, timeline_entries=entries)
+        self.assertEqual(len(rep["beds"]), 1)
+        self.assertEqual(rep["beds"][0]["gain_db"], -18.0)
+        self.assertEqual(rep["beds"][0]["stem"], "music")
+
+
+class TestBgmDuckingMeasurement(unittest.TestCase):
+    """Measured ducking on a synthetic mix: the music stem must sit
+    ~ducking_db lower inside speech windows than outside them, on
+    separate stems, with the restraint check passing."""
+
+    def test_bgm_ducking_step_measured_on_synthetic_mix(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            v1 = _sine_wav(tmp / "v1.wav", 2.0, volume=0.5)
+            v2 = _sine_wav(tmp / "v2.wav", 2.0, freq=520, volume=0.5)
+            entries = [
+                {"line_index": 1, "speaker": "An", "kind": "dialogue",
+                 "text": "x", "wav": str(v1), "duration": 2.0,
+                 "start": 0.5, "end": 2.5},
+                {"line_index": 2, "speaker": "narrator",
+                 "kind": "narration", "text": "y", "wav": str(v2),
+                 "duration": 2.0, "start": 4.0, "end": 6.0},
+            ]
+            beds = [{
+                "stem": "music", "synth_kind": "music_pad",
+                "start": 0.0, "end": 8.5, "gain_db": -18.0,
+                "method": SYNTHESIS_MAP["music_pad"]["method"],
+                "cue_name": "pad", "cue_id": None, "scene": 1,
+                "shot_id": None, "fade_down": False,
+                "source": "bgm_pad"}]
+            gains = resolve_mix_gains(
+                {"v1_global_audio": dict(SPEC_GAINS)})
+            _, info = _mix_audio(
+                tmp, entries, 8.5, False, segments=[], beds=beds,
+                mix_gains=gains, none_spans={})
+            # Separate buses: voice stems + music stem, no foley
+            # stem when no segments were supplied.
+            self.assertEqual(set(info["stems"]),
+                             {"dialogue.wav", "narration.wav",
+                              "music.wav"})
+            music = Path(info["stems"]["music.wav"])
+            inside = _rms_db_windows(music, [(0.5, 2.5), (4.0, 6.0)])
+            # Outside windows avoid the pad edge fades (0-0.2s in,
+            # last 0.35s out) and the duck-window edges.
+            outside = _rms_db_windows(music, [(2.6, 3.9),
+                                              (6.1, 8.0)])
+            self.assertIsNotNone(inside)
+            self.assertIsNotNone(outside)
+            step = outside - inside
+            # Resolved ducking is -6 dB; allow measurement slack
+            # for window-edge/rounding effects.
+            self.assertGreaterEqual(step, 4.0)
+            self.assertLessEqual(step, 8.0)
+            # Dialogue stays intelligible: restraint holds.
+            self.assertTrue(info["restraint"]["ok"])
+            self.assertGreaterEqual(
+                info["restraint"]["gaps_db"]["music.wav"], 6.0)
 
 
 if __name__ == "__main__":
