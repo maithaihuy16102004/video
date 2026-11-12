@@ -1,0 +1,1084 @@
+{
+  "$defs": {
+    "ambienceMode": {
+      "enum": [
+        "LOOP",
+        "ONCE"
+      ],
+      "type": "string"
+    },
+    "aspectRatio": {
+      "enum": [
+        "16:9",
+        "9:16"
+      ],
+      "type": "string"
+    },
+    "audioCue": {
+      "additionalProperties": false,
+      "properties": {
+        "cue_type": {
+          "$ref": "#/$defs/cueType"
+        },
+        "gain_db": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "MEME gain when given; null otherwise. Recorded as data only, never resolved to a file."
+        },
+        "intensity": {
+          "type": "string"
+        },
+        "line": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "mode": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "priority": {
+          "type": "string"
+        },
+        "scene_number": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "shot_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source_key": {
+          "description": "Original key as written, e.g. MUSIC for a BGM cue (legacy alias).",
+          "type": "string"
+        },
+        "trigger": {
+          "description": "A LINE_ID (validated) or free action text. Empty when not given.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "cue_type",
+        "name",
+        "trigger",
+        "priority",
+        "mode",
+        "intensity",
+        "gain_db",
+        "scene_number",
+        "shot_id",
+        "line",
+        "source_key"
+      ],
+      "type": "object"
+    },
+    "cameraMovement": {
+      "enum": [
+        "STATIC",
+        "PAN_LEFT",
+        "PAN_RIGHT",
+        "TILT_UP",
+        "TILT_DOWN",
+        "DOLLY_IN",
+        "DOLLY_OUT",
+        "TRACKING",
+        "CRANE_UP",
+        "CRANE_DOWN",
+        "HANDHELD"
+      ],
+      "type": "string"
+    },
+    "character": {
+      "additionalProperties": false,
+      "properties": {
+        "appearance": {
+          "type": "string"
+        },
+        "costume": {
+          "description": "Default outfit.",
+          "type": "string"
+        },
+        "costume_changes": {
+          "items": {
+            "$ref": "#/$defs/costumeChange"
+          },
+          "type": "array"
+        },
+        "head_ratio": {
+          "description": "Locked range 0.33-0.35, default 0.34. Values outside (including 0.42) are validation errors.",
+          "maximum": 0.35,
+          "minimum": 0.33,
+          "type": "number"
+        },
+        "identity_id": {
+          "description": "Defaults to the character name; stable across costume changes.",
+          "type": "string"
+        },
+        "line": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        },
+        "role": {
+          "type": "string"
+        },
+        "traits": {
+          "description": "Distinctive traits, ;-separated in the script.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "voice": {
+          "description": "Kept verbatim; AUTO by default.",
+          "type": "string"
+        },
+        "voice_style": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "role",
+        "appearance",
+        "traits",
+        "costume",
+        "costume_changes",
+        "voice",
+        "voice_style",
+        "head_ratio",
+        "identity_id",
+        "line"
+      ],
+      "type": "object"
+    },
+    "costumeChange": {
+      "additionalProperties": false,
+      "properties": {
+        "line": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "outfit": {
+          "type": "string"
+        },
+        "scene_number": {
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "scene_number",
+        "outfit",
+        "line"
+      ],
+      "type": "object"
+    },
+    "cueType": {
+      "enum": [
+        "SFX",
+        "AMBIENCE",
+        "BGM",
+        "MEME",
+        "VFX"
+      ],
+      "type": "string"
+    },
+    "endCard": {
+      "additionalProperties": false,
+      "properties": {
+        "duration": {
+          "type": "number"
+        },
+        "line": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "style": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "text",
+        "duration",
+        "style",
+        "line"
+      ],
+      "type": "object"
+    },
+    "expression": {
+      "additionalProperties": false,
+      "properties": {
+        "character": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "expression": {
+          "type": "string"
+        },
+        "line": {
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "character",
+        "expression",
+        "line"
+      ],
+      "type": "object"
+    },
+    "frameRate": {
+      "enum": [
+        24,
+        25,
+        30
+      ],
+      "type": "integer"
+    },
+    "globalAudio": {
+      "additionalProperties": false,
+      "properties": {
+        "ambience_gain_db": {
+          "type": "number"
+        },
+        "bgm_ducking_db": {
+          "type": "number"
+        },
+        "bgm_gain_db": {
+          "type": "number"
+        },
+        "buses": {
+          "const": [
+            "narration",
+            "dialogue",
+            "ambience",
+            "foley",
+            "sfx",
+            "bgm"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "dialogue_gain_db": {
+          "type": "number"
+        },
+        "foley_gain_db": {
+          "type": "number"
+        },
+        "master_limit_db": {
+          "type": "number"
+        },
+        "narration_gain_db": {
+          "type": "number"
+        },
+        "sfx_gain_db": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "narration_gain_db",
+        "dialogue_gain_db",
+        "ambience_gain_db",
+        "foley_gain_db",
+        "sfx_gain_db",
+        "bgm_gain_db",
+        "bgm_ducking_db",
+        "master_limit_db",
+        "buses"
+      ],
+      "type": "object"
+    },
+    "intensity": {
+      "enum": [
+        "LOW",
+        "MEDIUM",
+        "HIGH"
+      ],
+      "type": "string"
+    },
+    "location": {
+      "additionalProperties": false,
+      "properties": {
+        "architecture": {
+          "type": "string"
+        },
+        "background": {
+          "type": "string"
+        },
+        "features": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "forbidden": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "foreground": {
+          "type": "string"
+        },
+        "geography": {
+          "type": "string"
+        },
+        "id": {
+          "description": "LOCATION block id; scenes reference it by exact match.",
+          "type": "string"
+        },
+        "lighting": {
+          "type": "string"
+        },
+        "line": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "midground": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "palette": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "period": {
+          "type": "string"
+        },
+        "weather": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "period",
+        "geography",
+        "architecture",
+        "features",
+        "foreground",
+        "midground",
+        "background",
+        "lighting",
+        "weather",
+        "palette",
+        "forbidden",
+        "line"
+      ],
+      "type": "object"
+    },
+    "memePolicy": {
+      "enum": [
+        "CONTEXTUAL",
+        "NONE",
+        "ALWAYS"
+      ],
+      "type": "string"
+    },
+    "meta": {
+      "additionalProperties": false,
+      "properties": {
+        "aspect_ratio": {
+          "$ref": "#/$defs/aspectRatio"
+        },
+        "genre": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Null when the GENRE header is absent (unspecified, SPEC §4); no upstream default is inherited."
+        },
+        "language": {
+          "default": "vi-VN",
+          "type": "string"
+        },
+        "meme_max_per_minute": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "meme_policy": {
+          "$ref": "#/$defs/memePolicy"
+        },
+        "project": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Null when the PROJECT header is absent (unspecified, SPEC §4); no upstream default is inherited."
+        },
+        "target_duration": {
+          "description": "AUTO or a positive number of seconds.",
+          "type": "string"
+        },
+        "tone": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Null when the TONE header is absent (unspecified, SPEC §4); no upstream default is inherited."
+        },
+        "visual_style": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Single field for the STYLE / VISUAL_STYLE alias rule (SPEC §4): the value of whichever key is present, VISUAL_STYLE on conflict, null when neither is present. There is no separate 'style' field."
+        }
+      },
+      "required": [
+        "project",
+        "language",
+        "genre",
+        "visual_style",
+        "aspect_ratio",
+        "target_duration",
+        "tone",
+        "meme_policy",
+        "meme_max_per_minute"
+      ],
+      "type": "object"
+    },
+    "outputConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "draft_folder": {
+          "type": "string"
+        },
+        "format": {
+          "const": "MP4"
+        },
+        "fps": {
+          "$ref": "#/$defs/frameRate"
+        },
+        "master": {
+          "const": "MANUAL_ONLY",
+          "description": "A Master is never automatic; any other value is a validation error."
+        },
+        "resolution": {
+          "$ref": "#/$defs/resolution"
+        }
+      },
+      "required": [
+        "resolution",
+        "fps",
+        "format",
+        "draft_folder",
+        "master"
+      ],
+      "type": "object"
+    },
+    "priority": {
+      "enum": [
+        "REQUIRED",
+        "OPTIONAL"
+      ],
+      "type": "string"
+    },
+    "prop": {
+      "additionalProperties": false,
+      "properties": {
+        "all_scenes": {
+          "type": "boolean"
+        },
+        "description": {
+          "type": "string"
+        },
+        "interactions": {
+          "description": "Interaction verbs, ;-separated in the script.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "line": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        },
+        "owner": {
+          "description": "Character name, or NONE / empty for no owner.",
+          "type": "string"
+        },
+        "scenes": {
+          "description": "Scene numbers; empty when all_scenes is true.",
+          "items": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "name",
+        "description",
+        "owner",
+        "scenes",
+        "all_scenes",
+        "interactions",
+        "line"
+      ],
+      "type": "object"
+    },
+    "qaConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "language_gate": {
+          "type": "boolean"
+        },
+        "max_hard_fails": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "min_score": {
+          "maximum": 10,
+          "minimum": 0,
+          "type": "number"
+        },
+        "require_creative_review": {
+          "type": "boolean"
+        },
+        "require_technical": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "min_score",
+        "require_technical",
+        "require_creative_review",
+        "language_gate",
+        "max_hard_fails"
+      ],
+      "type": "object"
+    },
+    "resolution": {
+      "enum": [
+        "1920x1080",
+        "1280x720"
+      ],
+      "type": "string"
+    },
+    "scene": {
+      "additionalProperties": false,
+      "properties": {
+        "actions": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "ambience_none": {
+          "type": "boolean"
+        },
+        "audio_cues": {
+          "items": {
+            "$ref": "#/$defs/audioCue"
+          },
+          "type": "array"
+        },
+        "bgm_none": {
+          "type": "boolean"
+        },
+        "camera": {
+          "description": "Scene default camera description.",
+          "type": "string"
+        },
+        "camera_movement": {
+          "$ref": "#/$defs/cameraMovement"
+        },
+        "duration": {
+          "description": "AUTO or seconds, verbatim.",
+          "type": "string"
+        },
+        "duration_seconds": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "expressions": {
+          "items": {
+            "$ref": "#/$defs/expression"
+          },
+          "type": "array"
+        },
+        "line": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "location_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "LOCATION block id when the scene LOCATION matches an id exactly; otherwise null."
+        },
+        "location_text": {
+          "description": "Inline free-text location when no LOCATION id matches; empty when location_ref is set.",
+          "type": "string"
+        },
+        "meme_none": {
+          "type": "boolean"
+        },
+        "meme_note": {
+          "type": "string"
+        },
+        "mood": {
+          "type": "string"
+        },
+        "number": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "sfx_none": {
+          "description": "True when SFX: NONE was declared; no SFX may be invented.",
+          "type": "boolean"
+        },
+        "shots": {
+          "items": {
+            "$ref": "#/$defs/shot"
+          },
+          "type": "array"
+        },
+        "spoken_lines": {
+          "items": {
+            "$ref": "#/$defs/spokenLine"
+          },
+          "type": "array"
+        },
+        "time_of_day": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "transition": {
+          "$ref": "#/$defs/transition"
+        },
+        "vfx_cues": {
+          "description": "VFX lines, stored with cue_type VFX.",
+          "items": {
+            "$ref": "#/$defs/audioCue"
+          },
+          "type": "array"
+        },
+        "visual": {
+          "type": "string"
+        },
+        "voice_note": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "number",
+        "title",
+        "line",
+        "location_ref",
+        "location_text",
+        "time_of_day",
+        "mood",
+        "duration",
+        "duration_seconds",
+        "visual",
+        "actions",
+        "expressions",
+        "camera",
+        "camera_movement",
+        "voice_note",
+        "meme_note",
+        "transition",
+        "sfx_none",
+        "ambience_none",
+        "bgm_none",
+        "meme_none",
+        "shots",
+        "spoken_lines",
+        "audio_cues",
+        "vfx_cues"
+      ],
+      "type": "object"
+    },
+    "shot": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "type": "string"
+        },
+        "camera": {
+          "type": "string"
+        },
+        "camera_movement": {
+          "$ref": "#/$defs/cameraMovement"
+        },
+        "duration": {
+          "description": "AUTO or seconds, verbatim.",
+          "type": "string"
+        },
+        "duration_seconds": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "expression": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "line": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "spoken_line_ids": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "subject": {
+          "type": "string"
+        },
+        "type": {
+          "$ref": "#/$defs/shotType"
+        },
+        "type_raw": {
+          "description": "TYPE value exactly as written, before normalization.",
+          "type": "string"
+        },
+        "vfx": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "voice_note": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "line",
+        "type",
+        "type_raw",
+        "camera",
+        "camera_movement",
+        "subject",
+        "duration",
+        "duration_seconds",
+        "action",
+        "expression",
+        "vfx",
+        "voice_note",
+        "spoken_line_ids"
+      ],
+      "type": "object"
+    },
+    "shotType": {
+      "description": "Must match camera_planner.SHOT_TYPES exactly. Input is normalized to lower_snake (UPPER_SNAKE accepted).",
+      "enum": [
+        "establishing",
+        "medium",
+        "close_up",
+        "extreme_close_up",
+        "over_the_shoulder",
+        "reaction",
+        "object_insert",
+        "tracking",
+        "shot_reverse_shot"
+      ],
+      "type": "string"
+    },
+    "spokenKind": {
+      "enum": [
+        "narration",
+        "dialogue"
+      ],
+      "type": "string"
+    },
+    "spokenLine": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/spokenKind"
+        },
+        "line": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "line_id": {
+          "description": "Explicit [Lnn] if given, else auto L001, L002... in document order.",
+          "pattern": "^L\\d+$",
+          "type": "string"
+        },
+        "scene_number": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "shot_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Containing shot id, or null when the line is directly in the scene."
+        },
+        "speaker": {
+          "description": "Canonical declared character name, or 'Narrator' for narration.",
+          "type": "string"
+        },
+        "text": {
+          "description": "Spoken text, never rewritten.",
+          "type": "string"
+        },
+        "voice_note": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "line_id",
+        "speaker",
+        "text",
+        "kind",
+        "voice_note",
+        "scene_number",
+        "shot_id",
+        "line"
+      ],
+      "type": "object"
+    },
+    "transition": {
+      "enum": [
+        "CUT",
+        "DISSOLVE",
+        "FADE",
+        "FADE_TO_BLACK",
+        "MATCH_CUT",
+        "WIPE"
+      ],
+      "type": "string"
+    },
+    "unsupportedField": {
+      "additionalProperties": false,
+      "properties": {
+        "context": {
+          "description": "Where the field appeared: document, a block name, character:<name>, location:<id>, prop:<name>, scene:<n>, or shot:<id>.",
+          "type": "string"
+        },
+        "key": {
+          "type": "string"
+        },
+        "line": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "value",
+        "line",
+        "context"
+      ],
+      "type": "object"
+    },
+    "validationIssue": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "description": "SPEC §8.2 error code (V1E001–V1E024). Parsers emit exactly these codes; V1E022 is timeline-stage only and never appears in parse output.",
+          "pattern": "^V1E0\\d\\d$",
+          "type": "string"
+        },
+        "line": {
+          "description": "1-based source line; 0 means a document-level issue.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "line",
+        "code",
+        "message"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://ai-clip-studio.local/schemas/studio_script_v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Machine-readable schema for the to_dict() output of ai_clip_studio.studio_script_v1. Describes a VALID document: when is_valid is false, individual fields (e.g. head_ratio, shot type) may fall outside the enums/ranges below, and validation_errors explains why. Consumers should check is_valid first. Head ratio is locked to 0.33-0.35 (default 0.34); the upstream 0.42 default is never valid here.",
+  "properties": {
+    "characters": {
+      "items": {
+        "$ref": "#/$defs/character"
+      },
+      "type": "array"
+    },
+    "constraints": {
+      "description": "GLOBAL_NEGATIVE_CONSTRAINTS lines, in document order.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "end_card": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/endCard"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Null when the document has no END_CARD block."
+    },
+    "format": {
+      "const": "studio_script_v1"
+    },
+    "global_audio": {
+      "$ref": "#/$defs/globalAudio"
+    },
+    "is_valid": {
+      "type": "boolean"
+    },
+    "locations": {
+      "items": {
+        "$ref": "#/$defs/location"
+      },
+      "type": "array"
+    },
+    "meta": {
+      "$ref": "#/$defs/meta"
+    },
+    "output": {
+      "$ref": "#/$defs/outputConfig"
+    },
+    "props": {
+      "items": {
+        "$ref": "#/$defs/prop"
+      },
+      "type": "array"
+    },
+    "qa": {
+      "$ref": "#/$defs/qaConfig"
+    },
+    "scenes": {
+      "items": {
+        "$ref": "#/$defs/scene"
+      },
+      "type": "array"
+    },
+    "snapshot_hash": {
+      "description": "SHA-256 hex of the exact raw input text (UTF-8).",
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "unsupported_fields": {
+      "items": {
+        "$ref": "#/$defs/unsupportedField"
+      },
+      "type": "array"
+    },
+    "validation_errors": {
+      "items": {
+        "$ref": "#/$defs/validationIssue"
+      },
+      "type": "array"
+    },
+    "warnings": {
+      "items": {
+        "$ref": "#/$defs/validationIssue"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "format",
+    "snapshot_hash",
+    "is_valid",
+    "meta",
+    "characters",
+    "locations",
+    "props",
+    "scenes",
+    "global_audio",
+    "constraints",
+    "qa",
+    "output",
+    "end_card",
+    "unsupported_fields",
+    "validation_errors",
+    "warnings"
+  ],
+  "title": "STUDIO SCRIPT V1 document",
+  "type": "object"
+}

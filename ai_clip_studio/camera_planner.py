@@ -527,7 +527,7 @@ class CameraPlanner:
 
     @staticmethod
     def safe_frame(shot, focus_xy, subjects, others=None, frame_w=1920,
-                   frame_h=1080):
+                   frame_h=1080, max_scale=None):
         """Return (safe_shot, safe_focus, notes): a shot + focus that
         cannot repeat the v4/v5 framing defects.
 
@@ -566,6 +566,15 @@ class CameraPlanner:
         where safe_shot is a COPY of ``shot`` with camera.scale set to
         the applied scale and a "safe_frame" note; the input shot is
         untouched.
+
+        ``max_scale`` (F2, TEST C Phase 2): an optional cap on the
+        applied scale. A caller framing FULL BODIES passes 1.0 so a
+        pose-dependent subject box can never zoom a full-body shot
+        up mid-shot (a kneel shrinks the box and the ladder would
+        otherwise climb to 1.6x while the character kneels,
+        inflating the head to 33% of the frame). None (default)
+        keeps the old behaviour: the ladder starts at the planned
+        scale.
         """
         others = list(others or [])
         planned_scale = float((shot or {}).get("camera", {}).get("scale")
@@ -573,6 +582,9 @@ class CameraPlanner:
                                   (shot or {}).get("shot_type", "medium"),
                                   1.6))
         planned_scale = max(1.0, planned_scale)
+        if max_scale is not None:
+            planned_scale = min(planned_scale,
+                                max(1.0, float(max_scale)))
         ladder = [s for s in (3.4, 2.6, 1.6, 1.0) if s <= planned_scale + 1e-9]
         if not ladder:
             ladder = [1.0]
@@ -667,9 +679,9 @@ def apply_camera(img, shot, focus_xy=None):
 
 
 def safe_frame(shot, focus_xy, subjects, others=None, frame_w=1920,
-               frame_h=1080):
+               frame_h=1080, max_scale=None):
     return CameraPlanner.safe_frame(shot, focus_xy, subjects, others,
-                                    frame_w, frame_h)
+                                    frame_w, frame_h, max_scale)
 
 
 def apply_camera_safe(img, shot, focus_xy=None, subjects=None,

@@ -33,6 +33,8 @@ import urllib.request
 
 from .pipeline import segment_script
 from .planner_fallback import deterministic_planner
+from .studio_script_v1 import detect_format
+from .studio_script_v1_adapter import resolve_v1_plan
 from .vi_script_parser import is_structured_vi_script, parse_vi_script
 
 GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models"
@@ -214,10 +216,19 @@ def resolve_plan(script_text: str, *, api_key: str | None = None) -> tuple[dict,
     """Plan a script. Returns (package, planner_label, planner_detail).
 
     planner_label is "gemini" only when a real Gemini call produced the
-    enrichment; otherwise "fallback" with the reason. The package always
-    has the deterministic planner's shape, so the pipeline never breaks
-    when Gemini is unavailable.
+    enrichment; "v1" for STUDIO SCRIPT V1 scripts (deterministic V1
+    parser + adapter, no Gemini enrichment); otherwise "fallback"
+    with the reason. The package always has the deterministic
+    planner's shape, so the pipeline never breaks when Gemini is
+    unavailable.
     """
+    # STUDIO SCRIPT V1 route (Phase B): one pipeline, two parsers.
+    # V1 scripts are parsed by the V1 parser and mapped by the
+    # adapter; the free-form path below is untouched. The adapter is
+    # deterministic (the server plans at least twice per production)
+    # and raises V1AdapterError on invalid documents.
+    if detect_format(script_text) == "studio_v1":
+        return resolve_v1_plan(script_text)
     if is_structured_vi_script(script_text):
         parsed = parse_vi_script(script_text)
         parsed_lines = [{"speaker": l.speaker, "kind": l.kind, "text": l.text}

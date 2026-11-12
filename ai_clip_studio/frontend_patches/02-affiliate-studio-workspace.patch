@@ -1,0 +1,401 @@
+diff --git a/sites/ai-clip-studio/app/affiliate/page.tsx b/sites/ai-clip-studio/app/affiliate/page.tsx
+new file mode 100644
+index 0000000..8340a01
+--- /dev/null
++++ b/sites/ai-clip-studio/app/affiliate/page.tsx
+@@ -0,0 +1,315 @@
++"use client";
++import { useCallback, useEffect, useState } from "react";
++import Link from "next/link";
++
++// AI Affiliate Studio — Shopee Edition (Next.js workspace).
++//
++// Talks to the :8788 affiliate API through the /api/affiliate/*
++// proxy routes in this app. Every button calls a real endpoint and
++// shows the real response; stage status comes from polling the real
++// project record — progress is never simulated.
++//
++// Rules enforced by the backend (not by this page): export is
++// refused when the source authorization is UNKNOWN or the
++// commercial-rights confirmation is missing; a source URL is
++// recorded as provenance only and is never fetched; product facts
++// come only from user input + verified analysis.
++
++type Json = Record<string, unknown>;
++
++async function post(path: string, body: unknown): Promise<Json> {
++  const r = await fetch(path, {
++    method: "POST",
++    headers: { "Content-Type": "application/json" },
++    body: JSON.stringify(body),
++  });
++  let data: Json = {};
++  try {
++    data = (await r.json()) as Json;
++  } catch {
++    data = { error: `HTTP ${r.status}` };
++  }
++  return { _status: r.status, ...data };
++}
++
++async function get(path: string): Promise<Json> {
++  const r = await fetch(path);
++  return (await r.json()) as Json;
++}
++
++function fileToBase64(file: File): Promise<string> {
++  return new Promise((res, rej) => {
++    const fr = new FileReader();
++    fr.onload = () => res(String(fr.result).split(",")[1]);
++    fr.onerror = rej;
++    fr.readAsDataURL(file);
++  });
++}
++
++const inputCls =
++  "rounded-lg border-2 border-[#172033] bg-white px-2 py-1 text-sm";
++const btnCls =
++  "rounded-lg border-2 border-[#172033] bg-[#ffd34e] px-3 py-1.5 text-sm font-black shadow-[3px_3px_0_#172033] disabled:opacity-50";
++const cardCls =
++  "rounded-2xl border-[3px] border-[#172033] bg-white p-4 shadow-[4px_4px_0_#172033]";
++
++export default function AffiliateStudioPage() {
++  const [projectId, setProjectId] = useState<string | null>(null);
++  const [project, setProject] = useState<Json | null>(null);
++  const [out, setOut] = useState<Json | null>(null);
++  const [presets, setPresets] = useState<Json>({});
++  const [busy, setBusy] = useState(false);
++
++  const [projectName, setProjectName] = useState("");
++  const [sourceUrl, setSourceUrl] = useState("");
++  const [productName, setProductName] = useState("");
++  const [authType, setAuthType] = useState("USER_OWNED");
++  const [rightsConfirmed, setRightsConfirmed] = useState(false);
++  const [rightsNote, setRightsNote] = useState("");
++  const [videoFile, setVideoFile] = useState<File | null>(null);
++
++  const [transMode, setTransMode] = useState("NATURAL_LOCALIZATION");
++  const [transStyle, setTransStyle] = useState("neutral");
++  const [speakerRanges, setSpeakerRanges] = useState("");
++  const [scriptVariant, setScriptVariant] = useState("natural_review");
++  const [visibleDemo, setVisibleDemo] = useState("");
++  const [voicePreset, setVoicePreset] = useState("female_review");
++  const [speakerVoices, setSpeakerVoices] = useState("");
++  const [approver, setApprover] = useState("");
++
++  const refreshProject = useCallback(async () => {
++    if (!projectId) return;
++    try {
++      setProject(await get(`/api/affiliate/projects/${projectId}`));
++    } catch {
++      /* backend down: the next poll retries */
++    }
++  }, [projectId]);
++
++  useEffect(() => {
++    get("/api/affiliate/voices")
++      .then((d) => setPresets((d.presets as Json) || {}))
++      .catch(() => undefined);
++  }, []);
++
++  useEffect(() => {
++    if (!projectId) return;
++    refreshProject();
++    const t = setInterval(refreshProject, 5000);
++    return () => clearInterval(t);
++  }, [projectId, refreshProject]);
++
++  const run = async (fn: () => Promise<Json>) => {
++    setBusy(true);
++    try {
++      setOut(await fn());
++    } finally {
++      setBusy(false);
++      refreshProject();
++    }
++  };
++
++  const createProject = async () => {
++    const body: Json = {
++      project_name: projectName,
++      source_url: sourceUrl,
++      product: { product_name: productName || "Sản phẩm chưa đặt tên" },
++      authorization: {
++        authorization_type: authType,
++        commercial_rights_confirmed: rightsConfirmed,
++        rights_note: rightsNote,
++      },
++    };
++    if (videoFile) {
++      body.source = {
++        file_name: videoFile.name,
++        data_base64: await fileToBase64(videoFile),
++      };
++    }
++    await run(async () => {
++      const data = await post("/api/affiliate/projects", body);
++      if (data.project_id) setProjectId(String(data.project_id));
++      return data;
++    });
++  };
++
++  const assignSpeakers = () =>
++    run(async () => {
++      const ranges = speakerRanges
++        .split("\n")
++        .map((s) => s.trim())
++        .filter(Boolean)
++        .map((line) => {
++          const p = line.split(",").map((x) => x.trim());
++          return { start: Number(p[0]), end: Number(p[1]), speaker_id: p[2] };
++        });
++      return post(`/api/affiliate/projects/${projectId}/speakers`, { ranges });
++    });
++
++  const runVoice = () =>
++    run(async () => {
++      let map: Json = {};
++      if (speakerVoices.trim()) {
++        try {
++          map = JSON.parse(speakerVoices) as Json;
++        } catch {
++          return { error: "JSON giọng theo nhân vật không hợp lệ." };
++        }
++      }
++      return post(`/api/affiliate/projects/${projectId}/voice`, {
++        preset: voicePreset,
++        speaker_voices: map,
++      });
++    });
++
++  const stages = (project?.stages as { stage: string; status: string; detail?: string }[]) || [];
++
++  return (
++    <main className="min-h-screen bg-[#f3f0e8] text-[#172033]">
++      <header className="border-b-[3px] border-[#172033] bg-[#ffd34e]">
++        <div className="mx-auto flex max-w-[1200px] items-center justify-between px-5 py-4">
++          <div>
++            <h1 className="text-xl font-black tracking-[-.04em]">
++              🛒 AI AFFILIATE STUDIO · SHOPEE EDITION
++            </h1>
++            <p className="text-xs font-bold opacity-80">
++              Video sản phẩm được phép dùng → dịch → lồng tiếng Việt → phụ đề → 9:16 TikTok/Reels
++            </p>
++          </div>
++          <nav className="flex gap-2 text-xs font-black">
++            <Link href="/" className="rounded-full border-2 border-[#172033] bg-white px-3 py-1.5">
++              Story Studio
++            </Link>
++            <span className="rounded-full border-2 border-[#172033] bg-[#172033] px-3 py-1.5 text-white">
++              Affiliate Studio
++            </span>
++          </nav>
++        </div>
++      </header>
++
++      <div className="mx-auto max-w-[1200px] space-y-5 p-5">
++        <p className="rounded-xl border-2 border-[#172033] bg-[#ffe9a8] p-3 text-sm font-bold">
++          Lưu ý bản quyền: chỉ xử lý video bạn sở hữu hoặc được phép dùng cho mục đích
++          thương mại. Mirror, dịch chữ và lồng tiếng không biến video của người khác
++          thành nội dung nguyên bản, và không đảm bảo đủ điều kiện kiếm tiền.
++        </p>
++
++        <section className={cardCls}>
++          <h2 className="mb-2 font-black">1. Tạo dự án + tải video lên</h2>
++          <div className="flex flex-wrap gap-2">
++            <input className={inputCls} placeholder="Tên dự án" value={projectName} onChange={(e) => setProjectName(e.target.value)} />
++            <input className={inputCls} placeholder="Tên sản phẩm (*)" value={productName} onChange={(e) => setProductName(e.target.value)} />
++            <input className={inputCls} size={45} placeholder="Link nguồn (chỉ ghi lại, không tự tải)" value={sourceUrl} onChange={(e) => setSourceUrl(e.target.value)} />
++            <input type="file" accept=".mp4,.mov,.mkv,.webm" onChange={(e) => setVideoFile(e.target.files?.[0] || null)} />
++          </div>
++          <div className="mt-2 flex flex-wrap items-center gap-2">
++            <select className={inputCls} value={authType} onChange={(e) => setAuthType(e.target.value)}>
++              <option value="USER_OWNED">USER_OWNED — video của tôi</option>
++              <option value="LICENSED">LICENSED — có giấy phép</option>
++              <option value="SELLER_AUTHORIZED">SELLER_AUTHORIZED — người bán cho phép</option>
++              <option value="UNKNOWN">UNKNOWN — không rõ</option>
++            </select>
++            <label className="text-sm font-bold">
++              <input type="checkbox" checked={rightsConfirmed} onChange={(e) => setRightsConfirmed(e.target.checked)} /> Tôi xác nhận có quyền dùng video này cho mục đích thương mại
++            </label>
++            <input className={inputCls} size={40} placeholder="Ghi chú quyền" value={rightsNote} onChange={(e) => setRightsNote(e.target.value)} />
++            <button className={btnCls} disabled={busy} onClick={createProject}>Tạo dự án</button>
++          </div>
++          {projectId && <p className="mt-2 text-sm">Dự án: <b>{projectId}</b> — trạng thái tự cập nhật mỗi 5 giây.</p>}
++        </section>
++
++        {projectId && (
++          <>
++            <section className={cardCls}>
++              <h2 className="mb-2 font-black">2. Trạng thái các bước (thật, từ server)</h2>
++              {stages.length === 0 && <p className="text-sm">Chưa có bước nào chạy.</p>}
++              <ul className="text-sm">
++                {stages.map((s) => (
++                  <li key={s.stage}><b>{s.stage}</b>: {s.status}{s.detail ? ` — ${s.detail}` : ""}</li>
++                ))}
++              </ul>
++              <div className="mt-2 flex flex-wrap gap-2">
++                <button className={btnCls} disabled={busy} onClick={() => run(() => post(`/api/affiliate/projects/${projectId}/transcribe`, {}))}>🎤 Nhận diện giọng nói tiếng Trung</button>
++                <button className={btnCls} disabled={busy} onClick={refreshProject}>🔄 Xem trạng thái</button>
++              </div>
++            </section>
++
++            <section className={cardCls}>
++              <h2 className="mb-2 font-black">3. Người nói + dịch</h2>
++              <label className="text-sm font-bold">Gán người nói (mỗi dòng: bắt đầu-giây, kết thúc-giây, tên — VD: 0, 8.5, NGUOI_1):</label>
++              <textarea className={`${inputCls} mt-1 w-full`} rows={3} value={speakerRanges} onChange={(e) => setSpeakerRanges(e.target.value)} />
++              <button className={`${btnCls} mt-1`} disabled={busy} onClick={assignSpeakers}>Gán người nói</button>
++              <div className="mt-3 flex flex-wrap gap-2">
++                <select className={inputCls} value={transMode} onChange={(e) => setTransMode(e.target.value)}>
++                  <option value="NATURAL_LOCALIZATION">Bản địa hóa tự nhiên</option>
++                  <option value="DIRECT_TRANSLATION">Dịch trực tiếp</option>
++                  <option value="AFFILIATE_COPYWRITING">Viết lại kiểu affiliate</option>
++                </select>
++                <select className={inputCls} value={transStyle} onChange={(e) => setTransStyle(e.target.value)}>
++                  <option value="neutral">Giọng văn: trung tính</option>
++                  <option value="humorous_viral_review">Giọng văn: hài hước, viral, kiểu review (bám sát nghĩa gốc)</option>
++                </select>
++                <button className={btnCls} disabled={busy} onClick={() => run(() => post(`/api/affiliate/projects/${projectId}/translate`, { mode: transMode, style: transStyle, visible_demonstration: visibleDemo }))}>Dịch</button>
++              </div>
++            </section>
++
++            <section className={cardCls}>
++              <h2 className="mb-2 font-black">4. Kịch bản</h2>
++              <div className="flex flex-wrap gap-2">
++                <select className={inputCls} value={scriptVariant} onChange={(e) => setScriptVariant(e.target.value)}>
++                  <option value="natural_review">Review tự nhiên</option>
++                  <option value="demonstration">Trình diễn sản phẩm</option>
++                  <option value="problem_solution">Vấn đề — giải pháp</option>
++                </select>
++                <input className={inputCls} size={50} placeholder="Mô tả những gì video cho thấy" value={visibleDemo} onChange={(e) => setVisibleDemo(e.target.value)} />
++                <button className={btnCls} disabled={busy} onClick={() => run(() => post(`/api/affiliate/projects/${projectId}/script`, { variant: scriptVariant, target_seconds: 30, visible_demonstration: visibleDemo }))}>Viết kịch bản</button>
++                <button className={btnCls} disabled={busy} onClick={() => run(() => post(`/api/affiliate/projects/${projectId}/script`, { source: "translation" }))}>🎬 Kịch bản lồng tiếng từ bản dịch</button>
++              </div>
++              <div className="mt-2 flex gap-2">
++                <input className={inputCls} placeholder="Người duyệt" value={approver} onChange={(e) => setApprover(e.target.value)} />
++                <button className={btnCls} disabled={busy} onClick={() => run(() => post(`/api/affiliate/projects/${projectId}/script/approve`, { approved_by: approver || "user" }))}>✅ Duyệt kịch bản</button>
++              </div>
++            </section>
++
++            <section className={cardCls}>
++              <h2 className="mb-2 font-black">5. Lồng tiếng + phụ đề + âm thanh</h2>
++              <div className="flex flex-wrap items-center gap-2">
++                <select className={inputCls} value={voicePreset} onChange={(e) => setVoicePreset(e.target.value)}>
++                  {Object.entries(presets).map(([k, v]) => (
++                    <option key={k} value={k}>{String((v as Json).label_vi || k)}</option>
++                  ))}
++                  {Object.keys(presets).length === 0 && <option value="female_review">female_review</option>}
++                </select>
++                <button className={btnCls} disabled={busy} onClick={() => run(() => post(`/api/affiliate/projects/${projectId}/voice/preview`, { preset: voicePreset }))}>🔊 Nghe thử giọng</button>
++                <button className={btnCls} disabled={busy} onClick={runVoice}>🎙️ Lồng tiếng toàn bộ kịch bản</button>
++              </div>
++              <label className="mt-2 block text-sm font-bold">Giọng theo từng nhân vật (JSON — VD: {`{"NGUOI_1": "female_review", "NGUOI_2": "male_review"}`}):</label>
++              <textarea className={`${inputCls} mt-1 w-full`} rows={2} value={speakerVoices} onChange={(e) => setSpeakerVoices(e.target.value)} />
++              <div className="mt-2 flex flex-wrap gap-2">
++                <button className={btnCls} disabled={busy} onClick={() => run(() => post(`/api/affiliate/projects/${projectId}/subtitles`, {}))}>Phụ đề ASS + SRT</button>
++                <button className={btnCls} disabled={busy} onClick={() => run(() => post(`/api/affiliate/projects/${projectId}/mix`, {}))}>Trộn âm thanh</button>
++                <button className={btnCls} disabled={busy} onClick={() => run(() => post(`/api/affiliate/projects/${projectId}/marketing`, {}))}>Gói tiếp thị</button>
++              </div>
++            </section>
++
++            <section className={cardCls}>
++              <h2 className="mb-2 font-black">6. QA + xuất bản</h2>
++              <div className="flex flex-wrap gap-2">
++                <button className={btnCls} disabled={busy} onClick={() => run(() => post(`/api/affiliate/projects/${projectId}/qa`, {}))}>Chạy QA</button>
++                <button className={btnCls} disabled={busy} onClick={() => run(() => post(`/api/affiliate/projects/${projectId}/export`, {}))}>Xuất bản 9:16</button>
++              </div>
++              <p className="mt-1 text-sm">Xuất bản bị từ chối (403) khi quyền chưa xác nhận hoặc kịch bản chưa duyệt. Render/xuất file thật được nối ở giai đoạn tích hợp — cho đến lúc đó endpoint trả 501 trung thực.</p>
++            </section>
++          </>
++        )}
++
++        {out && (
++          <section className={cardCls}>
++            <h2 className="mb-2 font-black">Kết quả</h2>
++            <pre className="max-h-96 overflow-auto text-xs">{JSON.stringify(out, null, 2)}</pre>
++          </section>
++        )}
++      </div>
++    </main>
++  );
++}
+diff --git a/sites/ai-clip-studio/app/api/affiliate/[...path]/route.ts b/sites/ai-clip-studio/app/api/affiliate/[...path]/route.ts
+new file mode 100644
+index 0000000..51125be
+--- /dev/null
++++ b/sites/ai-clip-studio/app/api/affiliate/[...path]/route.ts
+@@ -0,0 +1,48 @@
++import { NextResponse } from "next/server";
++
++// Catch-all proxy to the Affiliate Studio API on the unified pipeline
++// server (ai_clip_studio, :8788): /api/affiliate/* -> :8788/api/affiliate/*.
++// The backend owns the schema, gates, and stages; this route only
++// forwards status + body verbatim (including 403 gate refusals and
++// the honest 501 for the not-yet-wired export stage). Never returns
++// SUCCESS before the backend actually completes the work.
++const backend = () =>
++  process.env.PRODUCTION_BACKEND_URL || "http://127.0.0.1:8788";
++
++async function proxy(request: Request, path: string[]) {
++  const target = `${backend()}/api/affiliate/${path.join("/")}`;
++  try {
++    const init: RequestInit = { method: request.method };
++    if (request.method !== "GET" && request.method !== "HEAD") {
++      init.headers = { "content-type": "application/json" };
++      init.body = await request.text();
++    }
++    const r = await fetch(target, init);
++    return new NextResponse(await r.text(), {
++      status: r.status,
++      headers: { "content-type": "application/json" },
++    });
++  } catch {
++    return NextResponse.json(
++      {
++        error:
++          "Affiliate backend chưa chạy (8788). Chạy: python -m ai_clip_studio.server",
++      },
++      { status: 503 },
++    );
++  }
++}
++
++export async function GET(
++  request: Request,
++  { params }: { params: Promise<{ path: string[] }> },
++) {
++  return proxy(request, (await params).path);
++}
++
++export async function POST(
++  request: Request,
++  { params }: { params: Promise<{ path: string[] }> },
++) {
++  return proxy(request, (await params).path);
++}
+diff --git a/sites/ai-clip-studio/app/page.tsx b/sites/ai-clip-studio/app/page.tsx
+index 2d33e78..c075e25 100644
+--- a/sites/ai-clip-studio/app/page.tsx
++++ b/sites/ai-clip-studio/app/page.tsx
+@@ -1,5 +1,6 @@
+ "use client";
+ import { useMemo, useState } from "react";
++import Link from "next/link";
+ import { PreflightPanel } from "../components/PreflightPanel";
+ import {
+   Clapperboard,
+@@ -630,6 +631,14 @@ export default function Home() {
+               </p>
+             </div>
+           </div>
++          <nav className="hidden items-center gap-2 text-xs font-black md:flex" aria-label="Chế độ Studio">
++            <span className="rounded-full border-2 border-[#172033] bg-[#172033] px-3 py-1.5 text-white">
++              Story Studio
++            </span>
++            <Link href="/affiliate" className="rounded-full border-2 border-[#172033] bg-white px-3 py-1.5">
++              Affiliate Studio
++            </Link>
++          </nav>
+           <div className="hidden items-center gap-2 rounded-full border-2 border-[#172033] bg-white px-4 py-2 text-xs font-black md:flex">
+             <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-[#47bd75]" />{" "}
+             PREMIUM STICKMAN CINEMATIC — V5

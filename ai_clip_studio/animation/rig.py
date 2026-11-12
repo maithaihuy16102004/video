@@ -148,14 +148,28 @@ GAIT_DEFAULT = {
 # Run gait: longer stride, real flight phase (overlap < 0), more lean,
 # bigger arm pump. A run is a SHORT shot, not a sped-up walk cycle
 # (the reference narrates runs; it does not show a run cycle).
+# F10 (TEST C Phase 2, 2026-11-12): the v9 run still READ as a walk
+# in still frames (Phase 1: torso upright, walking stride, no clear
+# forward lean). The run must read as a run in a single frame: lean
+# 0.22 -> 0.40 rad (~23 deg, the trunk clearly ahead of the hips),
+# arm pump 0.45 -> 0.60, flight lift 0.03 -> 0.05 and swing lift
+# 0.06 -> 0.09 (the swing knee tucks visibly). The overlap stays
+# -0.30 (the flight phase already exists; the problem was the pose,
+# not the airborne time). The stride stays 0.28: the run's stand
+# split tracks step/2, and a longer stride makes the settle sprint
+# the feet (stride 0.29 -> settle 32.3 px/frame, 0.30 -> 37.0, over
+# the 30 px/frame smoothness bound; 0.28 -> 27.5). Readability comes
+# from the lean, the arm drive and the flight/tuck, not from a
+# longer stride. Short 2-5 s inserts only -- the reference has no
+# sustained run cycle.
 GAIT_RUN = {
     "stride_frac": 0.28,
-    "arm_amp": 0.45,
-    "lean": 0.22,
+    "arm_amp": 0.60,
+    "lean": 0.40,
     "bob_frac": 0.02,
-    "lift_frac": 0.06,
+    "lift_frac": 0.09,
     "overlap": -0.30,
-    "flight_lift_frac": 0.03,
+    "flight_lift_frac": 0.05,
 }
 
 

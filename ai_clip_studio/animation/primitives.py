@@ -1010,15 +1010,43 @@ def kneel_pick(char, target, duration, ground_y, hand="r"):
     descend and the rise -- the v6 kneel lerped them along the ground,
     a hidden slide the v6 audit never measured.
 
+    F1 (TEST C Phase 2, 2026-11-12): the v7 kneel still read as a knot
+    in the rendered video (Phase 1 measurement: lean 52.7 deg, shins
+    42.5 px apart, front knee 75.9 deg, head top 50.9% of standing
+    height). The fix steps INTO the kneel: the root shifts forward
+    toward the prop during the descend (an adaptive lunge step, sized
+    from the prop's forward distance so the shoulder ends one short
+    reach from the prop), the lean drops to 0.82 rad (~47 deg), and
+    the front foot plants further ahead (0.72 * leg instead of 0.55),
+    opening the front knee to ~101 deg and separating the shins to
+    ~87 px. The root returns to its start during the rise, so the
+    next segment starts without an offset. Measured on the real rig
+    in both stagings (prop 83 px and 220 px ahead): hand exactly on
+    the prop, back knee 1.2 px above the ground, head top 56.2% of
+    standing height.
+
+    The back knee stays folded at ~33 deg -- that is NOT an unfixed
+    bug, it is the geometry of a kneel: the back shin lies flat on
+    the ground, so the knee angle is set by the hip height and the
+    foot tuck, and the knee-on-ground + ground-prop-reach constraints
+    pin both. A grid search over (lean 30-45 deg, hip 60-160 px, tuck
+    0.05-0.50) found ZERO combinations with lean <= 40 deg AND back
+    knee >= 55 deg AND the knee on the ground AND the hand on the
+    prop; the best achievable back-knee angle under those constraints
+    is ~40 deg, and only with the arm overstretched 11.6 px past its
+    clamp. A 55 deg back knee needs a longer arm or a raised prop,
+    not a different kneel. Readability comes from the shin separation
+    and the lower lean, not from unfolding the kneeling knee.
+
     A kneel is geometrically honest for this rig: the hip drops to a
     deep lunge-kneel, the BACK knee lands ON the ground (back foot
     tucks just behind the hip, shin flat on the ground), the FRONT
-    foot plants ahead, and the torso leans ~53 deg -- so the shoulder
+    foot plants ahead, and the torso leans ~47 deg -- so the shoulder
     is low enough for the hand to reach the prop without folding the
     body in half. (A textbook kneel -- hip one thigh-length up, knee
     under the hip -- still needs a ~83 deg lean to reach a ground prop
     with this rig's 0.283*H arm; the deep lunge-kneel is what actually
-    reaches at 53 deg. The numbers are verified by the IK clamp in the
+    reaches at 47 deg. The numbers are verified by the IK clamp in the
     tests, not assumed.) The reaching hand is on the same side as the
     planted front foot (the stable side); the kneeling knee is the
     opposite leg.
@@ -1048,6 +1076,21 @@ def kneel_pick(char, target, duration, ground_y, hand="r"):
             _start["facing"] = char.pose.get("facing", 1)
         f = _start["facing"]
         rx = _start["root_x"]
+        # F1: adaptive forward step into the kneel. The shoulder must
+        # end within arm's reach of the prop; at the lower 0.82 lean
+        # a fixed root cannot reach a prop 220 px ahead (the product
+        # staging), so the root steps forward by the excess forward
+        # distance, capped at 0.20H. A close prop (the test staging,
+        # 83 px) needs no step. The step follows the depth profile:
+        # it grows during the descend and returns during the rise, so
+        # the character ends standing where they started.
+        if "shift" not in _start:
+            _fwd = f * (target[0] - rx)
+            _shoulder_fwd = math.sin(0.82) * char.torso
+            _start["shift"] = max(
+                0.0, min(0.20 * float(char.H),
+                         _fwd - (_shoulder_fwd + _s(char, 25))))
+        shift = _start["shift"]
         # depth profile: 0 = standing, 1 = fully kneeled
         if u < 0.15:
             d = 0.15 * smoothstep(u / 0.15)
@@ -1057,13 +1100,15 @@ def kneel_pick(char, target, duration, ground_y, hand="r"):
             d = 1.0
         else:
             d = 1.0 - smoothstep((u - 0.65) / 0.35)
+        root_x = rx + f * shift * d
+        final_rx = rx + f * shift
         # hip: standing (leg * 0.93 above ground) -> deep lunge-kneel
         # (v7: 0.55 * thigh-length above ground, so the back knee
         # touches down without sinking below the ground plane AND the
         # head stays ~42% of standing height -- the rig-geometry cap
         # for the 0.283*H arm; see the docstring).
         root_y = ground_y - (leg * 0.93 - (leg * 0.93 - u_leg * 0.55) * d)
-        lean = 0.92 * d  # ~53 deg at full kneel (v6: 1.10 rad / 63 deg)
+        lean = 0.82 * d  # F1: ~47 deg at full kneel (v7: 0.92 / 53 deg)
         # feet: front foot (same side as the reaching hand) plants
         # ahead; back foot (opposite side) tucks just behind the hip
         # so its knee lands on the ground forward of the hip (deep
@@ -1073,7 +1118,13 @@ def kneel_pick(char, target, duration, ground_y, hand="r"):
         # the next walk starts without a blend slide.
         front_side = "r" if hand == "r" else "l"
         back_side = "l" if hand == "r" else "r"
-        front_tx = rx + f * 0.55 * leg
+        # F1: the front foot plants at 0.72 * leg ahead of the FINAL
+        # (shifted) root (v7: 0.55). The longer lunge opens the front
+        # knee to ~101 deg and separates the shins to ~87 px, so the
+        # two legs read as two legs instead of one knot. Both kneel
+        # targets are relative to the final root, so the hold pose is
+        # consistent with the shifted root.
+        front_tx = final_rx + f * 0.72 * leg
         # v7: the back foot tucks only 0.16*l_leg behind the hip (v6:
         # 0.30). The back knee's ground position is COUPLED to the hip
         # height: at the v7 hip (0.55*u_leg) the 0.30 tuck put the knee
@@ -1081,7 +1132,7 @@ def kneel_pick(char, target, duration, ground_y, hand="r"):
         # v6 hip 0.72*u_leg needed the wider tuck). 0.16 lands the
         # knee ~1 px above the ground; 0.165 is exactly on it. The
         # value is verified by the IK-clamp test, not assumed.
-        back_tx = rx - f * l_leg * 0.16
+        back_tx = final_rx - f * l_leg * 0.16
         stand_tx = {front_side: rx + f * step / 2.0,
                     back_side: rx - f * step / 2.0}
         # v7: feet travel on LIFT arcs (0.05H), never along the ground.
@@ -1117,7 +1168,7 @@ def kneel_pick(char, target, duration, ground_y, hand="r"):
                  ground_y - leg * 0.93 - _s(char, 60))
         hx = lerp(lerp(sx, tx, reach), waist[0], rise)
         hy = lerp(lerp(sy, ty, reach), waist[1], rise)
-        char.set_pose(root_y=root_y, torso_lean=lean)
+        char.set_pose(root_x=root_x, root_y=root_y, torso_lean=lean)
         # head tracks the prop -- CAPPED at 0.25 rad (v7): the default
         # 0.6 clamp let the head point down-forward and dropped it to
         # 35% of standing height; 0.25 keeps the head ~42% up.

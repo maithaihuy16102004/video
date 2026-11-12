@@ -1,0 +1,97 @@
+diff --git a/sites/ai-clip-studio/app/affiliate/page.tsx b/sites/ai-clip-studio/app/affiliate/page.tsx
+index 8340a01..04ba875 100644
+--- a/sites/ai-clip-studio/app/affiliate/page.tsx
++++ b/sites/ai-clip-studio/app/affiliate/page.tsx
+@@ -11,9 +11,11 @@ import Link from "next/link";
+ //
+ // Rules enforced by the backend (not by this page): export is
+ // refused when the source authorization is UNKNOWN or the
+-// commercial-rights confirmation is missing; a source URL is
+-// recorded as provenance only and is never fetched; product facts
+-// come only from user input + verified analysis.
++// commercial-rights confirmation is missing; a pasted Douyin link
++// is fetched only through the gated link-fetch endpoint (the gate
++// runs before any download, and a blocked fetch is reported
++// honestly with the file-upload fallback — never a fake success);
++// product facts come only from user input + verified analysis.
+ 
+ type Json = Record<string, unknown>;
+ 
+@@ -62,6 +64,7 @@ export default function AffiliateStudioPage() {
+ 
+   const [projectName, setProjectName] = useState("");
+   const [sourceUrl, setSourceUrl] = useState("");
++  const [linkUrl, setLinkUrl] = useState("");
+   const [productName, setProductName] = useState("");
+   const [authType, setAuthType] = useState("USER_OWNED");
+   const [rightsConfirmed, setRightsConfirmed] = useState(false);
+@@ -133,6 +136,42 @@ export default function AffiliateStudioPage() {
+     });
+   };
+ 
++  // Primary input (Mai, 2026-11-12): paste a Douyin link (seller-
++  // authorized) and fetch the video through the gated link-fetch
++  // endpoint. Creates the project first when none exists yet, using
++  // the same authorization controls as section 1. The backend
++  // reports a blocked fetch honestly (FETCH_BLOCKED etc.) with the
++  // file-upload fallback; this page shows the real response.
++  const submitLinkFetch = async () => {
++    if (!linkUrl.trim()) {
++      setOut({ error: "Dán link video trước." });
++      return;
++    }
++    const authorization = {
++      authorization_type: authType,
++      commercial_rights_confirmed: rightsConfirmed,
++      rights_note: rightsNote,
++    };
++    await run(async () => {
++      let pid = projectId;
++      if (!pid) {
++        const created = await post("/api/affiliate/projects", {
++          project_name: projectName || "Video từ link Douyin",
++          source_url: linkUrl,
++          product: { product_name: productName || "Sản phẩm chưa đặt tên" },
++          authorization,
++        });
++        if (!created.project_id) return created;
++        pid = String(created.project_id);
++        setProjectId(pid);
++      }
++      return post(`/api/affiliate/projects/${pid}/link-fetch`, {
++        source_url: linkUrl,
++        authorization,
++      });
++    });
++  };
++
+   const assignSpeakers = () =>
+     run(async () => {
+       const ranges = speakerRanges
+@@ -194,6 +233,26 @@ export default function AffiliateStudioPage() {
+           thành nội dung nguyên bản, và không đảm bảo đủ điều kiện kiếm tiền.
+         </p>
+ 
++        <section className={cardCls}>
++          <h2 className="mb-2 font-black">Dán link Douyin để tải video</h2>
++          <input className={`${inputCls} w-full`} size={70} placeholder="https://www.douyin.com/video/... — dán link video Douyin tại đây" value={linkUrl} onChange={(e) => setLinkUrl(e.target.value)} />
++          <div className="mt-2 flex flex-wrap items-center gap-2">
++            <select className={inputCls} value={authType} onChange={(e) => setAuthType(e.target.value)}>
++              <option value="USER_OWNED">USER_OWNED — video của tôi</option>
++              <option value="LICENSED">LICENSED — có giấy phép</option>
++              <option value="SELLER_AUTHORIZED">SELLER_AUTHORIZED — người bán cho phép</option>
++              <option value="UNKNOWN">UNKNOWN — không rõ</option>
++            </select>
++            <label className="text-sm font-bold">
++              <input type="checkbox" checked={rightsConfirmed} onChange={(e) => setRightsConfirmed(e.target.checked)} /> Tôi xác nhận có quyền dùng video này cho mục đích thương mại
++            </label>
++            <input className={inputCls} size={40} placeholder="Ghi chú quyền" value={rightsNote} onChange={(e) => setRightsNote(e.target.value)} />
++            <button className={btnCls} disabled={busy} onClick={submitLinkFetch}>Dán link và tải video</button>
++          </div>
++          <p className="mt-2 text-sm">Hệ thống chỉ tải video khi quyền sử dụng đã rõ ràng và được xác nhận. Nếu Douyin chặn tải trực tiếp (ví dụ: yêu cầu cookie), hệ thống sẽ báo rõ lý do và không tạo video giả.</p>
++          <p className="mt-1 text-sm">Hoặc tải file lên: dùng mục 1 bên dưới — tải file lên luôn là phương án dự phòng khi link không tải được.</p>
++        </section>
++
+         <section className={cardCls}>
+           <h2 className="mb-2 font-black">1. Tạo dự án + tải video lên</h2>
+           <div className="flex flex-wrap gap-2">

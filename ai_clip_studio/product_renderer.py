@@ -101,6 +101,15 @@ EMOTION_WORDS = (
     ("giận", "angry"),
 )
 
+# F4 (TEST C Phase 2): emotion words match on WORD BOUNDARIES, not
+# substrings. The old substring match fired "surprised" on nearly
+# every gentle line because "của" contains "ủa" -- so "Bà ơi, bà cầm
+# ô của cháu đi." showed a shocked face. A word matches only as a
+# standalone word/phrase ("ủa" alone, never inside "của").
+EMOTION_PATTERNS = tuple(
+    (re.compile(r"\b" + re.escape(word) + r"\b"), expr)
+    for word, expr in EMOTION_WORDS)
+
 # Generic location keywords -> sign label (only when the setting
 # actually names the place; otherwise the sign stays blank).
 SIGN_LABELS = (
@@ -113,6 +122,12 @@ SIGN_LABELS = (
 # Bus door (world x) — characters board here when the scene's cues
 # include "board".
 BUS_DOOR_X = 1.6
+
+# Bus body (world coords) -- shared by the 3D boxes and the F6 2D
+# detail overlay, so both always agree on where the bus is.
+BUS_BODY_CENTER = (2.6, 1.0, -3.5)
+BUS_BODY_SIZE = (2.6, 1.9, 1.0)
+BUS_WHEEL_X = (1.9, 3.3)
 
 # Generic movement-verb map (Vietnamese) for finding WHO performs an
 # action: the character named nearest before the verb in the scene's
@@ -174,8 +189,8 @@ def ws(screen_x: float) -> float:
 
 def expression_for(text: str) -> str:
     low = text.lower()
-    for word, expr in EMOTION_WORDS:
-        if word in low:
+    for pattern, expr in EMOTION_PATTERNS:
+        if pattern.search(low):
             return expr
     return "neutral"
 
@@ -546,6 +561,82 @@ def _lamp_glow(img, lamp_base_xy, lamp_head_xy):
               .convert("RGB"), (0, 0))
 
 
+def _draw_bus_details(img):
+    """F6 (TEST C Phase 2): 2D bus details over the projected bus
+    body -- wheels, headlight + glow, taillight, destination sign,
+    door outline, side stripe. The 3D boxes alone read as a building:
+    the kerb occludes the 3D wheels, the door is a dark slab, and
+    there are no lights. Every position is derived by projecting the
+    bus box corners with CAM.project, so the details track the bus
+    at any camera -- no hardcoded pixels. Drawn on the static
+    background (before the characters), so a boarding character
+    occludes the bus correctly. The wheels straddle the body's
+    bottom edge and may overlap the bench/kerb in front of the bus
+    -- a small depth trade-off for a bus that reads as a bus at a
+    glance (the alternative, 3D-only wheels, is invisible)."""
+    cx, cy, cz = BUS_BODY_CENTER
+    sx_, sy_, sz_ = BUS_BODY_SIZE
+    zf = cz + sz_ / 2.0  # front face, facing the camera
+    pts = [CAM.project((cx + dx * sx_ / 2.0, cy + dy * sy_ / 2.0, zf),
+                       W, H)
+           for dx in (-1, 1) for dy in (-1, 1)]
+    xs = [p[0] for p in pts]
+    ys = [p[1] for p in pts]
+    left, right = min(xs), max(xs)
+    top, bottom = min(ys), max(ys)
+    w, h = right - left, bottom - top
+    d = ImageDraw.Draw(img, "RGBA")
+    # Side stripe: a light band at window-sill level, breaking the
+    # "blue block" read and lengthening the body.
+    stripe_y = top + 0.52 * h
+    d.rectangle([left, stripe_y, right, stripe_y + 0.055 * h],
+                fill=(220, 230, 240, 255))
+    # Door outline at BUS_DOOR_X (the 3D door slab is nearly
+    # invisible against the body): light frame + centre split.
+    dx0, _, _, _ = CAM.project((BUS_DOOR_X - 0.25, 0.2, zf), W, H)
+    dx1, _, _, _ = CAM.project((BUS_DOOR_X + 0.25, 0.2, zf), W, H)
+    _, dy0, _, _ = CAM.project((BUS_DOOR_X, 1.6, zf), W, H)
+    _, dy1, _, _ = CAM.project((BUS_DOOR_X, 0.2, zf), W, H)
+    d.rectangle([dx0, dy0, dx1, dy1],
+                outline=(220, 230, 240, 255), width=3)
+    d.line([((dx0 + dx1) / 2, dy0), ((dx0 + dx1) / 2, dy1)],
+           fill=(220, 230, 240, 255), width=2)
+    # Wheels: dark circles + light hubcaps, straddling the bottom
+    # edge so they read as wheels under the body skirt.
+    for wx in BUS_WHEEL_X:
+        wcx, _, _, _ = CAM.project((wx, 0.15, zf), W, H)
+        wr = 0.085 * h
+        wcy = bottom - 0.02 * h
+        d.ellipse([wcx - wr, wcy - wr, wcx + wr, wcy + wr],
+                  fill=(15, 15, 18, 255),
+                  outline=(200, 205, 215, 255), width=2)
+        d.ellipse([wcx - wr * 0.4, wcy - wr * 0.4,
+                   wcx + wr * 0.4, wcy + wr * 0.4],
+                  fill=(200, 205, 215, 255))
+    # Headlight (front = left end) with a soft glow, and a red
+    # taillight at the rear end.
+    hlx, hly = left + 0.045 * w, bottom - 0.10 * h
+    hr_ = 0.045 * h
+    for _r, _a in ((hr_ * 2.6, 45), (hr_ * 1.7, 80)):
+        d.ellipse([hlx - _r, hly - _r, hlx + _r, hly + _r],
+                  fill=(255, 240, 180, _a))
+    d.ellipse([hlx - hr_, hly - hr_, hlx + hr_, hly + hr_],
+              fill=(255, 244, 200, 255))
+    tlx = right - 0.05 * w
+    d.ellipse([tlx - hr_ * 0.8, hly - hr_ * 0.8,
+               tlx + hr_ * 0.8, hly + hr_ * 0.8],
+              fill=(255, 80, 70, 255))
+    # Destination sign: a lit amber bar at the top-front with a
+    # generic route number (no story content -- every bus has one).
+    sign_w, sign_h = 0.22 * w, 0.075 * h
+    sx0, sy0 = left + 0.05 * w, top + 0.06 * h
+    d.rectangle([sx0, sy0, sx0 + sign_w, sy0 + sign_h],
+                fill=(255, 200, 90, 255))
+    fnt = _font(max(8, int(sign_h * 0.72)), bold=True)
+    d.text((sx0 + sign_w / 2, sy0 + sign_h / 2), "01", font=fnt,
+           fill=(30, 30, 30, 255), anchor="mm")
+
+
 def _render_shot(args: dict) -> dict:
     """One shot -> PNG frames (+ optional single still). Top-level so
     multiprocessing can pickle it. Pure in the shot: every boundary
@@ -581,12 +672,23 @@ def _render_shot(args: dict) -> dict:
     boxes, sky_top, sky_bottom, rainy = build_scene(
         shot.get("location_keyword", "street"), shot.get("setting", ""),
         shot.get("mood", "warm"), shot.get("time_of_day", "day"))
-    if "bus" in (shot.get("scene_cues") or shot.get("action_cues") or []):
+    # F6: the bus shows when EITHER cue list names it -- and "board"
+    # implies a bus even when the cues forget it, because the board
+    # shot must show the bus being boarded. (The old condition used
+    # `scene_cues or action_cues`, so a "bus"/"board" in action_cues
+    # was ignored whenever scene_cues was non-empty.)
+    _cues_all = list(shot.get("scene_cues") or []) + \
+        list(shot.get("action_cues") or [])
+    _has_bus = "bus" in _cues_all or "board" in _cues_all
+    if _has_bus:
         # The bus, arriving from the right: body + lit windows + door
         # at BUS_DOOR_X. A plain box would read as a building; the
-        # windows + wheels + door make it a bus.
+        # windows + wheels + door make it a bus -- and the F6 2D
+        # overlay (_draw_bus_details, on the static background)
+        # adds the wheels, lights, sign and stripe the 3D boxes
+        # cannot show (the kerb occludes the 3D wheels).
         boxes += [
-            Box3D(center=(2.6, 1.0, -3.5), size=(2.6, 1.9, 1.0),
+            Box3D(center=BUS_BODY_CENTER, size=BUS_BODY_SIZE,
                   color=(40, 90, 130), name="bus_body"),
             Box3D(center=(2.0, 1.4, -2.95), size=(0.6, 0.5, 0.08),
                   color=(255, 220, 130), name="bus_window_1"),
@@ -596,9 +698,11 @@ def _render_shot(args: dict) -> dict:
                   color=(255, 220, 130), name="bus_window_3"),
             Box3D(center=(BUS_DOOR_X, 0.9, -2.95), size=(0.5, 1.4, 0.08),
                   color=(20, 40, 60), name="bus_door"),
-            Box3D(center=(1.9, 0.15, -2.95), size=(0.4, 0.3, 0.1),
+            Box3D(center=(BUS_WHEEL_X[0], 0.15, -2.95),
+                  size=(0.4, 0.3, 0.1),
                   color=(20, 20, 24), name="bus_wheel_1"),
-            Box3D(center=(3.3, 0.15, -2.95), size=(0.4, 0.3, 0.1),
+            Box3D(center=(BUS_WHEEL_X[1], 0.15, -2.95),
+                  size=(0.4, 0.3, 0.1),
                   color=(20, 20, 24), name="bus_wheel_2"),
         ]
     # ---- static background, rendered ONCE per shot --------------------
@@ -622,6 +726,9 @@ def _render_shot(args: dict) -> dict:
         _lx, _ly, _, _ = CAM.project((4.0, 0.0, -1.5), W, H)
         _hx2, _hy2, _, _ = CAM.project((4.0, 3.3, -1.5), W, H)
         _lamp_glow(bg_img, (int(_lx), int(_ly)), (int(_hx2), int(_hy2)))
+    if _has_bus:
+        # F6: bus details on the static background, once per shot.
+        _draw_bus_details(bg_img)
     shadow_tile = Image.new("RGBA", (320, 48), (0, 0, 0, 0))
     _td = ImageDraw.Draw(shadow_tile)
     _td.ellipse([20, 8, 300, 40], fill=(0, 0, 0, 110))
@@ -797,12 +904,23 @@ def _render_shot(args: dict) -> dict:
         # Other characters are passed as `others` for close_up /
         # insert: safe_frame keeps them fully in or fully out.
         def _full_box(n):
+            # F2: the box is the STANDING extent, anchored at the
+            # ground -- not the current pose's head top. A kneel or
+            # crouch shrinks the pose box, and safe_frame climbs the
+            # scale ladder mid-shot (1.0x -> 1.6x as the character
+            # kneels), inflating the head to 358 px = 33% of the
+            # frame. The standing box is pose-independent, so the
+            # scale stays constant across the shot. At 1.0x the
+            # character is CHAR_H/1080 = 72.5% of the frame height
+            # (under the 75% cap) and the head is 24.6% (under 26%).
+            # The horizontal extent still follows the pose (hand /
+            # foot spread), so a wide stance still frames correctly.
             J = joints_now[n]
             _hr = float(getattr(chars[n], "head_r", 133.0))
             return {
                 "cx": J["head"][0],
-                "head_y": J["head"][1] - _hr,
-                "foot_y": J["foot_l"][1],
+                "head_y": GROUND_Y - CHAR_H,
+                "foot_y": GROUND_Y,
                 "half_w": max(
                     abs(J["hand_l"][0] - J["hand_r"][0]) / 2 + 40,
                     _hr + 20,
@@ -822,6 +940,12 @@ def _render_shot(args: dict) -> dict:
 
         _st = shot["shot_type"]
         _full = {n: _full_box(n) for n in names}
+        # F2: full-body shot types never zoom above 1.0x (belt and
+        # braces with the standing-extent box above: even if the box
+        # computation changes later, a full body can never be
+        # inflated mid-shot). Head/prop framings keep their scales:
+        # the zoom is the point of a close_up / reaction / insert.
+        _max_scale = None
         if _st == "close_up":
             _lead = actor if actor in joints_now else names[0]
             subjects = [_head_box(_lead)]
@@ -842,6 +966,7 @@ def _render_shot(args: dict) -> dict:
         else:
             subjects = [_full[n] for n in names]
             others = []
+            _max_scale = 1.0
         focus = None
         if _st == "object_insert" and _prop_xy is not None:
             focus = _prop_xy
@@ -852,7 +977,7 @@ def _render_shot(args: dict) -> dict:
                      "camera": {"scale": SHOT_SCALE.get(shot["shot_type"], 1.6)},
                      "focus_target": actor}
         safe_shot, safe_focus, notes = CameraPlanner.safe_frame(
-            shot_dict, focus, subjects, others)
+            shot_dict, focus, subjects, others, max_scale=_max_scale)
         if safe_shot["camera"]["scale"] == 1.0:
             # Establishing shot: the crop is the full frame — skip the
             # LANCZOS round-trip resize (same pixels, ~0.3 s saved).

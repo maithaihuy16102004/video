@@ -386,6 +386,12 @@ def _shade(color, factor):
             max(0, min(255, int(b * factor))))
 
 
+def _blend(c1, c2, t):
+    """Linear blend between two RGB colors (t=0 -> c1, t=1 -> c2)."""
+    a, b = _hex(c1), _hex(c2)
+    return tuple(int(round(a[i] + (b[i] - a[i]) * t)) for i in range(3))
+
+
 def _thick(d, a, b, width, color):
     """Thick segment with rounded caps (line + joint circles)."""
     d.line([a, b], fill=color, width=int(width))
@@ -450,18 +456,70 @@ def expression_at(keyframes, t):
 # ---------------------------------------------------------------------------
 
 
-def _draw_hand(draw, elbow, hand, char, ink):
+def _separate_close_hands(hand_l, hand_r, elbow_l, facing, H):
+    """F3 (TEST C Phase 2): separate the DRAWN far hand from the near
+    hand when the two hands hang close, and shorten + tighten both
+    finger fans.
+
+    The two hands share one drawing plane in side views, so when the
+    arms hang or swing together the hands coincide exactly (gap 0 px)
+    and the two 3-finger fans interleave into one 6-finger scribble.
+    The far hand is pushed away from the near hand (drawing-only: the
+    rig map is untouched, so bone checks pass and the prop -- staged
+    at the NEAR hand -- stays aligned) and both fans shorten to 0.6x
+    and thin to 0.7x while the hands are close, so each hand reads on
+    its own instead of interleaving. The fan spread stays FULL: a
+    parameter grid showed short + thin + full-fan reads as two
+    distinct 3-finger hands, while a tightened fan merges the three
+    strokes into a round blob (the strokes are thicker than their
+    tip gaps at a narrow spread).
+
+    The push direction is the gap direction biased backward (opposite
+    facing) + up, so it never flips as the hands cross: a pure gap
+    direction would pop the far hand ~2*sep in one frame at the
+    crossing. The push is 0 exactly at the threshold, so the
+    separation fades in smoothly as the hands approach. The elbow is
+    NEVER moved: the two forearms form a V from the shared elbow,
+    which keeps the upper arm coincident with (and hidden behind) the
+    near arm. Moving the elbow rotates the upper arm off the near
+    arm and exposes a light stripe down the torso centre.
+
+    Returns (hand_l, elbow_l, finger_scale, fan_scale, width_scale);
+    the near hand and the elbow are never moved. Pure geometry -- no
+    drawing -- so the separation is unit-testable without rendering."""
+    hl, hr, el = hand_l, hand_r, elbow_l
+    gdx, gdy = hl[0] - hr[0], hl[1] - hr[1]
+    gap = math.hypot(gdx, gdy)
+    sep = 0.045 * H
+    if gap >= sep:
+        return hl, el, 1.0, 1.0, 1.0
+    bx, by = -float(facing), -0.6
+    bn = math.hypot(bx, by)
+    ux = gdx + bx / bn * sep
+    uy = gdy + by / bn * sep
+    un = math.hypot(ux, uy) or 1.0
+    ux, uy = ux / un, uy / un
+    push = sep - gap
+    return ((hl[0] + ux * push, hl[1] + uy * push),
+            el, 0.6, 1.0, 0.7)
+
+
+def _draw_hand(draw, elbow, hand, char, ink, flen_scale=1.0,
+               fan_scale=1.0, fw_scale=1.0):
     """Minimal hand in the reference language: 3 finger strokes fanning
     from the wrist along the forearm direction. Never a dot, never a
-    skin circle, never a pasted symbol."""
+    skin circle, never a pasted symbol. ``flen_scale`` / ``fw_scale``
+    shorten and thin the fingers when the two hands hang close (F3):
+    full-length wide fans from two coincident wrists interleave into
+    one 6-finger scribble; short thin strokes stay distinct."""
     H = float(char.H)
     dx, dy = hand[0] - elbow[0], hand[1] - elbow[1]
     if math.hypot(dx, dy) < 1e-6:
         dx, dy = 0.0, 1.0
     base = math.atan2(dy, dx)
-    flen = STYLE_LOCK["finger_len_frac"] * H
-    fw = max(3.0, limb_width(char) * 0.75)
-    for off in (-0.61, 0.0, 0.61):  # ~ -35deg, 0, +35deg
+    flen = STYLE_LOCK["finger_len_frac"] * H * flen_scale
+    fw = max(3.0, limb_width(char) * 0.75 * fw_scale)
+    for off in (-0.61 * fan_scale, 0.0, 0.61 * fan_scale):
         a = base + off
         tip = (hand[0] + math.cos(a) * flen, hand[1] + math.sin(a) * flen)
         draw.line([hand, tip], fill=ink, width=int(fw))
@@ -530,6 +588,16 @@ def _draw_face(draw, char, hx, hy, view, face_dx, params, ink, pal):
         inner_dy = params["brow_in"] + (params["brow_asym"] if is_left else 0.0)
         inner = (ex - sgn * 0.11 * r, brow_y + inner_dy * r)
         outer = (ex + sgn * 0.11 * r, brow_y + params["brow_out"] * r)
+        # F4: keep each brow end ON the forehead -- below the hairline
+        # (-0.55r, the hair-cap chord is at -0.72r) and above this
+        # eye's top (-0.03r clearance). Surprised brows used to sit
+        # at -0.74..-0.78r, a stray line on the hair cap. The clamp
+        # is per end, so slants survive (angry still slants hard);
+        # only the out-of-band part is pulled back.
+        _brow_lo = hy - 0.55 * r
+        _brow_hi = eye_y - eh - 0.03 * r
+        inner = (inner[0], min(max(inner[1], _brow_lo), _brow_hi))
+        outer = (outer[0], min(max(outer[1], _brow_lo), _brow_hi))
         if show_brows:
             draw.line([inner, outer], fill=ink, width=int(brow_w))
     # Mouth: line <-> arc <-> open "O" morphs continuously with the
@@ -542,6 +610,14 @@ def _draw_face(draw, char, hx, hy, view, face_dx, params, ink, pal):
     curve = params["mouth_curve"]
     if params["mouth_open"] > 0.05:
         hh = 2.0 + (0.16 * r - 2.0) * params["mouth_open"]
+        # F4: the open "O" must clear the eyes. Surprised eyes grow
+        # (eye_h 1.45) and the mouth top used to overlap the far eye
+        # by ~0.13r, reading as a dot attached to the eye. Push the
+        # mouth down only when it would touch -- neutral / happy /
+        # worried already clear and stay exactly where they were.
+        _eye_bottom = (eye_y + STYLE_LOCK["eye_half_h_frac_of_r"] * r
+                       * params["eye_h"])
+        my = max(my, _eye_bottom + 0.05 * r + hh)
         draw.ellipse([mx - mw / 2, my - hh, mx + mw / 2, my + hh], fill=ink)
     elif abs(curve) > 0.15:
         if curve > 0:  # smile
@@ -786,6 +862,12 @@ def draw_character_v4(draw, char, expression="neutral", view="profile",
         limbs = {k: _squash(J[k]) for k in ("knee_l", "foot_l", "knee_r", "foot_r",
                                            "elbow_l", "hand_l", "elbow_r", "hand_r")}
 
+    # F3: separate the drawn hands when they hang close (see
+    # _separate_close_hands); the rig map J is untouched.
+    (limbs["hand_l"], limbs["elbow_l"], finger_scale, fan_scale,
+     fw_scale) = _separate_close_hands(limbs["hand_l"], limbs["hand_r"],
+                                       limbs["elbow_l"], f, H)
+
     # --- ground: sketch strokes + grass tuft ONLY (reference style).
     # The reference has no blob shadow -- just thin horizontal strokes
     # under the feet and a small tuft of grass at the left foot.
@@ -804,7 +886,14 @@ def draw_character_v4(draw, char, expression="neutral", view="profile",
                   fill=ink, width=2)
 
     # --- legs: clean uniform lines + flat structured feet --------------
-    ink_far = _shade(ink, 0.72)
+    # F1: the far limbs are LIGHTENED ink, not darkened. The old
+    # _shade(ink, 0.72) made the far leg darker than the near leg, so
+    # on the dark night background it vanished into the background
+    # and the two legs read as one dark mass (the kneel knot). A
+    # lighter far limb reads as depth on light backgrounds AND stays
+    # visible on dark ones. Still well under the silhouette test's
+    # dark threshold (sum 194 < 400), so silhouettes are unchanged.
+    ink_far = _blend(ink, (110, 130, 160), 0.30)
     for side, col in (("l", ink_far), ("r", ink)):
         _thick(draw, hip_d, limbs[f"knee_{side}"], limb_w, col)
         _thick(draw, limbs[f"knee_{side}"], limbs[f"foot_{side}"],
@@ -915,7 +1004,8 @@ def draw_character_v4(draw, char, expression="neutral", view="profile",
                  180, 360, fill=ink, width=max(3, int(limb_w * 0.7)))
     for side in ("l", "r"):
         _draw_hand(draw, limbs[f"elbow_{side}"], limbs[f"hand_{side}"],
-                   char, ink)
+                   char, ink, flen_scale=finger_scale,
+                   fan_scale=fan_scale, fw_scale=fw_scale)
 
     # --- head ------------------------------------------------------------
     hx, hy = head_d
