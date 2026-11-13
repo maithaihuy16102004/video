@@ -120,7 +120,7 @@ GitHub. Không tạo frontend mới. Không hardcode truyện.
 ## Startup / smoke-test commands
 
 ```bash
-cd ~/workspace/video-16x9-v2
+cd ~/workspace/agent
 python3 -m ai_clip_studio.server --port 8788
 python3 -m ai_clip_studio.smoke_test --script <file.txt>
 python3 -m unittest discover -s ai_clip_studio/tests
@@ -130,7 +130,7 @@ python3 ai_clip_studio/run_generalization.py
 ## Mai cần làm (theo thứ tự)
 
 1. **Cấp quyền GitHub App** cho repo `video` để push được cây
-   `video-16x9-v2/` (đang 403) — rồi pull code về máy Windows.
+   `agent/` (đang 403) — rồi pull code về máy Windows.
 2. **Duyệt patch 01/02** (`patches/`, đã sửa xong và kiểm chứng
    `git apply`): khóa headRatio 0.142–0.155 và sửa lỗi TTS cắt câu cuối.
 3. **Chạy trên máy Windows của cô ấy:** backend cũ
@@ -175,4 +175,4 @@ python3 ai_clip_studio/run_generalization.py
 - Báo cáo đầy đủ: `~/workspace/acceptance_loop/BAO_CAO_QA2.md`.
 - Việc còn lại: push GitHub bổ sung các file QA v2 + engine mới (push
   13:46 đã xong 59 file cũ; xem sync record
-  `~/workspace/video-16x9-v2.muse-github-snapshot-sync.json`).
+  `~/workspace/agent.muse-github-snapshot-sync.json`).

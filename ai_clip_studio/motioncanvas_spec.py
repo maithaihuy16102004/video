@@ -172,6 +172,28 @@ _LAYER_COLORS = {
 # preset mirrors example_spec.json; the others follow the same
 # structure (key light + hemisphere fill) with day/night-appropriate
 # values. No other location data influences the lights.
+#
+# ENERGY GLOW (3D path -- NOT YET EMITTED): the 2D renderer paints
+# energy_glow halos directly (lighting.paint_energy_glow, fed by
+# PropStateMachine.energy_glow_at). The 3D path has no correct slot
+# for them yet: World25D's point_lights live in the per-scene world
+# spec (static for the whole scene), while an energy record is
+# per-(prop, time) -- held only during part of a scene, with an
+# intensity ramp and holder changes. Emitting a static scene-level
+# light would shine in shots where the prop is not held. When the
+# World25D contract gains time-varying (per-shot or keyframed)
+# lights, the conversion is lighting.pixel_glow_to_world_glow with:
+#   * camera = the shot's emitted camera (position/target/fov),
+#   * frame_size = the full render frame (1920x1080),
+#   * plane_depth = the staging-plane depth for the holder
+#     (camera.depth_of(holder_ground_world_position)),
+#   * the record's position translated by the shot crop offset
+#     FIRST when the 2D position was measured on a cropped still
+#     (energy_glow_at positions are full-canvas, so the offset is
+#     (0, 0) for records taken straight from the state machine).
+# A bridge round-trip test (real PSM record -> world record ->
+# PointLight) lives in test_energy_glow_wiring.py; it proves the
+# conversion, not an emitted light.
 _LIGHTING_PRESETS = {
     ("day", "warm"): {
         "sky_top": "#6fa8dc", "sky_bottom": "#cfe5f5",
@@ -363,6 +385,73 @@ def _default_boxes(palette: list[str]) -> list[dict]:
     return boxes
 
 
+def _rgb_to_hex(rgb) -> str | None:
+    """RGB tuple/list (0-255) -> "#rrggbb". None when unusable."""
+    try:
+        r, g, b = (max(0, min(255, int(round(float(c))))) for c in rgb[:3])
+    except (TypeError, ValueError, IndexError):
+        return None
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+
+def _env_boxes(pkg: dict) -> tuple[list[dict], list[str]]:
+    """EnvironmentPackage elements -> World25D BoxSpecs.
+
+    Box-geometry elements map 1:1. Gable prisms have no prism mesh in
+    World25D.ts (boxes only), so they are emitted as boxes with the
+    approximation recorded on the box and in the notes — massing is
+    preserved, the roof profile is not. Any other geometry is skipped
+    and counted, never silently dropped. Extra keys (kind/layer/
+    material/geometry) are annotations the validator ignores.
+    """
+    boxes: list[dict] = []
+    notes: list[str] = []
+    approximated = 0
+    skipped: list[str] = []
+    for el in pkg.get("elements", []):
+        if not isinstance(el, dict):
+            continue
+        color = _rgb_to_hex(el.get("color"))
+        if color is None:
+            skipped.append(str(el.get("id", "?")))
+            continue
+        try:
+            center = [float(c) for c in el["center"]]
+            size = [float(c) for c in el["size"]]
+        except (KeyError, TypeError, ValueError):
+            skipped.append(str(el.get("id", "?")))
+            continue
+        if len(center) != 3 or len(size) != 3:
+            skipped.append(str(el.get("id", "?")))
+            continue
+        geometry = str(el.get("geometry") or "box")
+        box = {
+            "name": str(el.get("id") or "element"),
+            "center": center, "size": size, "color": color,
+            "roughness": 0.8,
+            "kind": str(el.get("kind") or ""),
+            "layer": str(el.get("layer") or ""),
+            "material": str(el.get("material") or ""),
+        }
+        if geometry == "box":
+            box["geometry"] = "box"
+        elif geometry == "gable_prism":
+            box["geometry"] = "gable_prism_approximated_as_box"
+            approximated += 1
+        else:
+            skipped.append(str(el.get("id", "?")))
+            continue
+        boxes.append(box)
+    if approximated:
+        notes.append(f"{approximated} gable-prism element(s) emitted "
+                     f"as boxes (World25D has no prism mesh)")
+    if skipped:
+        notes.append(f"{len(skipped)} element(s) skipped (unsupported "
+                     f"geometry or unusable colour): "
+                     + ", ".join(skipped[:8]))
+    return boxes, notes
+
+
 def build_world(location: dict | None, v1_location: dict | None,
                 character_anchors: list[dict]) -> tuple[dict, list[str]]:
     """Build a World25DSpec ``world`` dict from generic location data.
@@ -386,6 +475,36 @@ def build_world(location: dict | None, v1_location: dict | None,
     preset = _LIGHTING_PRESETS[(time_of_day, mood)]
     palette = _valid_palette(v1_location.get("palette"))
 
+    # W6 (visual recovery): when the scene carries a §15.3 trait
+    # block, stage the SAME EnvironmentPackage the 2D renderer builds
+    # from it (same deterministic inputs: traits + time_of_day +
+    # mood), so the 3D world and the 2D render stage the same
+    # environment. The phrase-box path below remains the fallback
+    # when there is no trait block, the location is map-type, or the
+    # environment build fails — every fallback is noted, never
+    # silent. Camera poses stay PLANNED (stage 7b runs before the
+    # render); they mirror viewpoint_for_shot, the geometry the 2D
+    # renderer executes, but "executed" poses do not exist yet.
+    env_pkg: dict | None = None
+    env_notes: list[str] = []
+    if v1_location:
+        try:
+            from .environment_v2 import build_environment
+            env_pkg = build_environment(
+                v1_location,
+                period=str(v1_location.get("period")
+                           or location.get("period") or ""),
+                time_of_day=time_of_day, style={"mood": mood})
+        except Exception as exc:  # noqa: BLE001 - fallback is noted
+            env_notes.append(f"environment build failed ({exc}); "
+                             f"phrase staging used")
+            env_pkg = None
+        if env_pkg is not None and env_pkg.get("kind") == "map_deferred":
+            env_notes.append("map location; Motion Canvas world uses "
+                             "phrase staging (maps render via "
+                             "map_renderer in the 2D path)")
+            env_pkg = None
+
     phrases = {
         "foreground": _split_features(v1_location.get("foreground")),
         "midground": _split_features(v1_location.get("midground")),
@@ -393,36 +512,90 @@ def build_world(location: dict | None, v1_location: dict | None,
     }
     # The free feature list stages in the midground band.
     phrases["midground"].extend(_split_features(v1_location.get("features")))
-    notes = []
+    notes = list(env_notes)
     boxes: list[dict] = []
-    for layer in ("foreground", "midground", "background"):
-        boxes.extend(_layer_boxes(layer, phrases[layer], palette))
-    boxes = boxes[:MAX_BOXES_TOTAL]
-    if not boxes:
-        boxes = _default_boxes(palette)
-        notes.append("no feature data for this location; default world used")
-    if palette:
-        notes.append(f"palette applied ({len(palette)} usable colours)")
+    env_light: dict = {}
+    env_ground: dict = {}
+    if env_pkg is not None:
+        boxes, box_notes = _env_boxes(env_pkg)
+        notes.extend(box_notes)
+        prov = env_pkg.get("provenance") or {}
+        notes.append(
+            f"environment archetype {env_pkg.get('archetype')} "
+            f"({len(boxes)} boxes from {len(env_pkg.get('elements', []))} "
+            f"elements; trait source "
+            f"{prov.get('trait_source') or 'anonymous'})")
+        if not boxes:
+            notes.append("environment package yielded no boxes; "
+                         "phrase staging used")
+            env_pkg = None
+        else:
+            env_light = env_pkg.get("light") or {}
+            env_ground = env_pkg.get("ground") or {}
+            trait_colors = (env_pkg.get("palette") or {}).get("trait_colors")
+            if trait_colors:
+                notes.append("trait palette tinted the archetype colours "
+                             f"({len(trait_colors)} usable colours)")
+    if env_pkg is None:
+        for layer in ("foreground", "midground", "background"):
+            boxes.extend(_layer_boxes(layer, phrases[layer], palette))
+        boxes = boxes[:MAX_BOXES_TOTAL]
+        if not boxes:
+            boxes = _default_boxes(palette)
+            notes.append("no feature data for this location; default world used")
+        if palette:
+            notes.append(f"palette applied ({len(palette)} usable colours)")
     point_lights = [dict(p) for p in _NIGHT_POINT_LIGHTS] \
         if time_of_day == "night" else []
 
+    # Light + ground: the environment package's measured values win
+    # when present (same staging as the 2D render); the preset fills
+    # anything the package does not supply. The key-light POSITION
+    # stays the preset's — the package carries a direction, not a
+    # position, and inventing one would change the lighting.
+    sky_top = _rgb_to_hex(env_light.get("sky_top")) or preset["sky_top"]
+    sky_bottom = (_rgb_to_hex(env_light.get("sky_bottom"))
+                  or preset["sky_bottom"])
+    ground_color = (_rgb_to_hex(env_ground.get("color"))
+                    or _rgb_to_hex(env_light.get("ground"))
+                    or preset["ground_color"])
+    key_light = dict(preset["key_light"])
+    sun_hex = _rgb_to_hex(env_light.get("sun_color"))
+    if sun_hex:
+        key_light["color"] = sun_hex
+    try:
+        key_light["intensity"] = float(env_light["key_intensity"])
+    except (KeyError, TypeError, ValueError):
+        pass
+    try:
+        ambient_intensity = float(env_light["ambient"])
+    except (KeyError, TypeError, ValueError):
+        ambient_intensity = preset["ambient_intensity"]
+    ambient_sky = (_rgb_to_hex(env_light.get("sky_top"))
+                   or preset["ambient_sky"])
+    ambient_ground = (_rgb_to_hex(env_light.get("ground"))
+                      or preset["ambient_ground"])
+
     world = {
-        "sky_top": preset["sky_top"],
-        "sky_bottom": preset["sky_bottom"],
-        "ground_color": preset["ground_color"],
+        "sky_top": sky_top,
+        "sky_bottom": sky_bottom,
+        "ground_color": ground_color,
         "ground_size": GROUND_SIZE,
         "ground_roughness": GROUND_ROUGHNESS,
         "boxes": boxes,
-        "key_light": dict(preset["key_light"]),
-        "ambient_sky": preset["ambient_sky"],
-        "ambient_ground": preset["ambient_ground"],
-        "ambient_intensity": preset["ambient_intensity"],
+        "key_light": key_light,
+        "ambient_sky": ambient_sky,
+        "ambient_ground": ambient_ground,
+        "ambient_intensity": ambient_intensity,
         "point_lights": point_lights,
         "camera_initial": {"position": [0.0, 2.4, 12.0],
                            "target": [0.0, 1.5, -2.0], "fov": FOV_DEG},
         "camera_keyframes": [],
         "character_anchors": list(character_anchors),
     }
+    if env_pkg is not None:
+        world["environment_archetype"] = env_pkg.get("archetype")
+        world["environment_provenance"] = env_pkg.get("provenance") or {}
     return world, notes
 
 
@@ -847,7 +1020,38 @@ def emit_scene_spec(package: dict, scene_number, shots: list[dict], *,
     v1_location = None
     if isinstance(location, dict):
         v1_location = location.get("v1_location")
+    # The scene location's trait copy drops fields the shot blocks
+    # carry (notably `type`, which MAP detection needs), so merge the
+    # first shot block for the SAME location over it — the emitter
+    # then consumes the same trait data the 2D renderer uses for
+    # that location. Shots staging a DIFFERENT location (a per-shot
+    # override) cannot be represented in one scene world; they are
+    # noted, never silently absorbed.
+    override_notes: list[str] = []
+    scene_loc_id = (v1_location or {}).get("location_id") \
+        if isinstance(v1_location, dict) else None
+    for _shot in scene_shots:
+        _sv1 = _shot.get("v1_location")
+        if not isinstance(_sv1, dict) or not _sv1:
+            continue
+        _shot_loc_id = _sv1.get("location_id")
+        if scene_loc_id is None or _shot_loc_id == scene_loc_id:
+            merged = dict(v1_location) if isinstance(v1_location, dict) else {}
+            merged.update(_sv1)
+            v1_location = merged
+            scene_loc_id = _shot_loc_id
+            break
+    for _shot in scene_shots:
+        _sv1 = _shot.get("v1_location")
+        if isinstance(_sv1, dict) and _sv1.get("location_id") \
+                and _sv1.get("location_id") != scene_loc_id:
+            override_notes.append(
+                f"shot {_shot.get('shot_id') or _shot.get('index')} "
+                f"stages location {_sv1.get('location_id')} (override); "
+                f"the scene world uses {scene_loc_id}")
+            break
     world, notes = build_world(location, v1_location, anchors)
+    notes.extend(override_notes)
     keyframes, provenance, duration = build_camera_keyframes(
         scene_shots, anchors, cast_by_name)
     first = keyframes[0]

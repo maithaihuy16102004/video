@@ -21,8 +21,15 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable
 
+from .action_compiler import (
+    UnauthorizedStoryChange, compile_actions, detect_conflicts)
+from .production_errors import ACTOR_RESOLUTION_FAILED
 from .production_request import ProductionRequest
+from .prop_system import ForbiddenPropTransition, SemanticPropTracker
+from .scene_graph import (
+    GraphValidationError, build_scene_graph, validate_or_raise)
 from .timeline import Timeline
+from .trait_derivation import PROP_KINDS
 
 
 @dataclass
@@ -132,3 +139,153 @@ def run_preflight(
 
     passed = all(c.passed for c in checks)
     return PreflightResult(passed=passed, checks=checks)
+
+
+def semantic_preflight_checks(package: dict) -> list[PreflightCheck]:
+    """Semantic conflict checks (directive §4) for a real package.
+
+    Compiles the package's actions (estimated spans -- binding is
+    by shot/scene id, not time) and runs detect_conflicts over
+    every level available before rendering: R1 cue-vs-event, R2
+    rain-vs-no-rain, R3 parser-vs-event. R4 (staging) and R5
+    (renderer primitives) need render-time records, so they are
+    enforced at render time instead (the renderer's rest
+    assignment + ground rule, and the action dispatch); they are
+    named here so the coverage gap is explicit, never silent.
+
+    Fails when: the compile raises UnauthorizedStoryChange (an
+    unresolved mandatory conflict -- wired as a preflight
+    failure, never a crash); any record's fails_preflight is
+    true; or an R3 record exists (the compiler emitted a verb
+    the parser's resolution forbids -- staging it would stage
+    the wrong story, so resolution alone does not clear it).
+    Resolved R1/R2 records pass with the resolution counted in
+    the detail. An ordinary compile failure also fails: the
+    semantic safety net could not be validated.
+    """
+    try:
+        return _semantic_preflight_checks_inner(package)
+    except UnauthorizedStoryChange as exc:  # pragma: no cover
+        return [PreflightCheck(
+            "semantic_conflicts", False,
+            f"UnauthorizedStoryChange: {exc}"[:300])]
+    except Exception as exc:  # noqa: BLE001 - preflight must report
+        return [PreflightCheck(
+            "semantic_preflight", False,
+            f"{type(exc).__name__}: {exc}"[:300])]
+
+
+def _semantic_preflight_checks_inner(package: dict
+                                     ) -> list[PreflightCheck]:
+    cue_records = [r for s in (package.get("scenes") or [])
+                   for r in (s.get("cue_records") or [])]
+    sem_sink: list = []
+    con_sink: list = []
+    try:
+        events, unsupported = compile_actions(
+            package, inferred_cues=cue_records or None,
+            semantic_sink=sem_sink, conflict_sink=con_sink)
+    except UnauthorizedStoryChange as exc:
+        return [PreflightCheck(
+            "semantic_conflicts", False,
+            f"UnauthorizedStoryChange: {exc}"[:300])]
+    except Exception as exc:  # noqa: BLE001 - see docstring
+        return [PreflightCheck(
+            "semantic_compile", False,
+            f"{type(exc).__name__}: {exc}"[:300])]
+    records = detect_conflicts(
+        semantic_actions=sem_sink, cue_records=cue_records,
+        compiled_events=events, unsupported=unsupported)
+    failing = [r for r in records
+               if r.fails_preflight or r.level_a == "parser"]
+    if failing:
+        detail = "; ".join(r.description for r in failing)[:400]
+        return [PreflightCheck(
+            "semantic_conflicts", False,
+            f"{len(failing)} blocking semantic conflict(s): {detail}")]
+    resolved = len(records)
+    conflict_check = PreflightCheck(
+        "semantic_conflicts", True,
+        f"{resolved} conflict record(s), all resolved, 0 blocking; "
+        f"{len(events)} events, {len(sem_sink)} semantic actions "
+        f"(R1-R3 checked; R4/R5 enforced at render time)")
+    # Canonical scene graph: structural validation over the same
+    # compile outputs. A broken graph fails preflight alongside
+    # the conflict check.
+    try:
+        graph = build_scene_graph(
+            package, events, semantic_actions=sem_sink,
+            unsupported=unsupported)
+        validate_or_raise(graph)
+    except GraphValidationError as exc:
+        return [conflict_check, PreflightCheck(
+            "scene_graph", False,
+            f"GraphValidationError: {exc}"[:300])]
+    validation = graph["validation"]
+    checks = [conflict_check, PreflightCheck(
+        "scene_graph", True,
+        f"{len(graph['scenes'])} scenes, {len(graph['shots'])} shots, "
+        f"{len(graph['events'])} events, "
+        f"{len(graph['semantic_actions'])} semantic actions, "
+        f"{len(validation['warnings'])} warning(s)")]
+    # Prop-state timelines (directive section 7): a prop taken from
+    # a pocket cannot then be picked up from the ground in the same
+    # scene without an intervening release. Checked per scene --
+    # cross-scene carry-over is the scene graph's concern, and a
+    # fresh scene may re-introduce a prop in a fresh state.
+    props = package.get("props") or []
+    by_scene: dict = {}
+    for event in events:
+        by_scene.setdefault(event.get("scene_number"), []).append(event)
+    contradictions: list[str] = []
+    for scene_no in sorted(by_scene, key=lambda x: (x is None, x)):
+        try:
+            SemanticPropTracker(props, by_scene[scene_no])
+        except ForbiddenPropTransition as exc:
+            contradictions.append(f"scene {scene_no}: {exc}")
+    if contradictions:
+        checks.append(PreflightCheck(
+            "prop_states", False,
+            "; ".join(contradictions)[:400]))
+    else:
+        checks.append(PreflightCheck(
+            "prop_states", True,
+            f"{len(by_scene)} scene(s), no prop-state contradiction"))
+    # Prop kinds (directive section 8): an unknown mandatory prop
+    # fails preflight -- the renderer must never silently draw a
+    # generic fallback for a script-declared prop. "generic" is
+    # the unclassified fallback kind: a script prop that resolved
+    # to it has no renderable identity, so it fails here too.
+    unknown = [(p.get("id") or p.get("name"), p.get("kind"))
+               for p in props
+               if (p.get("kind") or "") not in PROP_KINDS
+               or p.get("kind") == "generic"]
+    if unknown:
+        detail = "; ".join(
+            f"{pid} (kind {kind!r})" for pid, kind in unknown)[:300]
+        checks.append(PreflightCheck(
+            "prop_kinds", False,
+            f"unknown prop kind(s), no renderer support: {detail}"))
+    else:
+        checks.append(PreflightCheck(
+            "prop_kinds", True,
+            f"{len(props)} prop(s), all kinds renderable"))
+    # Actor resolution (sprint section 6): a classified action
+    # with no resolvable actor fails preflight -- the pipeline
+    # must never stage an action for a character it cannot name.
+    no_actor = [u for u in unsupported
+                if u.get("category") == "NO_ACTOR"]
+    if no_actor:
+        first = no_actor[0]
+        checks.append(PreflightCheck(
+            "actor_resolution", False,
+            (f"[{ACTOR_RESOLUTION_FAILED}] {len(no_actor)} "
+             f"action(s) with no resolvable actor; first: "
+             f"{first.get('action_id')}: "
+             f"{first.get('directive_text')!r}")[:300]))
+    else:
+        checks.append(PreflightCheck(
+            "actor_resolution", True,
+            f"{len(events)} event(s), every classified action "
+            f"resolved to an actor"))
+    return checks

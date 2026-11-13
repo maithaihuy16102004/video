@@ -1,0 +1,7 @@
+Map attribution — Europe 1914 (for the video description)
+
+Map data © OpenHistoricalMap contributors (https://www.openhistoricalmap.org), in the public domain under a Creative Commons CC0 dedication (https://creativecommons.org/publicdomain/zero/1.0/), unless noted otherwise.
+
+Boundary segments © IGN CNIG (Spain), Kartverket (Norwegian Mapping Authority), Surveying and Mapping Authority of the Republic of Slovenia (eProstor), and UN OCHA Humanitarian Data Exchange, licensed under Creative Commons Attribution 4.0 International (CC BY 4.0, https://creativecommons.org/licenses/by/4.0/).
+
+The 1914 boundaries shown are a pinned extract of OpenHistoricalMap (relations current on 28 July 1914, the start of the First World War), simplified for display. Coastlines are drawn from the boundary relations' own outer rings. Historical borders are approximate and reflect the sources cited above.

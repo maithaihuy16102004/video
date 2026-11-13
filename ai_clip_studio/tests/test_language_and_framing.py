@@ -1,7 +1,7 @@
 """Unit tests for the language gate (§5) and the 9:16 framing (§8).
 
 Run:  python3 -m unittest discover -s ai_clip_studio/tests -v
-from ~/workspace/video-16x9-v2/
+from ~/workspace/agent/
 """
 import sys
 import unittest

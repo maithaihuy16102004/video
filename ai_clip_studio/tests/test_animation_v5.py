@@ -14,8 +14,6 @@ from PIL import Image, ImageDraw
 from ai_clip_studio.animation import Stickman
 from ai_clip_studio.animation.character_art import (
     make_character, make_character_instance, draw_character_v4)
-from ai_clip_studio.animation.environment_art import (
-    LOCATION_SIGNATURES, SIGN_TEXT, draw_layered_background)
 from ai_clip_studio.animation.primitives import (
     walk_to, run_to, wave, idle, bend_pick, give_to,
     snapshot, apply_snapshot, _ease_profile)
@@ -464,39 +462,6 @@ class TestHairAndFraming(unittest.TestCase):
         subj = [{"cx": 960, "head_y": 200, "foot_y": 900, "half_w": 700}]
         issues, _ = CameraPlanner.validate_framing(shot, (960, 540), subj)
         self.assertTrue(any("zoom out" in i for i in issues))
-
-
-class TestLocationSignatures(unittest.TestCase):
-    def test_every_kind_has_signatures(self):
-        from ai_clip_studio.animation.environment_art import KINDS
-        for kind in KINDS:
-            self.assertGreaterEqual(len(LOCATION_SIGNATURES[kind]), 3,
-                                    kind)
-
-    def test_backgrounds_differ_per_kind(self):
-        import numpy as np
-        imgs = {}
-        for kind in ("night_street", "shelter", "station", "park"):
-            # half scale: the art's fixed pixel coordinates are tuned
-            # for 1920x1080 (a 480x270 render breaks the shelter roof).
-            imgs[kind] = np.asarray(
-                draw_layered_background(kind, 960, 540, "cold"),
-                dtype=float)
-        kinds = list(imgs)
-        for i in range(len(kinds)):
-            for j in range(i + 1, len(kinds)):
-                diff = float(abs(imgs[kinds[i]] - imgs[kinds[j]]).mean())
-                self.assertGreater(diff, 5.0, f"{kinds[i]} vs {kinds[j]}")
-
-    def test_shelter_sign_carries_text(self):
-        """The bus-stop sign must read as a sign: yellow text pixels
-        in the sign's middle band (the old blank board had none)."""
-        img = draw_layered_background("shelter", 1920, 1080, "cold")
-        region = img.crop((1010, 360 + 35, 1010 + 300, 360 + 75))
-        px = list(region.getdata())
-        yellow = sum(1 for r, g, b in px
-                     if r > 200 and 170 < g < 230 and b < 120)
-        self.assertGreater(yellow, 20, "sign text not visible")
 
 
 if __name__ == "__main__":

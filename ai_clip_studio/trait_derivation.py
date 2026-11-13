@@ -62,6 +62,12 @@ MUSIC_INTENSITIES = ("LOW", "MEDIUM", "HIGH")
 SFX_EVENTS = frozenset({
     "rain_start", "foot_contact", "door_contact", "door_rotation",
     "paper_movement", "object_impact", "character_reaction",
+    # hammer_contact: forge hammer strike (Zeus SFX_009). Added with
+    # the metal_strike synth kind (2026-11-13, Zeus §18 correction):
+    # EVENT_SFX_MAP gained the event, so the planner vocabulary must
+    # admit it or trait SFX naming it would be dropped. Sync with
+    # audio_events.EVENT_SFX_MAP is pinned by test_trait_derivation.
+    "hammer_contact",
 })
 
 # Drawable prop kinds. Mirror of product_renderer.PROP_KINDS (the
@@ -71,6 +77,8 @@ SFX_EVENTS = frozenset({
 PROP_KINDS = frozenset({
     "wallet", "umbrella", "newspaper", "letter", "ticket", "cup",
     "bag", "key", "book", "flower", "pen", "generic",
+    "bolt", "hammer", "trident", "helmet", "sword", "staff",
+    "shield", "crown", "ring", "hat", "chain", "stone", "boulder",
 })
 
 # The sixteen keys of animation/primitives.PRIMITIVES (authoritative
@@ -80,7 +88,12 @@ PROP_KINDS = frozenset({
 PRIMITIVE_NAMES = frozenset({
     "walk_to", "run_to", "turn_to", "look_at", "point_at", "wave",
     "reach_to", "give_to", "shrug", "cover_face", "nod", "sit_down",
-    "stand_up", "idle", "bend_pick", "kneel_pick",
+    "stand_up", "idle", "bend_pick", "kneel_pick", "hammer_strike",
+    "breathe", "carry_bag", "close_wallet", "hand_over", "head_tilt",
+    "hold_pen", "look_at_point", "open_wallet", "pick_up", "put_away",
+    "raise_hand", "react_event", "sign_document", "sit_at_desk",
+    "stand_from_chair", "walk_mud", "write_on_paper", "seated_idle",
+    "crouch", "receive_prop",
 })
 
 # Face-system expression names (animation/character_art.EXPRESSIONS).
@@ -531,7 +544,26 @@ def derive_location_traits(name: str = "", geography: str = "",
 # Kind -> keywords, checked in dict order (most specific first).
 # Word-boundary matching on normalised text. "flower" is checked
 # before "bag" so a basket of flowers reads as flowers, not a bag.
+# Mythological / restraint kinds come first: "helmet" before "hat"
+# ("mũ tàng hình" is a helmet, not a hat), "boulder" before "stone"
+# ("tảng đá" / "mountain rock" is a boulder). Bare "đá" is safe HERE
+# (prop name/description text only) but deliberately absent from the
+# compiler/geometry inference tables, where "đá" is the verb "kick".
 PROP_KEYWORDS: dict[str, tuple[str, ...]] = {
+    "bolt": ("tia chớp", "tia sét", "lightning bolt", "lightning",
+             "bolt", "sét"),
+    "hammer": ("búa", "hammer", "mallet"),
+    "trident": ("đinh ba", "trident"),
+    "helmet": ("mũ tàng hình", "mũ sắt", "mũ giáp", "helmet"),
+    "sword": ("kiếm", "sword"),
+    "shield": ("khiên", "shield"),
+    "crown": ("vương miện", "crown"),
+    "ring": ("nhẫn", "ring"),
+    "staff": ("quyền trượng", "gậy", "scepter", "staff"),
+    "chain": ("dây xích", "xích", "chain", "shackle"),
+    "boulder": ("tảng đá", "boulder", "mountain rock", "giant rock"),
+    "stone": ("hòn đá", "viên đá", "đá", "stone", "rock", "pebble"),
+    "hat": ("mũ", "nón", "hat", "cap"),
     "wallet": ("wallet", "ví", "bóp", "purse"),
     "umbrella": ("umbrella", "ô", "dù", "parasol"),
     "newspaper": ("newspaper", "tờ báo", "nhật báo", "báo"),
@@ -883,7 +915,7 @@ ACTION_CUE_TO_PRIMITIVE: dict[str, str | None] = {
     "walk": "walk_to", "walk_fast": "walk_to", "run": "run_to",
     "bend_pick": "kneel_pick", "give": "give_to", "wave": "wave",
     "turn_back": "turn_to", "look": "look_at", "sit": "sit_down",
-    "stand": "stand_up", "stop": "idle",
+    "stand": "stand_up", "stop": "idle", "head_tilt": "head_tilt",
     "smile": None, "search": None, "open": None, "take": None,
     "put_away": None, "take_out": None, "board": None,
     "rain": None, "bus": None,

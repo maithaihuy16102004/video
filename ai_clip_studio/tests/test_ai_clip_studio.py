@@ -1,7 +1,7 @@
 """Unit tests for ai_clip_studio (stdlib unittest, no network, no Drive).
 
 Run:  python3 -m unittest discover -s ai_clip_studio/tests -v
-from ~/workspace/video-16x9-v2/
+from ~/workspace/agent/
 """
 
 import json

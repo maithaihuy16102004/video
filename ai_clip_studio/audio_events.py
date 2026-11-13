@@ -47,6 +47,7 @@ from typing import Any
 # emits (foot_contact, door_contact, ...), never a clock time.
 EVENT_SFX_MAP: dict[str, dict[str, Any]] = {
     "foot_contact":   {"sfx": "FOOTSTEP",       "category": "foley", "gain_db": -18.0},
+    "hammer_contact": {"sfx": "METAL_STRIKE",   "category": "foley", "gain_db": -12.0},
     "door_contact":   {"sfx": "DOOR_KNOCK",     "category": "foley", "gain_db": -12.0},
     "door_rotation":  {"sfx": "DOOR_OPEN",      "category": "foley", "gain_db": -12.0},
     "paper_movement": {"sfx": "PAPER_RUSTLE",   "category": "foley", "gain_db": -14.0},
@@ -288,6 +289,26 @@ SYNTHESIS_MAP: dict[str, dict[str, Any]] = {
                   "[1:a]afade=t=out:st=0:d={fade_d},volume=0.7[t];"
                   "[n][t]amix=inputs=2:normalize=0[out]",
     },
+    "metal_strike": {
+        "duration_default": 0.7, "category": "foley",
+        "base_gain_db": -12.0,
+        "method": "synthesised: hammer-on-anvil ring (four "
+                  "inharmonic partials 587/1244/2093/3520 Hz decaying "
+                  "across the strike + a 50 ms bandpassed noise "
+                  "transient, ffmpeg lavfi)",
+        "inputs": ["sine=frequency=587:duration={dur}",
+                   "sine=frequency=1244:duration={dur}",
+                   "sine=frequency=2093:duration={dur}",
+                   "sine=frequency=3520:duration={dur}",
+                   "anoisesrc=color=white:duration={dur}"],
+        "filter": "[0:a]afade=t=out:st=0:d={dur},volume=0.9[p0];"
+                  "[1:a]afade=t=out:st=0:d={dur},volume=0.55[p1];"
+                  "[2:a]afade=t=out:st=0:d={dur},volume=0.35[p2];"
+                  "[3:a]afade=t=out:st=0:d={dur},volume=0.22[p3];"
+                  "[4:a]bandpass=f=3200:width_type=h:width=2000,"
+                  "afade=t=out:st=0:d=0.05,volume=0.5[n];"
+                  "[p0][p1][p2][p3][n]amix=inputs=5:normalize=0[out]",
+    },
     "door_open": {
         "duration_default": 0.8, "category": "foley",
         "base_gain_db": -12.0,
@@ -464,6 +485,7 @@ ENGINE_EVENT_SYNTH: dict[str, str] = {
     "paper_movement": "paper_rustle",
     "object_impact": "impact",
     "foot_contact": "footstep",
+    "hammer_contact": "metal_strike",
     "rain_start": "rain_bed",
     "crowd murmur": "crowd_bed",
 }
@@ -540,6 +562,11 @@ _CUE_KEYWORDS: tuple[tuple[str, str | None, tuple[str, ...]], ...] = (
     ("room_tone", None, ("room tone", "room", "indoor", "attic")),
     ("street_bed", None, ("street", "city", "activity", "soldiers")),
     ("soft_rustle", None, ("rustle", "leather")),
+    ("metal_strike", "hammer_contact",
+     ("metal strike", "hammer strike", "hammer", "hammers",
+      "hammering", "anvil", "clang", "clanging", "metal clang",
+      "forge strike", "cai de", "bua", "dap bua", "go bua",
+      "tieng bua", "kim loai", "metal")),
     ("impact", "object_impact",
      ("set down", "dropping", "drop", "drops", "roi", "dat xuong",
       "pickup", "pick up", "impact", "thud")),
@@ -993,6 +1020,81 @@ def _shot_matches_trigger(shot: dict, content: list[str]) -> bool:
 _SNAKE_TOKEN_RE = re.compile(r"^[A-Z][A-Z0-9_]*_[A-Z0-9_]+$")
 _LINE_ID_SPLIT_RE = re.compile(r"[\s\u2014\u2013\-]+")
 
+# Phase G: SNAKE_CASE SFX triggers -> compiled action types. A cue
+# whose trigger names one of these actions anchors to the action
+# event's measured contact moment instead of the owning shot's
+# start. Tokens with no action verb (DOOR_*, LIGHTNING_*, ...) are
+# deliberately absent: the compiler has no such verbs, so those
+# cues keep the existing recorded-fallback behaviour and are never
+# given an invented semantic time.
+TRIGGER_ACTION_MAP = {
+    "PROP_WALLET_OPEN": "OPEN_WALLET",
+    "WALLET_OPEN": "OPEN_WALLET",
+    "PROP_WALLET_CLOSE": "CLOSE_WALLET",
+    "WALLET_CLOSE": "CLOSE_WALLET",
+    "PROP_PEN_WRITE": "WRITE",
+    "PEN_WRITE": "WRITE",
+    "PROP_PEN_SIGN": "SIGN",
+    "PEN_SIGN": "SIGN",
+    "PROP_HANDOVER": "HAND_OVER",
+    "HANDOVER": "HAND_OVER",
+    "PROP_PICK_UP": "PICK_UP",
+    "PICK_UP": "PICK_UP",
+    "PROP_TAKE_OUT": "TAKE_OUT",
+    "TAKE_OUT": "TAKE_OUT",
+    "PROP_PUT_AWAY": "PUT_AWAY",
+    "PUT_AWAY": "PUT_AWAY",
+    "PROP_GRASP": "PICK_UP",
+    "GRASP": "PICK_UP",
+    "PROP_RELEASE": "RELEASE",
+    "RELEASE": "RELEASE",
+    "PROP_HOLD_PEN": "HOLD_PEN",
+    "HOLD_PEN": "HOLD_PEN",
+    "PROP_BEND_PICK": "BEND_PICK",
+    "BEND_PICK": "BEND_PICK",
+    "PROP_KNEEL_PICK": "KNEEL_PICK",
+    "KNEEL_PICK": "KNEEL_PICK",
+    "PROP_RECEIVE_PROP": "RECEIVE_PROP",
+    "PROP_RECEIVE": "RECEIVE_PROP",
+    "RECEIVE_PROP": "RECEIVE_PROP",
+    "PROP_HAMMER_STRIKE": "HAMMER_STRIKE",
+    "HAMMER_STRIKE": "HAMMER_STRIKE",
+    "HAMMER_CONTACT": "HAMMER_STRIKE",
+    "HAMMER_METAL_CONTACT": "HAMMER_STRIKE",
+}
+
+
+def _anchor_fraction(action_type: str) -> float:
+    """Contact moment within an action event, as a fraction of its
+    duration. Grasp/transfer/release fractions are the SHARED
+    constants from animation/primitives.py (single source of truth
+    with prop_system.py); everything else anchors at the event
+    start (the motion — and its sound — begins there)."""
+    from .animation.primitives import (
+        HAND_OVER_TRANSFER_U,
+        KNEEL_PICK_GRASP_U,
+        PICK_UP_GRASP_U,
+        PUT_AWAY_RELEASE_U,
+        RECEIVE_REACH_U,
+    )
+    if action_type in ("PICK_UP", "TAKE_OUT", "HOLD"):
+        return float(PICK_UP_GRASP_U)
+    if action_type in ("BEND_PICK", "KNEEL_PICK"):
+        # Ground pickups grasp at the kneel fraction (shared with
+        # the prop state machine), not the standing pick-up
+        # fraction: the hand arrives with the kneel, later in the
+        # event.
+        return float(KNEEL_PICK_GRASP_U)
+    if action_type == "RECEIVE_PROP":
+        return float(RECEIVE_REACH_U)
+    if action_type == "HOLD_PEN":
+        return 0.40  # matches the HOLD_PEN grasp in prop_system.py
+    if action_type in ("PUT_AWAY", "RELEASE"):
+        return float(PUT_AWAY_RELEASE_U)
+    if action_type == "HAND_OVER":
+        return float(HAND_OVER_TRANSFER_U)
+    return 0.0
+
 
 def _line_ids_from_shot_entry(entry: dict) -> list[str]:
     """LINE_IDs a V1 SHOT entry is anchored to: explicit id lists
@@ -1068,8 +1170,10 @@ def audio_event_to_synth_job(event: AudioEvent, gains: dict[str, Any],
 def resolve_v1_cues(cues: list[Any] | None, *, package: dict | None,
                     shots: list[dict] | None,
                     timeline_entries: list[dict] | None,
-                    rainy: bool = False,
-                    script_text: str = "") -> dict[str, Any]:
+                    rainy_scenes: Any = None,
+                    script_text: str = "",
+                    compiled_events: list[dict] | None = None
+                    ) -> dict[str, Any]:
     """Resolve V1 audio cues against the measured timeline clock.
 
     TRIGGER RESOLUTION (measured times only; planner timestamps are
@@ -1077,9 +1181,12 @@ def resolve_v1_cues(cues: list[Any] | None, *, package: dict | None,
     * LINE_ID trigger -> that line's measured start time (via the
       LINE_ID -> ordinal map and the timeline entries' starts).
     * SNAKE_CASE event token (new dialect, e.g. PROP_WALLET_OPEN) ->
-      the owning shot's start: the plan shot carrying the V1 shot
-      id, else the V1 shot entry's LINE_ID anchor (shot TRIGGER),
-      else the scene start as a RECORDED fallback.
+      the compiled action event's contact moment when
+      ``compiled_events`` is supplied and the token names an action
+      verb (Phase G semantic anchor); otherwise the owning shot's
+      start: the plan shot carrying the V1 shot id, else the V1
+      shot entry's LINE_ID anchor (shot TRIGGER), else the scene
+      start as a RECORDED fallback.
     * Action-text trigger (old dialect) -> the start of the shot
       whose action text / cues match (word-boundary, accent
       stripped); else the scene start as a RECORDED fallback when
@@ -1188,6 +1295,87 @@ def resolve_v1_cues(cues: list[Any] | None, *, package: dict | None,
                                         f"{line_id} via shot TRIGGER"}
         return None
 
+    # Phase G semantic anchors: compiled action events indexed by
+    # action type. Times come from the compiler's measured spans on
+    # the same shot clock build_shot_clock reproduces, so an event
+    # time is directly comparable to shot/line times.
+    _events_by_type: dict[str, list[dict[str, Any]]] = {}
+    for _ev in compiled_events or []:
+        if not isinstance(_ev, dict):
+            continue
+        _atype = _ev.get("action_type")
+        try:
+            _start = float(_ev.get("start_time"))
+            _end = float(_ev.get("end_time"))
+        except (TypeError, ValueError):
+            continue
+        if _atype and _end >= _start:
+            _events_by_type.setdefault(str(_atype), []).append(_ev)
+
+    def _semantic_anchor(trigger: str, shot_id: str | None,
+                         scene_no: Any) -> dict[str, Any] | None:
+        """SNAKE_CASE trigger -> compiled action event contact
+        moment, or None when the token names no action verb or no
+        event of that type exists in the cue's shot/scene (the
+        caller then falls through to the existing shot/scene
+        behaviour — never an invented time)."""
+        action_type = TRIGGER_ACTION_MAP.get(trigger)
+        if action_type is None:
+            return None
+        candidates = _events_by_type.get(action_type, [])
+        if not candidates:
+            return None
+        scene_prefix = None
+        if shot_id:
+            for ev in candidates:
+                if str(ev.get("action_id", "")).startswith(
+                        str(shot_id) + "_"):
+                    chosen = ev
+                    break
+            else:
+                chosen = None
+            if chosen is None:
+                scene_prefix = str(shot_id).rsplit("_", 1)[0] + "_"
+        else:
+            chosen = None
+        if chosen is None and scene_prefix:
+            for ev in candidates:
+                if str(ev.get("action_id", "")).startswith(
+                        scene_prefix):
+                    chosen = ev
+                    break
+        if chosen is None:
+            return None
+        start = float(chosen["start_time"])
+        end = float(chosen["end_time"])
+        if action_type == "HAMMER_STRIKE":
+            # One SFX hit per strike: the event renders N strike
+            # cycles, and the sound must hit at every contact, not
+            # once at the event start. The cycle count is the
+            # primitive's own default (hammer_cycles), so audio
+            # and animation agree on the strike moments.
+            from .animation.primitives import (
+                hammer_cycles, hammer_strike_times)
+            cycles = hammer_cycles(end - start)
+            strikes = [round(start + t, 3) for t in hammer_strike_times(
+                end - start, cycles)]
+            return {"status": "resolved", "method": "action_event",
+                    "start": strikes[0], "anchor_end": round(end, 3),
+                    "anchor_event_id": str(chosen.get("action_id")),
+                    "strike_times": strikes,
+                    "note": f"TRIGGER {trigger} -> "
+                            f"{chosen.get('action_id')} "
+                            f"(HAMMER_STRIKE) {cycles} strike(s) at "
+                            f"{strikes} within {start:.2f}-{end:.2f}s"}
+        frac = _anchor_fraction(action_type)
+        at = start + frac * (end - start)
+        return {"status": "resolved", "method": "action_event",
+                "start": round(at, 3), "anchor_end": round(end, 3),
+                "anchor_event_id": str(chosen.get("action_id")),
+                "note": f"TRIGGER {trigger} -> {chosen.get('action_id')} "
+                        f"({action_type}) contact moment "
+                        f"u={frac} within {start:.2f}-{end:.2f}s"}
+
     def _resolve_sfx_trigger(trigger: str, scene_no: Any,
                              shot_id: str | None,
                              structured: bool) -> dict[str, Any]:
@@ -1209,8 +1397,12 @@ def resolve_v1_cues(cues: list[Any] | None, *, package: dict | None,
                             "start": None, "anchor_end": None,
                             "reason": f"LINE_ID {candidate} has no "
                                       "measured start time (V1E022)"}
-        # 2. SNAKE_CASE event token -> owning shot start.
+        # 2. SNAKE_CASE event token -> semantic action anchor, else
+        # owning shot start.
         if trigger and _SNAKE_TOKEN_RE.fullmatch(trigger):
+            anchor = _semantic_anchor(trigger, shot_id, scene_no)
+            if anchor is not None:
+                return anchor
             own = _owning_shot(shot_id)
             if own is not None:
                 return {"status": "resolved", "method": own["method"],
@@ -1612,9 +1804,10 @@ def resolve_v1_cues(cues: list[Any] | None, *, package: dict | None,
                         f"sound {kind}, which cannot fill an ambience "
                         "span — part not rendered")
                     continue
-                if rainy and kind == "rain_bed":
+                if (scene_no in (rainy_scenes or ())
+                        and kind == "rain_bed"):
                     reasons.append("rain bed deduped against the "
-                                   "global rain bed (not doubled)")
+                                   "scene rain bed (not doubled)")
                     dedupe_covered = True
                     continue
                 spec = SYNTHESIS_MAP[kind]
@@ -1641,81 +1834,89 @@ def resolve_v1_cues(cues: list[Any] | None, *, package: dict | None,
             dur_raw, dur_mode, dur_note = parse_cue_duration(cue)
             if dur_note:
                 reasons.append(dur_note)
-            start = timing["start"]
-            for part in mapping["parts"]:
-                kind = part["synth_kind"]
-                engine_event = part["engine_event"]
-                spec = SYNTHESIS_MAP[kind]
-                if kind in BED_KINDS:
-                    if rainy and kind == "rain_bed":
-                        reasons.append("rain bed deduped against the "
-                                       "global rain bed (not doubled)")
-                        dedupe_covered = True
+            # A hammer anchor carries every strike time: one
+            # segment per strike (the dedupe key keeps strikes
+            # distinct). Every other anchor is a single start.
+            starts = timing.get("strike_times") or [timing["start"]]
+            for start in starts:
+                for part in mapping["parts"]:
+                    kind = part["synth_kind"]
+                    engine_event = part["engine_event"]
+                    spec = SYNTHESIS_MAP[kind]
+                    if kind in BED_KINDS:
+                        if (scene_no in (rainy_scenes or ())
+                                and kind == "rain_bed"):
+                            reasons.append(
+                                "rain bed deduped against the "
+                                "scene rain bed (not doubled)")
+                            dedupe_covered = True
+                            continue
+                        span = scene_spans.get(scene_no)
+                        end = span[1] if span is not None else \
+                            start + spec["duration_default"]
+                        gain = round(
+                            spec["base_gain_db"]
+                            + _bus_offset(gains, "ambience")
+                            + intensity_offset(intensity_raw), 2)
+                        bed_key = ("ambience", kind, scene_no,
+                                   round(start, 1), round(end, 1))
+                        if bed_key in seen_beds:
+                            dedupe_covered = True
+                            continue
+                        seen_beds.add(bed_key)
+                        beds.append({
+                            "stem": "ambience", "synth_kind": kind,
+                            "start": start, "end": end, "gain_db": gain,
+                            "method": spec["method"], "cue_name": name,
+                            "cue_id": cue_id, "scene": scene_no,
+                            "shot_id": shot_id, "fade_down": False,
+                            "source": mapping["source"]})
+                        produced += 1
                         continue
-                    span = scene_spans.get(scene_no)
-                    end = span[1] if span is not None else \
-                        start + spec["duration_default"]
-                    gain = round(
-                        spec["base_gain_db"]
-                        + _bus_offset(gains, "ambience")
-                        + intensity_offset(intensity_raw), 2)
-                    bed_key = ("ambience", kind, scene_no,
-                               round(start, 1), round(end, 1))
-                    if bed_key in seen_beds:
-                        dedupe_covered = True
-                        continue
-                    seen_beds.add(bed_key)
-                    beds.append({
-                        "stem": "ambience", "synth_kind": kind,
-                        "start": start, "end": end, "gain_db": gain,
-                        "method": spec["method"], "cue_name": name,
-                        "cue_id": cue_id, "scene": scene_no,
-                        "shot_id": shot_id, "fade_down": False,
-                        "source": mapping["source"]})
-                    produced += 1
-                    continue
-                if dur_mode == "ACTION_DURATION":
-                    anchor_end = timing.get("anchor_end")
-                    if anchor_end is not None and anchor_end > start:
-                        duration = round(anchor_end - start, 3)
+                    if dur_mode == "ACTION_DURATION":
+                        anchor_end = timing.get("anchor_end")
+                        if anchor_end is not None and anchor_end > start:
+                            duration = round(anchor_end - start, 3)
+                        else:
+                            duration = spec["duration_default"]
+                            reasons.append(
+                                "DURATION_MODE: ACTION_DURATION without "
+                                "a locatable owning shot; synthesis "
+                                "default duration used")
+                    elif dur_raw is not None:
+                        duration = max(0.05, dur_raw)
                     else:
                         duration = spec["duration_default"]
-                        reasons.append(
-                            "DURATION_MODE: ACTION_DURATION without "
-                            "a locatable owning shot; synthesis "
-                            "default duration used")
-                elif dur_raw is not None:
-                    duration = max(0.05, dur_raw)
-                else:
-                    duration = spec["duration_default"]
-                if engine_event is not None:
-                    base_gain = EVENT_SFX_MAP[engine_event]["gain_db"]
-                else:
-                    base_gain = spec["base_gain_db"]
-                gain = round(base_gain + _bus_offset(gains, "sfx")
-                             + intensity_offset(intensity_raw), 2)
-                seg_key = (kind, round(start, 1))
-                if seg_key in seen_segments:
-                    dedupe_covered = True
-                    continue
-                seen_segments.add(seg_key)
-                sfx_label = (EVENT_SFX_MAP[engine_event]["sfx"]
-                             if engine_event is not None
-                             else kind.upper())
-                segments.append({
-                    "event_type": engine_event or kind,
-                    "at_seconds": round(start, 3),
-                    "end_seconds": round(start + duration, 3),
-                    "duration": round(duration, 3),
-                    "sfx": sfx_label, "category": "foley",
-                    "gain_db": gain, "synth_kind": kind,
-                    "method": spec["method"], "cue_name": name,
-                    "cue_id": cue_id, "scene": scene_no,
-                    "shot_id": shot_id,
-                    "source": ("v1_cue+trait"
-                               if mapping["source"] == "trait_blocks"
-                               else "v1_cue")})
-                produced += 1
+                    if engine_event is not None:
+                        base_gain = EVENT_SFX_MAP[engine_event]["gain_db"]
+                    else:
+                        base_gain = spec["base_gain_db"]
+                    gain = round(base_gain + _bus_offset(gains, "sfx")
+                                 + intensity_offset(intensity_raw), 2)
+                    seg_key = (kind, round(start, 1))
+                    if seg_key in seen_segments:
+                        dedupe_covered = True
+                        continue
+                    seen_segments.add(seg_key)
+                    sfx_label = (EVENT_SFX_MAP[engine_event]["sfx"]
+                                 if engine_event is not None
+                                 else kind.upper())
+                    segments.append({
+                        "event_type": engine_event or kind,
+                        "at_seconds": round(start, 3),
+                        "end_seconds": round(start + duration, 3),
+                        "duration": round(duration, 3),
+                        "sfx": sfx_label, "category": "foley",
+                        "gain_db": gain, "synth_kind": kind,
+                        "method": spec["method"], "cue_name": name,
+                        "cue_id": cue_id, "scene": scene_no,
+                        "shot_id": shot_id,
+                        "anchor_method": timing.get("method"),
+                        "anchor_event_id": timing.get("anchor_event_id"),
+                        "source": ("v1_cue+trait"
+                                   if mapping["source"] == "trait_blocks"
+                                   else "v1_cue")})
+                    produced += 1
         if produced == 0 and not dedupe_covered:
             reasons.append("no mixer job produced")
             _finish("unrendered", reasons)

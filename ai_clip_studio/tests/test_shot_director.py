@@ -1,7 +1,7 @@
 """Unit tests for the ShotDirector (§4) — direction, not shot inflation.
 
 Run:  python3 -m unittest discover -s ai_clip_studio/tests -v
-from ~/workspace/video-16x9-v2/
+from ~/workspace/agent/
 """
 import sys
 import unittest

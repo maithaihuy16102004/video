@@ -631,16 +631,27 @@ class TestMapping(unittest.TestCase):
         self.assertTrue(all(c["render"] == "rendered"
                             for c in rep["cues"]))
 
-    def test_rain_cue_dedupes_against_global_rain_bed(self):
+    def test_rain_cue_dedupes_against_own_scene_rain_bed(self):
         package, shots, entries = _resolver_fixture()
         rep = resolve_v1_cues(
             [_cue("AMBIENCE", "Light rain", "", scene=1)],
             package=package, shots=shots, timeline_entries=entries,
-            rainy=True)
+            rainy_scenes={1})
         self.assertEqual(rep["beds"], [])
         self.assertEqual(rep["cues"][0]["render"], "rendered")
         self.assertTrue(any("rain bed" in r
                             for r in rep["cues"][0]["reasons"]))
+
+    def test_rain_cue_in_dry_scene_renders_own_bed(self):
+        # Scene-local isolation: another scene's rain must not
+        # silence this scene's rain cue.
+        package, shots, entries = _resolver_fixture()
+        rep = resolve_v1_cues(
+            [_cue("AMBIENCE", "Light rain", "", scene=1)],
+            package=package, shots=shots, timeline_entries=entries,
+            rainy_scenes={2})
+        self.assertEqual(len(rep["beds"]), 1)
+        self.assertEqual(rep["beds"][0]["synth_kind"], "rain_bed")
 
     def test_synthesis_map_covers_engine_events(self):
         for event, kind in (("door_contact", "knock"),
@@ -748,7 +759,7 @@ class TestMixAudio(unittest.TestCase):
             entries = self._entries(tmp)
             segments, beds = self._jobs()
             mix, info = _mix_audio(
-                tmp, entries, 8.5, False, segments=segments,
+                tmp, entries, 8.5, [], segments=segments,
                 beds=beds, mix_gains=resolve_mix_gains({}),
                 none_spans={})
             # Stems exported, mix exact length, fade-out present.
@@ -789,7 +800,7 @@ class TestMixAudio(unittest.TestCase):
             segments, _ = self._jobs()
             segments[0] = dict(segments[0], gain_db=6.0)
             _, info = _mix_audio(
-                tmp, entries, 8.5, False, segments=segments, beds=[],
+                tmp, entries, 8.5, [], segments=segments, beds=[],
                 mix_gains=resolve_mix_gains({}), none_spans={})
             restraint = info["restraint"]
             self.assertTrue(restraint["ok"])
@@ -803,7 +814,7 @@ class TestMixAudio(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             tmp = Path(tmp)
             entries = self._entries(tmp)
-            mix, info = _mix_audio(tmp, entries, 8.5, True)
+            mix, info = _mix_audio(tmp, entries, 8.5, [(0.0, 8.5)])
             self.assertAlmostEqual(measure_wav_duration(mix), 8.5,
                                    delta=0.05)
             self.assertIsNotNone(info["rain_db"])
@@ -816,7 +827,7 @@ class TestMixAudio(unittest.TestCase):
             tmp = Path(tmp)
             entries = self._entries(tmp)
             mix, info = _mix_audio(
-                tmp, entries, 8.5, False, segments=[], beds=[],
+                tmp, entries, 8.5, [], segments=[], beds=[],
                 mix_gains=resolve_mix_gains({}), none_spans={})
             self.assertEqual(set(info["stems"]),
                              {"dialogue.wav", "narration.wav"})
@@ -828,7 +839,7 @@ class TestMixAudio(unittest.TestCase):
             tmp = Path(tmp)
             entries = self._entries(tmp)
             _, info = _mix_audio(
-                tmp, entries, 8.5, True, segments=[], beds=[],
+                tmp, entries, 8.5, [(0.0, 8.5)], segments=[], beds=[],
                 mix_gains=resolve_mix_gains({}),
                 none_spans={"ambience": [[4.0, 6.0]]})
             ambience = Path(info["stems"]["ambience.wav"])
@@ -845,7 +856,7 @@ class TestMixAudio(unittest.TestCase):
             gains = resolve_mix_gains(
                 {"v1_global_audio": dict(SPEC_GAINS)})
             mix, info = _mix_audio(
-                tmp, entries, 8.5, False, segments=segments,
+                tmp, entries, 8.5, [], segments=segments,
                 beds=beds, mix_gains=gains, none_spans={})
             self.assertEqual(info["master_limit_db"], -1.0)
             r = subprocess.run(
@@ -873,7 +884,7 @@ class TestMixAudio(unittest.TestCase):
             _, beds = self._jobs()
             beds = [dict(beds[0], end=6.0)]
             _, info = _mix_audio(
-                tmp, entries, 8.5, False, segments=[], beds=beds,
+                tmp, entries, 8.5, [], segments=[], beds=beds,
                 mix_gains=resolve_mix_gains({}), none_spans={})
             ambience = Path(info["stems"]["ambience.wav"])
             self.assertEqual(
@@ -925,7 +936,7 @@ class TestEp1OldDialectOffline(unittest.TestCase):
         entries.sort(key=lambda e: e["line_index"])
         rep = resolve_v1_cues(
             package["v1_audio_cues"], package=package, shots=shots,
-            timeline_entries=entries, rainy=False,
+            timeline_entries=entries,
             script_text=(job_dir / "script.txt").read_text(
                 encoding="utf-8"))
         # Honest counts from the real data (brief said 8 MEME_NOTEs
@@ -1115,7 +1126,7 @@ class TestEp1NewDialectOffline(unittest.TestCase):
     def test_new_script_cue_resolution_counts(self):
         package, shots, entries, cues = _new_dialect_fixture()
         rep = resolve_v1_cues(cues, package=package, shots=shots,
-                              timeline_entries=entries, rainy=False)
+                              timeline_entries=entries)
         self.assertEqual(rep["total_cues"], 18)
         self.assertEqual(rep["rendered_cues"], 18)
         self.assertEqual(rep["unrendered_cues"], 0)
@@ -1225,7 +1236,8 @@ class TestEp1RealPackageOffline(unittest.TestCase):
         entries.sort(key=lambda e: e["line_index"])
         line_starts = {e["line_index"]: e["start"] for e in entries}
         rep = resolve_v1_cues(cues, package=package, shots=shots,
-                              timeline_entries=entries, rainy=True)
+                              timeline_entries=entries,
+                              rainy_scenes={6})
         self.assertEqual(rep["total_cues"], 18)
         self.assertEqual(rep["rendered_cues"], 18)
         self.assertEqual(rep["unrendered_cues"], 0)
@@ -1340,8 +1352,8 @@ EP1_SFX_NONE_SHOTS = frozenset({
 class TestEp1V2Stage3Continuation(unittest.TestCase):
     """Stage 3 continuation requirements, checked on the real Ep1
     v2 package (parser + adapter + plan_shots clock, no rendering)
-    and on the resolver fixture. rainy=True matches the real
-    product flow (scene 6 carries the 'rain' action cue)."""
+    and on the resolver fixture. rainy_scenes={6} matches the
+    real product flow (scene 6 carries the 'rain' action cue)."""
 
     def _real_ep1(self):
         text = (REPO_ROOT / "examples"
@@ -1370,7 +1382,7 @@ class TestEp1V2Stage3Continuation(unittest.TestCase):
         entries.sort(key=lambda e: e["line_index"])
         rep = resolve_v1_cues(
             package["v1_audio_cues"], package=package, shots=shots,
-            timeline_entries=entries, rainy=True)
+            timeline_entries=entries, rainy_scenes={6})
         total_sec = clock["total_shot_sec"] + 0.5
         content_end = max(
             span["end"] for span in clock["shot_spans"]
@@ -1560,7 +1572,7 @@ class TestBgmDuckingMeasurement(unittest.TestCase):
             gains = resolve_mix_gains(
                 {"v1_global_audio": dict(SPEC_GAINS)})
             _, info = _mix_audio(
-                tmp, entries, 8.5, False, segments=[], beds=beds,
+                tmp, entries, 8.5, [], segments=[], beds=beds,
                 mix_gains=gains, none_spans={})
             # Separate buses: voice stems + music stem, no foley
             # stem when no segments were supplied.

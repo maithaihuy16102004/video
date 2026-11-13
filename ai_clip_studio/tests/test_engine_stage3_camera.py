@@ -9,7 +9,7 @@ occlusion, split-screen, shot-level character view, map-board
 frontal override.
 
 Run: python3 -m unittest ai_clip_studio.tests.test_engine_stage3_camera
-from ~/workspace/video-16x9-v2/
+from ~/workspace/agent/
 """
 import math
 import sys
@@ -291,6 +291,15 @@ class TestRenderLevelCamera(unittest.TestCase):
                 / "hitler_ep01_munich_1914.studio.md").read_text(
                     encoding="utf-8")
         package = adapt_document(parse_studio_script_v1(text))
+        # W2: map shots route through render_map, which fails loudly
+        # in historical mode without a verified dataset. This test
+        # measures the CAMERA frontal override, not map data, so the
+        # fixture records an explicit modern-mode decision (test-only;
+        # production Ep1 without a recorded decision still fails
+        # loudly — see test_environment_w2).
+        package["map_config"] = {
+            "mode": "modern", "override_forbidden": True,
+            "override_note": "TEST FIXTURE ONLY: camera-override test"}
         shots = plan_shots(
             package,
             [{"line_index": i + 1, "duration": 3.0} for i in range(9)])

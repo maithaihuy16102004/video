@@ -8,7 +8,7 @@ plus general kinds; props attach to the holder's hand, and fall to
 the ground only when no holder is known.
 
 Run: python3 -m unittest ai_clip_studio.tests.test_engine_stage3_locations_props
-from ~/workspace/video-16x9-v2/
+from ~/workspace/agent/
 """
 import sys
 import tempfile
@@ -165,13 +165,19 @@ class TestProps(unittest.TestCase):
             _draw_prop(ImageDraw.Draw(img), 100, 80, kind=kind)
             canvases[kind] = np.asarray(img).astype(int)
         kinds = sorted(PROP_KINDS)
+        # Compare within the footprint region around the draw
+        # point: a full-canvas mean dilutes thin geometry shapes
+        # (staff vs trident) with empty canvas. Most-similar pair
+        # measured 3.34 (staff/trident) in the footprint region.
+        y0, y1, x0, x1 = 45, 115, 52, 148
         worst = None
         for i, a in enumerate(kinds):
             for b in kinds[i + 1:]:
-                diff = float(np.abs(canvases[a] - canvases[b]).mean())
+                diff = float(np.abs(
+                    canvases[a][y0:y1, x0:x1]
+                    - canvases[b][y0:y1, x0:x1]).mean())
                 if worst is None or diff < worst[0]:
                     worst = (diff, a, b)
-        # Most-similar pair measured 3.86 (book/wallet).
         self.assertGreater(worst[0], 1.0,
                            f"closest pair {worst[1]}/{worst[2]}")
 

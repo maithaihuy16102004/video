@@ -61,7 +61,7 @@ Không tạo frontend mới. Các sửa đổi tối thiểu, đều trong
 5. **Chạy 2 backend cùng lúc trên máy Mai:**
    - Backend cũ: `python pipeline/studio_api.py` → `127.0.0.1:8787`
    - Orchestrator mới: `python -m ai_clip_studio.server --port 8788`
-     (chạy từ `~/workspace/video-16x9-v2/` sau khi push code lên repo
+     (chạy từ `~/workspace/agent/` sau khi push code lên repo
      và pull về máy cô ấy — hiện chưa push được vì GitHub App chưa có
      quyền, xem STATUS.md).
 

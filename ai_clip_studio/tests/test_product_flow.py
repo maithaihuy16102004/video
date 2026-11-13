@@ -568,6 +568,47 @@ class TestFrameCountExact(unittest.TestCase):
                 "frame count must equal round(duration x fps)")
 
 
+class TestRenderUsesFrozenShots(unittest.TestCase):
+    """The renderer renders the FROZEN plan verbatim (Ep1 2026-11-13:
+    the internal re-plan diverged 5.2 s from the frozen timeline, so
+    the mux's -t cut the final line's audio and the verifier could
+    not find it)."""
+
+    def test_passed_shots_win_over_replan(self):
+        pkg = _tiny_package()
+        timeline = [{"line_index": 1, "duration": 2.0}]
+        shots = plan_shots(pkg, timeline)
+        # Stretch the first shot the way the frozen stage-7 plan
+        # differs from a fresh re-plan; the render must follow
+        # the passed plan, not recompute it.
+        shots[0] = dict(shots[0],
+                        duration=round(shots[0]["duration"] + 1.0, 3))
+        expected = (round(sum(s["duration"] for s in shots) * 24)
+                    + round(0.5 * 24))
+        with tempfile.TemporaryDirectory() as tmp:
+            out = render_product_video(pkg, timeline, Path(tmp) / "job",
+                                       workers=1, shots=shots)
+        self.assertEqual(out["shots"][0]["duration"],
+                         shots[0]["duration"])
+        self.assertEqual(out["n_frames"], expected)
+        # The caller's plan is not mutated (index/n_frames are
+        # written to copies).
+        self.assertNotIn("index", shots[0])
+        self.assertNotIn("n_frames", shots[0])
+
+    def test_storyboard_stills_use_frozen_shots(self):
+        pkg = _tiny_package()
+        timeline = [{"line_index": 1, "duration": 2.0}]
+        shots = plan_shots(pkg, timeline)
+        shots[0] = dict(shots[0],
+                        duration=round(shots[0]["duration"] + 1.0, 3))
+        with tempfile.TemporaryDirectory() as tmp:
+            stills = render_storyboard_stills(
+                pkg, timeline, Path(tmp) / "board", shots=shots)
+        self.assertEqual(len(stills), len(shots))
+        self.assertEqual(stills[0]["duration"], shots[0]["duration"])
+
+
 class TestEndCardSeconds(unittest.TestCase):
     """Stage 3 integration: the timeline must cover the end card."""
 

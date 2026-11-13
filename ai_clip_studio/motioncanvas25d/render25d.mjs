@@ -38,6 +38,9 @@
  *   npm install
  *   npm run build-world
  *   node render25d.mjs --spec example_spec.json --out frames --fps 24
+ *   # A real pipeline job spec (world25d_spec.json) holds one world
+ *   # per scene under scene_specs[] — render one scene at a time:
+ *   node render25d.mjs --spec world25d_spec.json --scene 1 --out frames_sc1 --fps 24
  *
  * Requires: puppeteer-core, three (see package.json). No Motion Canvas
  * dependency for this script.
@@ -134,10 +137,10 @@ export function detectChrome() {
 }
 
 function parseArgs(argv) {
-  const out = { spec: 'example_spec.json', outDir: 'frames', fps: 24 };
+  const out = { spec: 'example_spec.json', outDir: 'frames', fps: 24, scene: null };
   for (let i = 0; i < argv.length; i++) {
     const flag = argv[i];
-    if (flag !== '--spec' && flag !== '--out' && flag !== '--fps') {
+    if (flag !== '--spec' && flag !== '--out' && flag !== '--fps' && flag !== '--scene') {
       throw new Error(`unknown argument: ${flag}`);
     }
     const value = argv[++i];
@@ -147,11 +150,49 @@ function parseArgs(argv) {
     if (flag === '--spec') out.spec = value;
     if (flag === '--out') out.outDir = value;
     if (flag === '--fps') out.fps = Number(value);
+    if (flag === '--scene') out.scene = Number(value);
   }
   if (!Number.isFinite(out.fps) || out.fps <= 0) {
     throw new Error(`--fps must be a positive number, got ${out.fps}`);
   }
+  if (out.scene !== null && (!Number.isInteger(out.scene) || out.scene < 1)) {
+    throw new Error(`--scene must be a positive integer (1-based scene number), got ${out.scene}`);
+  }
   return out;
+}
+
+/** Normalize a spec file to {duration_seconds, world}.
+ * Single-world specs (example_spec.json) pass through. Job specs
+ * (world25d_spec.json) carry scene_specs[] and require --scene N,
+ * matched against each entry's `scene` number. */
+export function selectSceneWorld(specJson, scene) {
+  if (specJson && typeof specJson.world === 'object' && specJson.world !== null) {
+    if (scene !== null) {
+      throw new Error('--scene only applies to job specs with scene_specs; this spec has a single top-level world.');
+    }
+    return specJson;
+  }
+  const scenes = specJson && Array.isArray(specJson.scene_specs) ? specJson.scene_specs : null;
+  if (!scenes || scenes.length === 0) {
+    throw new Error('spec has neither a "world" object nor a non-empty "scene_specs" list.');
+  }
+  if (scene === null) {
+    throw new Error(
+      `job spec holds ${scenes.length} scenes; pass --scene N (1-based). ` +
+      `Available scenes: ${scenes.map((s) => s.scene).join(', ')}.`,
+    );
+  }
+  const match = scenes.find((s) => s.scene === scene);
+  if (!match) {
+    throw new Error(
+      `scene ${scene} not in this spec. ` +
+      `Available scenes: ${scenes.map((s) => s.scene).join(', ')}.`,
+    );
+  }
+  if (!match.world || typeof match.world !== 'object') {
+    throw new Error(`scene ${scene} has no "world" object.`);
+  }
+  return { duration_seconds: match.duration_seconds, world: match.world };
 }
 
 function blocked(message) {
@@ -189,15 +230,17 @@ async function main() {
       + 'Usage: node render25d.mjs --spec example_spec.json --out frames --fps 24',
     );
   }
-  const { spec, outDir, fps } = args;
+  const { spec, outDir, fps, scene } = args;
   let specJson;
   try {
     specJson = JSON.parse(readFileSync(resolve(spec), 'utf-8'));
   } catch (error) {
     blocked(`RENDER BLOCKED: cannot read spec ${spec}: ${error.message}`);
   }
-  if (!specJson || typeof specJson.world !== 'object' || specJson.world === null) {
-    blocked(`RENDER BLOCKED: spec ${spec} has no "world" object.`);
+  try {
+    specJson = selectSceneWorld(specJson, scene);
+  } catch (error) {
+    blocked(`RENDER BLOCKED: ${error.message}`);
   }
 
   const { path: chromePath, detail } = detectChrome();

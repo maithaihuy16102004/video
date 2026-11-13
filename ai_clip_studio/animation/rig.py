@@ -43,7 +43,16 @@ HIP_HALF_FRAC = 0.06
 # Body-variant width scale. ONE scale multiplies torso width AND limb
 # width together, so a sturdy character is uniformly thicker, never a
 # thin arm on a wide torso (PREMIUM_STICKMAN v4 line rule).
-BODY_WIDTH_SCALE = {"slim": 0.9, "standard": 1.0, "sturdy": 1.15}
+BODY_WIDTH_SCALE = {"slim": 0.9, "standard": 1.0, "sturdy": 1.15,
+                    "massive": 1.30}
+# "massive" (Test F, 2026-11-12): a general large-build variant for
+# characters whose script traits declare a massive / giant build
+# (BODY_TYPE "large muscular", "massive", ...). The same locked rule
+# applies: torso + limb widths scale TOGETHER, so line thickness
+# stays uniform within one character. Height scale is separate
+# (the scale-variant mechanism); a massive character is wide, and
+# may additionally be tall. trait_derivation maps script BODY_TYPE
+# text to this variant (ATLAS wiring); the rig only honours it.
 
 # Moustache styles (v8, animation audit 2026-11-11): a character's
 # signature facial trait, carried as template data. See Stickman.
@@ -75,7 +84,14 @@ def ik_2bone(ax, ay, tx, ty, l1, l2, bend=+1):
         # Target on the anchor: no direction to bend toward. Put the
         # middle joint straight down at l1 so bone lengths stay exact.
         return ax, ay + l1
-    d = max(1.0, min(raw_d, l1 + l2 - 0.5))
+    # Clamp to the reach annulus: too far stretches the chain (the
+    # old too-far clamp); too close (|l1-l2|) folds it back on
+    # itself and the old code stretched bone 1 past l1 (W4 rig
+    # hardening — a hand target inside the annulus must fold, never
+    # stretch). The middle joint then sits at the folded geometry
+    # and both bone lengths stay exact.
+    d = max(max(1.0, abs(l1 - l2) + 0.5),
+            min(raw_d, l1 + l2 - 0.5))
     # unit vector anchor->target
     ux, uy = dx / raw_d, dy / raw_d
     # distance from anchor to the middle joint projected on the line
@@ -137,7 +153,14 @@ def interp_keys(keys, t):
 #     other foot strikes (+0.20 = 20% double support, a walk;
 #     negative = flight phase, a run).
 GAIT_DEFAULT = {
+    # "stride_frac" is a LEGACY alias for the STEP length (one
+    # footfall): strikes are step apart, same-foot strikes 2*step
+    # apart (see primitives._foot_state). New code uses the explicit
+    # step_length_frac / stride_length_frac keys; stride_frac is
+    # kept equal to the step length for the proven core.
     "stride_frac": 0.25,
+    "step_length_frac": 0.25,
+    "stride_length_frac": 0.50,
     "arm_amp": 0.25,
     "lean": 0.12,
     "bob_frac": 0.015,
@@ -164,6 +187,8 @@ GAIT_DEFAULT = {
 # sustained run cycle.
 GAIT_RUN = {
     "stride_frac": 0.28,
+    "step_length_frac": 0.28,
+    "stride_length_frac": 0.56,
     "arm_amp": 0.60,
     "lean": 0.40,
     "bob_frac": 0.02,
@@ -181,7 +206,8 @@ class Stickman:
                  name="lustig",
                  template="male", body_variant="standard",
                  hair_style=None, glasses=False, cane=False,
-                 costume="none", gait=None):
+                 costume="none", gait=None, gait_profile=None,
+                 eye_count=2):
         self.H = height
         self.head_r = HEAD_RATIO * height / 2
         self.torso = TORSO_FRAC * height
@@ -209,11 +235,23 @@ class Stickman:
                 f"(expected one of {sorted(MOUSTACHE_STYLES)})")
         self.moustache_style = moustache_style
         self.moustache = moustache_style != "none"
+        # eye_count (Test F, 2026-11-12): a general face trait, 1 or 2.
+        # A single central eye is a script-declared distinctive
+        # feature (e.g. a one-eyed giant); the face drawing honours
+        # it (one larger centred eye, same line language, same
+        # expression parameters). Default 2 reproduces every
+        # existing character exactly. Any other value is a data
+        # error, raised loudly like an unknown moustache style.
+        if eye_count not in (1, 2):
+            raise ValueError(
+                f"unknown eye_count: {eye_count!r} (expected 1 or 2)")
+        self.eye_count = int(eye_count)
         self.name = name
         # PREMIUM_STICKMAN v4 identity (see animation/character_art.py).
         # template: male | female | child | elderly. body_variant scales
         # torso/limb widths TOGETHER (slim 0.9 / standard 1.0 / sturdy
-        # 1.15) so line thickness stays uniform within one character.
+        # 1.15 / massive 1.30) so line thickness stays uniform within
+        # one character.
         self.template = template
         self.body_variant = body_variant
         self.width_scale = BODY_WIDTH_SCALE.get(body_variant, 1.0)
@@ -232,6 +270,14 @@ class Stickman:
         self.gait = dict(GAIT_DEFAULT)
         if gait:
             self.gait.update(gait)
+        # gait_profile (D1, Cinematic Engine Upgrade 2026-11-12): an
+        # optional GaitProfile, preset name, or gait dict carried by
+        # the character. walk_to/run_to/walk_mud read it when no
+        # explicit profile is passed; None = the legacy shared gait.
+        # Stored as given (no contract import here); locomotion.py
+        # resolves it. The per-template gait dicts above remain
+        # unread -- parametric profiles are the D1 mechanism.
+        self.gait_profile = gait_profile
         # pose defaults (angles in radians; + = forward / toward facing)
         self.pose = {
             "root_x": 960.0, "root_y": 900.0, "facing": 1,
@@ -353,7 +399,7 @@ class Stickman:
         return J
 
 
-def walk_pose(phase, stride=0.55, amp=0.5):
+def walk_pose(phase, stride=0.55, amp=0.5, profile=None):
     """Walk-cycle joint angles. phase in radians; one full cycle = 2 steps.
     Returns dict of thigh/knee/arm angles + bob. Foot contacts happen at
     phase 0 and pi (each foot in turn).
@@ -363,21 +409,75 @@ def walk_pose(phase, stride=0.55, amp=0.5):
     at mid-stance (phase pi/2, 3pi/2) -- Richard Williams' walk cycle
     (Contact, Down, Passing, Up). The old bob ``10*abs(cos)`` peaked
     exactly at foot strike, i.e. the walk was upside-down.
+
+    With no ``profile`` the output is the legacy formula, unchanged.
+    With a ``profile`` (a GaitProfile, a preset name, or a gait dict
+    with step_length_frac/arm_pose/head_stability/posture keys) the
+    SAME formula is driven by the profile: thigh amplitude from the
+    step length (asin of half-step / leg length), arm amplitude and
+    pose from arm_pose, bob from head_stability, lean from posture.
+    This is a parameterization of one engine, not a second walk
+    system. The rendered engine is ``primitives._locomote``
+    (planted-foot, space-based); this helper is for analytic /
+    prototype use.
     """
     s = math.sin(phase)
     c = math.cos(phase)
+    if profile is None:
+        thigh_amp = amp
+        arm_mode = "swing"
+        arm_amp = 0.45
+        bob_scale = 1.0
+        lean = 0.08
+        elbows = (0.25, 0.25)
+    else:
+        if isinstance(profile, dict):
+            step = float(profile.get(
+                "step_length_frac", profile.get("stride_frac", 0.29)))
+            arm_mode = profile.get("arm_pose", "swing")
+            head_stability = float(profile.get("head_stability", 1.0))
+            posture = profile.get("posture", "upright")
+            arm_amp = float(profile.get("arm_amp", 0.45))
+        else:
+            from .locomotion import resolve_gait_profile
+            resolved = resolve_gait_profile(profile)
+            step = resolved.step_length
+            arm_mode = resolved.arm_pose
+            head_stability = resolved.head_stability
+            posture = resolved.posture
+            arm_amp = 0.45
+        leg_frac = UPPER_LEG_FRAC + LOWER_LEG_FRAC
+        thigh_amp = math.asin(min(1.0, (step / 2.0) / leg_frac))
+        bob_scale = max(0.15, 1.15 - head_stability)
+        lean = {"upright": 0.08, "stooped": 0.22,
+                "military": 0.04, "regal": 0.06}.get(posture, 0.08)
+        elbows = (0.25, 0.25)
+    if arm_mode == "carrying":
+        arm_l = arm_r = 0.55
+        elbows = (0.90, 0.90)
+    elif arm_mode == "task":
+        arm_l = 0.08 + 0.25 * arm_amp * s
+        arm_r = 0.08 - 0.25 * arm_amp * s
+        elbows = (0.35, 0.35)
+    elif arm_mode == "restrained":
+        arm_l = 0.10 * arm_amp * s
+        arm_r = -0.10 * arm_amp * s
+        elbows = (0.15, 0.15)
+    else:  # swing
+        arm_l = -arm_amp * s
+        arm_r = arm_amp * s
     return {
-        "thigh_l": amp * s,
-        "thigh_r": -amp * s,
+        "thigh_l": thigh_amp * s,
+        "thigh_r": -thigh_amp * s,
         # knee bends when the leg is swinging back / lifting
         "knee_l": max(0.0, -0.9 * c) + 0.15,
         "knee_r": max(0.0, 0.9 * c) + 0.15,
-        "arm_l": -0.45 * s,
-        "arm_r": 0.45 * s,
-        "elbow_l": 0.25,
-        "elbow_r": 0.25,
-        "bob": 10.0 * abs(s),
-        "torso_lean": 0.08,
+        "arm_l": arm_l,
+        "arm_r": arm_r,
+        "elbow_l": elbows[0],
+        "elbow_r": elbows[1],
+        "bob": 10.0 * abs(s) * bob_scale,
+        "torso_lean": lean,
     }
 
 

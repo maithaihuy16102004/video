@@ -46,8 +46,11 @@ SOFTWARE.
 Only techniques and measured values were adapted. No artwork, characters,
 scenes, scripts, branding, or reference imagery was taken. Every adapted
 file below carries an MIT attribution header naming the source repo and
-copyright. Nothing is wired into the pipeline, renderer, or server yet —
-wiring is Phase 2 work, after Stage 3 lands.
+copyright. The three audit ADOPT modules (frame_qa, synth_sfx,
+look_targets) remain unwired — wiring is Phase 2 work. The P-S1
+painters (paint_textures.py, added 2026-11-12 during consolidation
+scene integration) ARE wired into `environment_v2.render_environment`
+and therefore into the product background layers.
 
 | File in this repo | Source file(s) in claude-animated-shorts | What was adapted |
 |---|---|---|
@@ -57,6 +60,8 @@ wiring is Phase 2 work, after Stage 3 lands.
 | `ai_clip_studio/tests/test_frame_qa.py` | (tests for the adaptation above) | New tests, written for this repo; no source test code was copied (the source repo ships no tests). |
 | `ai_clip_studio/tests/test_synth_sfx.py` | (tests for the adaptation above) | New tests, written for this repo. |
 | `ai_clip_studio/tests/test_look_targets.py` | (tests for the adaptation above) | New tests, written for this repo. |
+| `ai_clip_studio/paint_textures.py` | `templates/bridge/paint.ts` | Texture-painting algorithms only, re-implemented in PIL: seeded HSL jitter (`jit`), per-course/per-brick variation, bevel highlights, blotches, cracks, grime, and the facade window grid (floors per 2.8 m, bays per 2.2 m, 0.85 x 1.25 m windows). Palette-parameterized — the source's Broughton colours were NOT ported; every painter takes its palette from the calling archetype/element. THREE.js CanvasTexture plumbing NOT ported; perspective quad pasting is new PIL code. Wired into `environment_v2.py` (P-S1): plaster/brick/stone/marble faces + roof-tile slopes, windows layer OFF (3D window elements already draw openings). |
+| `ai_clip_studio/tests/test_paint_textures.py` | (tests for the adaptation above) | New tests, written for this repo; no source test code was copied (the source repo ships no tests). |
 
 ### Explicitly EXCLUDED — never copied, moved, uploaded, or pushed
 

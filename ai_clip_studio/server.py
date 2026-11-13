@@ -1,7 +1,10 @@
 """AI Clip Studio product server (stdlib only, no new deps).
 
-Run:  GEMINI_API_KEY=... python -m ai_clip_studio.server [--port 8788]
-      (from ~/workspace/video-16x9-v2/)
+Run:  python3 -m ai_clip_studio.server --port 8788
+      (from ~/workspace/agent/)
+
+Gemini planning goes through the registered connector helper
+(custom.gemini); no GEMINI_API_KEY env var is used or needed.
 
 Implements Mai's "luồng chuẩn" (standard flow) end to end:
 
@@ -54,7 +57,7 @@ from typing import Any
 
 from .drive_uploader import GwsCliDriveClient
 from .gemini_planner import resolve_plan
-from .preflight import run_preflight
+from .preflight import run_preflight, semantic_preflight_checks
 from .product_flow import (
     TEST_FOLDER_ID, approve_master, run_product_job,
 )
@@ -799,6 +802,11 @@ class Handler(BaseHTTPRequestHandler):
                            "detail": "hook + twist identified by the planner"
                                      if package.get("hook") and package.get("twist")
                                      else "hook or twist missing — story may lack a surprise ending"})
+            # Semantic conflict checks (directive §4): R1-R3 over
+            # the real package; a blocking conflict fails preflight.
+            for check in semantic_preflight_checks(package):
+                checks.append({"name": check.name, "passed": check.passed,
+                               "detail": check.detail})
             passed = result.passed and all(c["passed"] for c in checks)
             return self._send({"passed": passed, "planner": planner,
                                "checks": checks})

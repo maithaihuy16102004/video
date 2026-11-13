@@ -1,0 +1,17 @@
+Creative Commons Attribution 4.0 International (CC BY 4.0) — reference
+
+Canonical text: https://creativecommons.org/licenses/by/4.0/legalcode
+Deed summary: https://creativecommons.org/licenses/by/4.0/deed
+
+You are free to share (copy and redistribute) and adapt (remix,
+transform, build upon) the material for any purpose, even
+commercially, under these terms: you must give appropriate credit,
+provide a link to the license, and indicate if changes were made. You
+may do so in any reasonable manner, but not in any way that suggests
+the licensor endorses you or your use. No additional restrictions may
+be applied.
+
+Used by: 273 boundary segments in ohm_1914_europe (IGN CNIG, Kartverket,
+eProstor Slovenia, UN OCHA HDX — see the dataset ATTRIBUTION.md). The
+on-frame credit line + this registry's ATTRIBUTION.md satisfy the
+attribution term for rendered video distribution.

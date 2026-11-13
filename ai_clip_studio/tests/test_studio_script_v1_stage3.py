@@ -558,14 +558,18 @@ class TestShotFields(unittest.TestCase):
 
 
 class TestCharacterExtrasAndHeadRatio(unittest.TestCase):
-    def test_voice_none_is_extra(self):
+    def test_voice_none_is_not_extra(self):
+        # 2026-11-12 (A2 wiring item 5): VOICE:NONE alone must NOT
+        # mark a character an extra -- silent actors (the Cyclopes:
+        # hammer, carry, hand over the bolt) belong in the visible
+        # cast. Only the background-extras role marks an extra.
         doc = parse_studio_script_v1(
             FIRST_PERSON_HEADER
             + "CHARACTER: CHAR_X\nNAME: Quan chung\nVOICE: NONE\n"
               "SCENE: SC01\nTITLE: T\nSHOT: SH01\nCAMERA: wide\n"
               "NARRATION:\nSPEAKER: CHAR_A\nLINE_ID: T_01\nTEXT: “Chao.”\n")
-        extra = next(c for c in doc.characters if c.id == "CHAR_X")
-        self.assertTrue(extra.is_extra)
+        char = next(c for c in doc.characters if c.id == "CHAR_X")
+        self.assertFalse(char.is_extra)
 
     def test_background_extras_role_is_extra(self):
         doc = parse_studio_script_v1(

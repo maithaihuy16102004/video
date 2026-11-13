@@ -1,7 +1,7 @@
 """Unit tests for ai_clip_studio.subtitles (stdlib unittest).
 
 Run:  python3 -m unittest discover -s ai_clip_studio/tests -v
-from ~/workspace/video-16x9-v2/
+from ~/workspace/agent/
 """
 import sys
 import unittest
@@ -13,8 +13,8 @@ from PIL import Image, ImageDraw
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from ai_clip_studio.subtitles import (
-    FONT_PX, MAX_CHARS, check_phone_legibility, draw_phrase,
-    get_font, phrase_windows, split_subtitle,
+    FONT_PX, MAX_CHARS, _wrap_lines, check_phone_legibility,
+    draw_phrase, get_font, phrase_windows, split_subtitle,
 )
 
 # Exactly 132 characters -- the length of the old renderer's failing
@@ -47,6 +47,32 @@ class TestSubtitles(unittest.TestCase):
         for p in phrases:
             for w in p.split():
                 self.assertIn(w, words)
+
+    def test_wrap_never_orphans_a_single_token(self):
+        # Zeus re-render frames: the greedy wrap left one syllable
+        # on the second line, splitting compounds ("tiết / kiệm",
+        # "phương / pháp", "chị / em", "từng / được").
+        cases = [
+            ("Một phương pháp nuôi con cực kỳ tiết kiệm",
+             "tiết kiệm"),
+            ("tất nhiên không đồng tình với phương pháp",
+             "phương pháp"),
+            ("cha bạn chưa từng nuốt sống năm anh chị em",
+             "chị em"),
+            ("Vị thần tối cao của đỉnh Olympus từng được",
+             "từng được"),
+        ]
+        for phrase, compound in cases:
+            lines = _wrap_lines(phrase)
+            joined = " ".join(lines)
+            self.assertIn(compound, joined)
+            for line in lines:
+                self.assertNotEqual(line.split()[-1],
+                                    compound.split()[0],
+                                    f"compound split: {lines}")
+            if len(lines) > 1:
+                self.assertGreaterEqual(len(lines[-1].split()), 2,
+                                        lines)
 
     def test_split_prefers_punctuation_breaks(self):
         phrases = split_subtitle("Xin chào, tôi tên là Lan, tôi đến từ Hà Nội.")

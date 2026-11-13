@@ -6,7 +6,7 @@ text from Ep1 v2) -> moustache IS drawn; (c) explicit female traits
 -> female template, never a silent male default.
 
 Run: python3 -m unittest ai_clip_studio.tests.test_engine_stage3_moustache
-from ~/workspace/video-16x9-v2/
+from ~/workspace/agent/
 """
 import sys
 import unittest

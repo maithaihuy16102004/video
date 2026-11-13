@@ -1,9 +1,11 @@
 """Tests for the deterministic fallback planner (shared engine)."""
 import unittest
+from pathlib import Path
 
 from ai_clip_studio.planner_fallback import deterministic_planner
 
 REAL_SCRIPT = "/home/hatch/workspace/acceptance_loop/test_chiec_vi_trong_mua/script.txt"
+_PARSER_TEST = str(Path(__file__).resolve().parent / "test_vi_script_parser.py")
 
 
 class TestPlannerFallback(unittest.TestCase):
@@ -25,12 +27,12 @@ class TestPlannerFallback(unittest.TestCase):
         self.assertGreater(pkg["scenes"][3]["action_lead_sec"], 8.0)
 
     def test_other_script_not_hardcoded(self):
-        text = open("/home/hatch/workspace/video-16x9-v2/ai_clip_studio/tests/test_vi_script_parser.py",
+        text = open(_PARSER_TEST,
                     encoding="utf-8").read()
         # the OTHER_SCRIPT constant lives in the parser test module
         import importlib.util
         spec = importlib.util.spec_from_file_location(
-            "t", "/home/hatch/workspace/video-16x9-v2/ai_clip_studio/tests/test_vi_script_parser.py")
+            "t", _PARSER_TEST)
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
         pkg = deterministic_planner(mod.OTHER_SCRIPT)

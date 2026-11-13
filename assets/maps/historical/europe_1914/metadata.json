@@ -1,0 +1,44 @@
+{
+ "attribution": "Map data © OpenHistoricalMap contributors (CC0, unless noted); boundary segments © IGN CNIG, Kartverket, eProstor Slovenia, UN OCHA HDX (CC BY 4.0).",
+ "commercial_use_status": "PERMITTED with attribution (CC BY 4.0 segments require attribution + license notice; CC0 remainder unrestricted)",
+ "dataset_id": "ohm_1914_europe",
+ "geographic_region": "Europe",
+ "geometry": {
+  "features": 35,
+  "file": "boundaries.geojson",
+  "format": "GeoJSON FeatureCollection, MultiPolygon",
+  "rings": "stitched closed; holes preserved",
+  "simplification": "Douglas-Peucker, tolerance 0.02 deg (~2.2 km); 53-probe acceptance re-run unchanged",
+  "vertices_original": 902212,
+  "vertices_simplified": 17729
+ },
+ "geometry_checksum": "438369285496c38340bb363f8fce55e89db74bab1c83ffd65dd499ac20fffba3",
+ "known_limitations": [
+  "Topology (checked 2026-11-13, shapely 2.2.0): 29/35 features fully valid; 6 invalid -- 5 only via degenerate interior rings/holes collapsed by simplification (Austria-Hungary, German Reich, Belgium, Switzerland, Netherlands; exterior rings valid) plus zero-area sliver parts, and 1 self-intersecting island ring (Italian Islands of the Aegean, 0.28 deg2). No visual defect observed at the Europe frame scale. Repair requires re-issuing the derived checksum and re-running the 53 probes; see verification_report.json.",
+  "Spain-Portugal 'Modern border' ways use a modern IGN CNIG survey line, unverified against a 1914 source (outside the Ep1 map frame).",
+  "Border-line precision between probe points unverified; only containment at 53 points was checked.",
+  "No route geometries included.",
+  "Finland modeled within the Russian Empire (no separate Grand Duchy polygon); a distinct Finland label is a presentation decision.",
+  "Live-database drift: only the pinned extract (hash above) is verified; a re-query requires re-verification.",
+  "License tags on member NODES unchecked (nodes in boundary relations do not normally carry license tags)."
+ ],
+ "license": "CC0 dedication (OpenHistoricalMap) + CC BY 4.0 segments (273 member ways; see ATTRIBUTION.md)",
+ "query": "[out:json][timeout:240]; relation(35,-12,60,40)[\"admin_level\"=\"2\"](if: t[\"start_date\"] <= \"1914-07-28\" && (!is_tag(\"end_date\") || t[\"end_date\"] > \"1914-07-28\")); out geom;",
+ "response_sha256": "c61c0cf1c0f6cd6667fe27e74cf7b3aa7a39330ae344a1f13c1855339554d134",
+ "source_urls": [
+  "https://www.openhistoricalmap.org",
+  "https://overpass-api.openhistoricalmap.org/api/"
+ ],
+ "source_version": "OSM base 2026-11-12T14:19:31Z, Overpass API 0.7.62.11",
+ "valid_from": "1914-07-28",
+ "valid_note": "Relations filtered to those whose start_date <= 1914-07-28 < end_date (start of WWI). Balkan relations encode the post-Balkan-Wars settlement (Treaty of Bucharest, Aug 1913).",
+ "valid_to": "1914-07-28",
+ "verification_status": "VERIFIED",
+ "recommended_framing": {
+  "lon_min": -12,
+  "lon_max": 40,
+  "lat_min": 35,
+  "lat_max": 60
+ },
+ "pinned_response_archive": "acceptance_loop/map_research/ohm_1914_europe_response.json (47,121,777 bytes; SHA-256 verified 2026-11-13, matches response_sha256)"
+}

@@ -1,6 +1,6 @@
 """Unit tests for ai_clip_studio.motioncanvas_spec (stdlib unittest).
 
-Run from ~/workspace/video-16x9-v2/:
+Run from ~/workspace/agent/:
     python3 -m unittest ai_clip_studio.tests.test_motioncanvas_spec -v
 
 The emitter is proven general on SYNTHETIC packages written here
@@ -193,16 +193,19 @@ class TestExampleSpecConformance(unittest.TestCase):
 
 class TestSceneSpecs(unittest.TestCase):
     def test_day_warm_scene_uses_features_palette_and_no_night_lights(self):
+        # W6: a trait block stages the EnvironmentPackage (the same
+        # staging the 2D renderer uses), not phrase boxes. The
+        # feature/palette data still drives the world — via the
+        # archetype selection — and day scenes carry no night lights.
         spec = mc.emit_scene_spec(_package_a(), 1, _shots_a())
         self.assertEqual(mc.validate_spec(spec), [])
         world = spec["world"]
-        # 2 foreground + (2 midground + 2 features) + 2 background boxes.
-        self.assertEqual(len(world["boxes"]), 8)
-        colours = {b["color"] for b in world["boxes"]}
-        self.assertIn("#aabbcc", colours)
-        self.assertIn("#112233", colours)
+        self.assertIn("environment_archetype", world)
+        self.assertGreater(len(world["boxes"]), 0)
+        for box in world["boxes"]:
+            self.assertRegex(box["color"], r"^#[0-9a-f]{6}$")
         self.assertEqual(world["point_lights"], [])
-        self.assertEqual(world["sky_top"], "#6fa8dc")
+        self.assertRegex(world["sky_top"], r"^#[0-9a-f]{6}$")
         anchors = {a["id"]: a for a in world["character_anchors"]}
         self.assertEqual(set(anchors), {"CHAR_MARA", "CHAR_THEO"})
         self.assertEqual(anchors["CHAR_MARA"]["feet"][1], 0.0)
@@ -217,30 +220,45 @@ class TestSceneSpecs(unittest.TestCase):
         self.assertEqual(world["camera_initial"]["position"], first["position"])
         self.assertEqual(world["camera_initial"]["target"], first["target"])
 
-    def test_night_cold_scene_uses_default_world_and_lamp_lights(self):
+    def test_night_cold_scene_uses_environment_staging_and_lamp_lights(self):
         spec = mc.emit_scene_spec(_package_b(), 1, _shots_b())
         self.assertEqual(mc.validate_spec(spec), [])
         world = spec["world"]
+        self.assertIn("environment_archetype", world)
         self.assertGreaterEqual(len(world["boxes"]), 3)
         self.assertEqual(len(world["point_lights"]), 2)
-        self.assertEqual(world["sky_top"], "#0e1a33")
-        self.assertIn("default world used",
-                      " ".join(spec["meta"]["world_notes"]))
+        # Night sky from the environment light: dark, valid hex.
+        sky = world["sky_top"]
+        self.assertRegex(sky, r"^#[0-9a-f]{6}$")
+        lum = sum(int(sky[i:i + 2], 16) for i in (1, 3, 5))
+        self.assertLess(lum, 150)
         anchors = {a["id"]: a for a in world["character_anchors"]}
         self.assertLess(anchors["CHAR_PIP"]["height"],
                         anchors["CHAR_NADIA"]["height"])
         self.assertAlmostEqual(anchors["CHAR_PIP"]["height"], 1.7 * 0.7,
                                places=2)
 
+    def test_no_trait_block_falls_back_to_default_world(self):
+        # The phrase/default path survives for packages without a
+        # §15.3 trait block, and says so in the notes.
+        package = _package_b()
+        del package["scenes"][0]["location"]["v1_location"]
+        spec = mc.emit_scene_spec(package, 1, _shots_b())
+        self.assertEqual(mc.validate_spec(spec), [])
+        self.assertNotIn("environment_archetype", spec["world"])
+        self.assertIn("default world used",
+                      " ".join(spec["meta"]["world_notes"]))
+
     def test_palette_invalid_entries_ignored(self):
         package = _package_a()
         v1_loc = package["scenes"][0]["location"]["v1_location"]
         v1_loc["palette"] = ["red", "#12", "", None, "#ABCDEF"]
         spec = mc.emit_scene_spec(package, 1, _shots_a())
-        colours = {b["color"] for b in spec["world"]["boxes"]}
-        self.assertEqual(colours, {"#abcdef"})
         for box in spec["world"]["boxes"]:
             self.assertRegex(box["color"], r"^#[0-9a-f]{3}([0-9a-f]{3})?$")
+            self.assertNotEqual(box["color"], "#12")
+        blob = json.dumps(spec, ensure_ascii=False)
+        self.assertNotIn("#12", blob)
 
     def test_staging_override_moves_anchor(self):
         shots = _shots_a()
@@ -496,6 +514,82 @@ class TestCameraPlannerSync(unittest.TestCase):
             counterpart_x=0.8)
         for got, want in zip(pose["position"], expected.position):
             self.assertAlmostEqual(got, want, places=3)
+
+
+class TestEnvironmentPackageEmission(unittest.TestCase):
+    """W6: scene worlds stage the EnvironmentPackage, not phrase boxes."""
+
+    def _street_package(self):
+        v1_loc = _v1_location(
+            "LOC_STREET",
+            features=["Kiến trúc đô thị.", "Nhà nhiều tầng, mặt tiền "
+                      "trát vữa.", "Cửa sổ cao, khung gỗ.", "Vỉa hè.",
+                      "Cột đèn đường."],
+            foreground="xe ngựa, thùng gỗ", midground="cửa hàng",
+            background="nhà phố")
+        pkg = _package_a()
+        pkg["scenes"] = [_scene(1, setting="street", time_of_day="day",
+                               mood="warm", v1_location=v1_loc,
+                               visible=["Mara", "Theo"])]
+        return pkg
+
+    def test_street_world_uses_environment_elements(self):
+        spec = mc.emit_scene_spec(self._street_package(), 1, _shots_a())
+        world = spec["world"]
+        self.assertEqual(world["environment_archetype"],
+                         "EUROPEAN_STREET_1900")
+        # The phrase path caps at 24 boxes; the environment path emits
+        # the full element set.
+        self.assertGreater(len(world["boxes"]), 24)
+        self.assertTrue(any(
+            b.get("geometry") == "gable_prism_approximated_as_box"
+            for b in world["boxes"]))
+        self.assertEqual(mc.validate_spec(spec), [])
+        self.assertTrue(any("EUROPEAN_STREET_1900" in n
+                            for n in spec["meta"]["world_notes"]))
+
+    def test_map_location_defers_with_note(self):
+        v1_loc = _v1_location("LOC_MAP", features=["borders"])
+        v1_loc["type"] = "Historical animated map"
+        pkg = _package_a()
+        pkg["scenes"] = [_scene(1, setting="map", time_of_day="day",
+                               mood="warm", v1_location=v1_loc,
+                               visible=["Mara", "Theo"])]
+        spec = mc.emit_scene_spec(pkg, 1, _shots_a())
+        self.assertNotIn("environment_archetype", spec["world"])
+        self.assertTrue(any("map location" in n
+                            for n in spec["meta"]["world_notes"]))
+        self.assertEqual(mc.validate_spec(spec), [])
+
+    def test_shot_trait_block_supplies_map_type(self):
+        # The scene copy drops `type`; the shot block carries it. The
+        # emitter must merge the matching shot block, or MAP detection
+        # fails and the map scene gets a street world.
+        v1_loc = _v1_location("LOC_MAP", features=["borders"])
+        pkg = _package_a()
+        pkg["scenes"] = [_scene(1, setting="map", time_of_day="day",
+                               mood="warm", v1_location=v1_loc,
+                               visible=["Mara", "Theo"])]
+        shots = _shots_a()
+        shot_v1 = dict(v1_loc)
+        shot_v1["type"] = "Historical animated map"
+        shots[0]["v1_location"] = shot_v1
+        spec = mc.emit_scene_spec(pkg, 1, shots)
+        self.assertNotIn("environment_archetype", spec["world"])
+        self.assertTrue(any("map location" in n
+                            for n in spec["meta"]["world_notes"]))
+
+    def test_location_override_is_noted_not_absorbed(self):
+        pkg = self._street_package()
+        shots = _shots_a()
+        other = _v1_location("LOC_OTHER", features=["borders"])
+        other["type"] = "Historical animated map"
+        shots[-1]["v1_location"] = other
+        spec = mc.emit_scene_spec(pkg, 1, shots)
+        self.assertEqual(spec["world"]["environment_archetype"],
+                         "EUROPEAN_STREET_1900")
+        self.assertTrue(any("override" in n and "LOC_OTHER" in n
+                            for n in spec["meta"]["world_notes"]))
 
 
 if __name__ == "__main__":

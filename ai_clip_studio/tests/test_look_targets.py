@@ -1,6 +1,6 @@
 """Unit tests for ai_clip_studio.look_targets (stdlib unittest, no network).
 
-Run from ~/workspace/video-16x9-v2/:
+Run from ~/workspace/agent/:
     python3 -m unittest ai_clip_studio.tests.test_look_targets -v
 
 Tests verify the frozen constants are sane (monotone curves, in-range

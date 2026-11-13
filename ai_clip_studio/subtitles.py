@@ -69,7 +69,16 @@ def _pack_words(words, max_chars, phrases):
 
 
 def _wrap_lines(phrase, font=None, max_w=SAFE_WIDTH_PX):
-    """Word-wrap a phrase at the fixed font; returns the line list."""
+    """Word-wrap a phrase at the fixed font; returns the line list.
+
+    Orphan prevention: a final line holding a single token splits
+    Vietnamese compounds across the break ("tiết / kiệm",
+    "phương / pháp", "chị / em" -- all observed on the Zeus
+    re-render) and reads as a dangling syllable. Tokens are
+    pulled back from the previous line until the last line holds
+    at least two tokens, keeping every line inside the width.
+    A two-token phrase that cannot fit one line cannot be helped.
+    """
     font = font or get_font(FONT_PX)
     lines, cur = [], ""
     for w in phrase.split():
@@ -81,6 +90,17 @@ def _wrap_lines(phrase, font=None, max_w=SAFE_WIDTH_PX):
             cur = w
     if cur:
         lines.append(cur)
+    while len(lines) >= 2:
+        if len(lines[-1].split()) >= 2:
+            break
+        prev = lines[-2].split()
+        if len(prev) <= 1:
+            break
+        new_last = prev[-1] + " " + lines[-1]
+        if font.getlength(new_last) > max_w:
+            break
+        lines[-2] = " ".join(prev[:-1])
+        lines[-1] = new_last
     return lines
 
 

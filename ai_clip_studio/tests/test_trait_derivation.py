@@ -666,7 +666,8 @@ class TestSyncWithEngine(unittest.TestCase):
     def test_primitives_match_registry(self):
         from ai_clip_studio.animation.primitives import PRIMITIVES
         self.assertEqual(set(PRIMITIVE_NAMES), set(PRIMITIVES))
-        self.assertEqual(len(PRIMITIVE_NAMES), 16)
+        # 37 = 35 + crouch + receive_prop (A2 semantic props, 2026-11-12).
+        self.assertEqual(len(PRIMITIVE_NAMES), 37)
 
     def test_expressions_match_face_system(self):
         from ai_clip_studio.animation.character_art import EXPRESSIONS
@@ -681,8 +682,13 @@ class TestSyncWithEngine(unittest.TestCase):
                          set(EVENT_SFX_MAP) - {"crowd murmur"})
 
     def test_prop_kinds_match_renderer_when_defined(self):
+        # 25 kinds since wiring item 7 (2026-11-12): + the 13
+        # geometry kinds, kept identical in both constants.
         own = {"wallet", "umbrella", "newspaper", "letter", "ticket",
-               "cup", "bag", "key", "book", "flower", "pen", "generic"}
+               "cup", "bag", "key", "book", "flower", "pen", "generic",
+               "bolt", "hammer", "trident", "helmet", "sword", "staff",
+               "shield", "crown", "ring", "hat", "chain", "stone",
+               "boulder"}
         self.assertEqual(set(PROP_KINDS), own)
         try:
             import ai_clip_studio.product_renderer as renderer

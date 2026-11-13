@@ -29,6 +29,7 @@ import math
 from .rig import (Stickman, walk_pose, interp_keys, smoothstep, lerp,
                   head_track, plant_feet, GAIT_DEFAULT, GAIT_RUN,
                   STAND_SPLIT_FRAC)
+from .locomotion import profile_to_gait, resolve_gait_profile
 
 
 def _pose(char, **kw):
@@ -142,12 +143,35 @@ def _locomote(char, from_x, to_x, duration, ground_y, gait, *,
     the ground, instead of the old 'walk + lean'.
     """
     leg = char.u_leg + char.l_leg
-    step = gait["stride_frac"] * float(char.H)
+    step = gait.get("step_length_frac", gait["stride_frac"]) * float(char.H)
     overlap = gait["overlap"]
     lift = gait["lift_frac"] * float(char.H)
     bob_amp = gait["bob_frac"] * leg
     flight_amp = gait.get("flight_lift_frac", 0.0) * float(char.H)
     arm_amp = gait["arm_amp"]
+    # D1 profile parameters (all default to the legacy behaviour when
+    # absent, so the proven core is byte-identical without a profile).
+    arm_mode = gait.get("arm_pose", "swing")
+    sway_scale = gait.get("sway_scale", 1.0)
+    ease_scale = gait.get("ease_scale", 1.0)
+
+    def _arms(cyc):
+        """(arm_l, arm_r, elbow_l, elbow_r) at cycle value ``cyc``
+        (+1 = left arm forward). "swing" is the proven contralateral
+        swing; the other modes are D1 parametric variants of the
+        same engine -- task (hands committed, small counter-motion),
+        carrying (both arms held forward), restrained (near-still)."""
+        if arm_mode == "carrying":
+            return 0.55, 0.55, 0.90, 0.90
+        if arm_mode == "task":
+            return (0.08 + 0.25 * arm_amp * cyc,
+                    0.08 - 0.25 * arm_amp * cyc, 0.35, 0.35)
+        if arm_mode == "restrained":
+            return (0.10 * arm_amp * cyc, -0.10 * arm_amp * cyc,
+                    0.15, 0.15)
+        return (arm_amp * cyc, -arm_amp * cyc,
+                0.25 + 0.25 * max(0.0, cyc),
+                0.25 + 0.25 * max(0.0, -cyc))
     direction = 1 if to_x >= from_x else -1
     dist = abs(to_x - from_x)
     # Visible turn (v6, backwards-walk audit 2026-11-11): if the
@@ -174,8 +198,13 @@ def _locomote(char, from_x, to_x, duration, ground_y, gait, *,
     # v7 settle (0.165 s for a 1.1 s run) gathered the feet so fast
     # the foot hit 42 px/frame and the knee jerked 45.7 px/frame^2 at
     # the travel->settle boundary (rubric E7/E2).
-    t_ant = min(0.20, duration * 0.15)
-    t_set = min(0.25, duration * 0.20)
+    t_ant = min(0.20, duration * 0.15) * ease_scale
+    t_set = min(0.25, duration * 0.20) * ease_scale
+    if t_ant + t_set > duration * 0.6:
+        # A heavy profile on a short segment must not eat the travel.
+        scale = duration * 0.6 / (t_ant + t_set)
+        t_ant *= scale
+        t_set *= scale
     t_travel = max(0.05, duration - t_ant - t_set)
     stand_root_y = ground_y - leg * 0.93
     walk_root_y = ground_y - leg * 0.90
@@ -282,19 +311,22 @@ def _locomote(char, from_x, to_x, duration, ground_y, gait, *,
             else:
                 turn_u = 0.0
                 facing_now = direction
+            ant_l, ant_r, ant_el, ant_er = _arms(1.0)
             _pose(char, root_x=from_x, root_y=lerp(stand_root_y, walk_root_y, a),
                   facing=facing_now, turn_u=turn_u,
                   torso_lean=gait["lean"] * a,
                   bob=-_s(char, 6) * math.sin(math.pi * a),
-                  arm_l=lerp(0.08, arm_amp, a),
-                  arm_r=lerp(0.08, -arm_amp, a),
-                  elbow_l=lerp(0.15, 0.50, a),
-                  elbow_r=lerp(0.15, 0.25, a),
+                  arm_l=lerp(0.08, ant_l, a),
+                  arm_r=lerp(0.08, ant_r, a),
+                  elbow_l=lerp(0.15, ant_el, a),
+                  elbow_r=lerp(0.15, ant_er, a),
                   head_look=0.0,
                   # v8: head ANTICIPATION -- the head dips back a few
                   # px before the body moves (secondary motion). The
                   # v7 head was rigid on the torso (0 frames of lag).
-                  head_sway_x=-_s(char, 6) * math.sin(math.pi * a))
+                  # D1: the sway damps with head_stability.
+                  head_sway_x=(-_s(char, 6) * math.sin(math.pi * a)
+                               * sway_scale))
             for side, stand_xy in (("l", stand_fl), ("r", stand_fr)):
                 sx, sy = _turn["foot_" + side]
                 gx = lerp(sx, stand_xy[0], a)
@@ -331,19 +363,22 @@ def _locomote(char, from_x, to_x, duration, ground_y, gait, *,
             # foot). A foot already on its stand mark stays planted
             # (no pointless lift arc).
             b = smoothstep((t - (duration - t_set)) / max(t_set, 0.01))
+            set_l, set_r, set_el, set_er = _arms(cyc_end)
             _pose(char, root_x=to_x, root_y=lerp(walk_root_y, stand_root_y, b),
                   facing=direction, turn_u=0.0,
                   torso_lean=gait["lean"] * (1.0 - b),
                   bob=bob_end * (1.0 - b),
-                  arm_l=lerp(arm_amp * cyc_end, 0.08, b),
-                  arm_r=lerp(-arm_amp * cyc_end, 0.08, b),
-                  elbow_l=lerp(0.25 + 0.25 * max(0.0, cyc_end), 0.15, b),
-                  elbow_r=lerp(0.25 + 0.25 * max(0.0, -cyc_end), 0.15, b),
+                  arm_l=lerp(set_l, 0.08, b),
+                  arm_r=lerp(set_r, 0.08, b),
+                  elbow_l=lerp(set_el, 0.15, b),
+                  elbow_r=lerp(set_er, 0.15, b),
                   head_look=0.0,
                   # v8: head FOLLOW-THROUGH -- the head overshoots
                   # forward a few px as the body stops and settles
                   # back. The v7 head stopped dead with the hips.
-                  head_sway_x=_s(char, 8) * math.sin(math.pi * b))
+                  # D1: the sway damps with head_stability.
+                  head_sway_x=_s(char, 8) * math.sin(math.pi * b)
+                  * sway_scale)
             # (named gather_* -- assigning to stand_fl/stand_fr here
             # would make them locals of fn() and shadow the closure
             # variables the anticipation branch uses; the v7 settle
@@ -406,11 +441,12 @@ def _locomote(char, from_x, to_x, duration, ground_y, gait, *,
         # above): when the right foot is forward, the LEFT arm is
         # forward. Elbows bend more on the forward swing.
         cyc = math.cos(math.pi * s / step)
+        trav_l, trav_r, trav_el, trav_er = _arms(cyc)
         _pose(char, root_x=root_x, root_y=walk_root_y,
               facing=direction, turn_u=0.0, torso_lean=gait["lean"], bob=bob,
-              arm_l=arm_amp * cyc, arm_r=-arm_amp * cyc,
-              elbow_l=0.25 + 0.25 * max(0.0, cyc),
-              elbow_r=0.25 + 0.25 * max(0.0, -cyc),
+              arm_l=trav_l, arm_r=trav_r,
+              elbow_l=trav_el,
+              elbow_r=trav_er,
               head_look=0.0)
         char.foot_target_l = (fl_x, fl_y)
         char.foot_target_r = (fr_x, fr_y)
@@ -420,7 +456,27 @@ def _locomote(char, from_x, to_x, duration, ground_y, gait, *,
     return fn
 
 
-def walk_to(char, from_x, to_x, duration, ground_y, height=560):
+def _profile_gait(char, profile, run=False, terrain="flat"):
+    """Gait dict for a locomotion primitive from a D1 profile.
+
+    Resolution: explicit ``profile`` > the character's carried
+    ``gait_profile`` > None (the caller then uses the legacy gait
+    dict, byte-identical to the pre-D1 behaviour). ``profile`` is a
+    GaitProfile, a preset name ("canonical" / "elderly" / "soldier" /
+    "giant" / "civilian"), or a gait dict (passed through).
+    """
+    if profile is None:
+        profile = getattr(char, "gait_profile", None)
+    if profile is None:
+        return None
+    if isinstance(profile, dict):
+        return dict(profile)
+    return profile_to_gait(resolve_gait_profile(profile), run=run,
+                           terrain=terrain)
+
+
+def walk_to(char, from_x, to_x, duration, ground_y, height=560,
+            profile=None):
     """Walk from from_x to to_x over `duration` seconds. Returns f(t)->char.
 
     v5 (audit 2026-11-11): planted feet (zero slip), step length from
@@ -428,24 +484,40 @@ def walk_to(char, from_x, to_x, duration, ground_y, height=560):
     55 px shuffle at 267 steps/min), correct bob phase (lowest at
     foot strike), anti-phase arm swing with live elbows, anticipation
     crouch at the start and a settle (feet together) at the end.
+
+    D1 (2026-11-12): ``profile`` (a GaitProfile, a preset name, or a
+    gait dict) parameterizes the SAME core -- step length, posture,
+    arm pose, head stability, mass, fatigue. With no profile (and no
+    gait_profile carried by the character) the legacy GAIT_DEFAULT
+    path runs unchanged. A mud profile delegates to walk_mud.
     """
-    gait = dict(GAIT_DEFAULT)
+    gait = _profile_gait(char, profile)
+    if gait is not None and gait.get("terrain_response") == "mud":
+        return walk_mud(char, from_x, to_x, duration, ground_y,
+                        profile=profile)
+    if gait is None:
+        gait = dict(GAIT_DEFAULT)
     return _locomote(char, from_x, to_x, duration, ground_y, gait,
                      phase_name="walk")
 
 
-def run_to(char, from_x, to_x, duration, ground_y):
+def run_to(char, from_x, to_x, duration, ground_y, profile=None):
     """Run: the same planted-foot core with a run gait -- longer stride,
     forward lean, bigger arm pump, and a REAL flight phase (both feet
     off the ground ~30% of each step). The old run was just a walk with
-    torso_lean 0.22 and zero airborne frames."""
-    gait = dict(GAIT_RUN)
+    torso_lean 0.22 and zero airborne frames.
+
+    D1: ``profile`` parameterizes the run gait the same way walk_to's
+    does (step, posture, arms, stability); None = legacy GAIT_RUN."""
+    gait = _profile_gait(char, profile, run=True)
+    if gait is None:
+        gait = dict(GAIT_RUN)
     return _locomote(char, from_x, to_x, duration, ground_y, gait,
                      phase_name="run")
 
 
 def detour_walk(char, from_x, to_x, duration, ground_y, obstacle, *,
-                clearance=25.0, margin=40.0):
+                clearance=25.0, margin=40.0, profile=None):
     """Walk from ``from_x`` to ``to_x`` DETOURING AROUND a ground
     obstacle instead of through it -- a generic obstacle-avoidance
     primitive (the five-moment "avoids splashing water" beat is one
@@ -469,7 +541,8 @@ def detour_walk(char, from_x, to_x, duration, ground_y, obstacle, *,
     plain walk. Returns f(t) -> char; also exposes ``bulge`` and the
     crossing window as attributes on the returned function for tests.
     """
-    walk_fn = walk_to(char, from_x, to_x, duration, ground_y)
+    walk_fn = walk_to(char, from_x, to_x, duration, ground_y,
+                      profile=profile)
     ox, oy = float(obstacle["x"]), float(obstacle["y"])
     orx, ory = float(obstacle["rx"]), float(obstacle["ry"])
     direction = 1 if to_x >= from_x else -1
@@ -540,7 +613,7 @@ def detour_walk(char, from_x, to_x, duration, ground_y, obstacle, *,
 
 
 def board_vehicle(char, from_x, door, duration, ground_y, *,
-                  step_height=36.0):
+                  step_height=36.0, profile=None):
     """Board a vehicle through its door -- a generic boarding
     primitive (the five-moment "boards the bus" beat is one use: any
     script passes any door). ``door`` is a screen-space rect dict
@@ -564,9 +637,10 @@ def board_vehicle(char, from_x, door, duration, ground_y, *,
     t_walk = 0.50 * duration
     t_step = 0.20 * duration
     t_enter = 0.30 * duration
-    walk_fn = walk_to(char, from_x, door_cx, t_walk, ground_y)
+    walk_fn = walk_to(char, from_x, door_cx, t_walk, ground_y,
+                      profile=profile)
     enter_fn = walk_to(char, door_cx, inside_x, t_enter,
-                       ground_y - step_height)
+                       ground_y - step_height, profile=profile)
     _state = {"stepped": False}
 
     def fn(t):
@@ -797,9 +871,53 @@ def reach_to(char, target, duration, hand="r"):
     return fn
 
 
-def give_to(giver, receiver, prop, duration):
+def _reachable_meeting_point(giver, receiver, point):
+    """Pull a handover meeting point into both characters' reach.
+
+    The rig clamps each hand target INDEPENDENTLY to 98% of that
+    arm's reach, so a meeting point outside either character's
+    reach leaves the two hands clamped to DIFFERENT positions --
+    the handover gap. For equal-height partners the classic meeting
+    point is already reachable and this is a no-op. For mixed
+    heights (a tall giver, a short receiver) the giver-height
+    meeting point is out of the receiver's reach, and the pull
+    moves it onto the receiver's reach circle -- the closest point
+    both hands can actually meet at. Alternating projection onto
+    the two reach circles until both constraints hold within
+    0.01 px (the lens between the circles can be thin -- a fixed
+    12 passes left a 1.5 px residual on the Test F staging,
+    measured numerically); 50 passes is far more than the
+    projection needs to converge when the lens is non-empty.
+    Staging must still keep the partners within combined arm reach
+    (A-S7); beyond that no meeting point exists and the residual
+    gap is reported honestly by the measurement, never hidden.
+    """
+    px, py = float(point[0]), float(point[1])
+    for _ in range(50):
+        excess = 0.0
+        for char in (giver, receiver):
+            shoulder = char.joints()["shoulder"]
+            limit = 0.98 * (char.u_arm + char.l_arm)
+            dx, dy = px - shoulder[0], py - shoulder[1]
+            dist = math.hypot(dx, dy)
+            if dist > limit:
+                excess = max(excess, dist - limit)
+                px = shoulder[0] + dx / dist * limit
+                py = shoulder[1] + dy / dist * limit
+        if excess < 0.01:
+            break
+    return (px, py)
+
+
+def give_to(giver, receiver, prop, duration, receive_hand="l"):
     """Handoff: giver's and receiver's hands converge on a midpoint and
     `prop` (dict with 'x','y') travels with them. Returns f(t)->(giver, receiver, prop).
+
+    ``receive_hand`` ("l" | "r") is the hand the receiver takes the
+    prop with -- named by the script ("tay phải" / "tay trái") via
+    the compiler's HAND_OVER receive_hand param. The default "l"
+    preserves the engine's historical behaviour. The giver always
+    offers with the right hand.
 
     v5 (audit 2026-11-11): both hands start from their CURRENT
     positions and lerp in x AND y to the meeting point. The old code
@@ -807,35 +925,52 @@ def give_to(giver, receiver, prop, duration):
     x, so each hand teleported 100-180 px on the first frame of the
     handoff.
     """
+    if receive_hand not in ("l", "r"):
+        raise ValueError(f"receive_hand must be 'l' or 'r', "
+                         f"got {receive_hand!r}")
+    recv_joint = "hand_" + receive_hand
+    recv_target = "hand_target_" + receive_hand
     _start = {}
 
     def fn(t):
         u = smoothstep(t / max(duration, 0.01))
         if "giver" not in _start:
             _start["giver"] = giver.joints()["hand_r"]
-            _start["receiver"] = receiver.joints()["hand_l"]
+            _start["receiver"] = receiver.joints()[recv_joint]
             _start["last_g"] = None
-            _start["last_r"] = None
+            _start["last_recv"] = None
         elif t < 0.25:
             # stale pre-warm capture -- re-capture (see _start_moved)
             if (_start["last_g"] is not None and _start_moved(
                     giver, "hand_r", _start["last_g"])):
                 _start["giver"] = giver.joints()["hand_r"]
-            if (_start["last_r"] is not None and _start_moved(
-                    receiver, "hand_l", _start["last_r"])):
-                _start["receiver"] = receiver.joints()["hand_l"]
+            if (_start["last_recv"] is not None and _start_moved(
+                    receiver, recv_joint, _start["last_recv"])):
+                _start["receiver"] = receiver.joints()[recv_joint]
+        # Pose FIRST: the meeting-point clamp reads the shoulder from
+        # joints(), and the lean set here moves the shoulder by up to
+        # ~14 px. Clamping before set_pose left an 8.7 px residual
+        # gap on the Test F proof (the clamp and the drawn pose
+        # disagreed); with the pose final first, the clamp reads the
+        # shoulder the renderer will actually use.
+        giver.set_pose(head_look=0.25 * u, torso_lean=0.06 * u)
+        receiver.set_pose(head_look=-0.25 * u, torso_lean=-0.06 * u)
         gx, gy = giver.pose["root_x"], giver.pose["root_y"]
         rx, ry = receiver.pose["root_x"], receiver.pose["root_y"]
         mid_x = (gx + rx) / 2
         mid_y = gy - _s(giver, 180) - _s(giver, 40) * math.sin(u * math.pi)
+        # Mixed-height partners: the meeting point must be reachable
+        # by BOTH hands, or the rig's independent IK clamps leave a
+        # gap (see _reachable_meeting_point). No-op when reachable.
+        mid_x, mid_y = _reachable_meeting_point(
+            giver, receiver, (mid_x, mid_y))
         gsx, gsy = _start["giver"]
         rsx, rsy = _start["receiver"]
         giver.hand_target_r = (lerp(gsx, mid_x, u), lerp(gsy, mid_y, u))
-        receiver.hand_target_l = (lerp(rsx, mid_x, u), lerp(rsy, mid_y, u))
+        setattr(receiver, recv_target,
+                (lerp(rsx, mid_x, u), lerp(rsy, mid_y, u)))
         _start["last_g"] = giver.hand_target_r
-        _start["last_r"] = receiver.hand_target_l
-        giver.set_pose(head_look=0.25 * u, torso_lean=0.06 * u)
-        receiver.set_pose(head_look=-0.25 * u, torso_lean=-0.06 * u)
+        _start["last_recv"] = getattr(receiver, recv_target)
         prop["x"], prop["y"] = mid_x, mid_y + _s(giver, 10)
         return giver, receiver, prop
     return fn
@@ -873,6 +1008,32 @@ def idle(char, duration, ground_y):
                               ground_y)
         char.hand_target_l = None
         char.hand_target_r = None
+        return char
+    return fn
+
+
+def seated_idle(char, duration):
+    """Seated idle: breathing + slow head drift while seated.
+
+    Unlike idle() (standing), this never touches foot or hand
+    targets: the seated character may hold a pen, rest hands on a
+    desk, or keep feet planted under a chair -- the previous
+    primitive's targets stay. Only the torso lean, the breathing
+    bob and the head drift move, so the pose stays seated for the
+    whole duration. Completion pose: the incoming seated pose.
+    """
+    _base = {}
+
+    def fn(t):
+        if "lean" not in _base:
+            _base["lean"] = char.pose.get("torso_lean", 0.0)
+            _base["bob"] = char.pose.get("bob", 0.0)
+        breathe = math.sin(t * 2 * math.pi * 0.25)  # ~15 breaths/min
+        drift = math.sin(t * 2 * math.pi * 0.05)     # slow head drift
+        char.set_pose(
+            torso_lean=_base["lean"] + 0.015 * breathe,
+            bob=_base["bob"] + _s(char, 2) * (0.5 + 0.5 * breathe),
+            head_look=0.06 * drift)
         return char
     return fn
 
@@ -1298,6 +1459,998 @@ def stand_up(char, duration, ground_y):
     return fn
 
 
+# ---------------------------------------------------------------------------
+# Visual Quality Recovery (2026-11-12): semantic-action primitives.
+#
+# The recovery directive (P1/P2/P5) requires reusable, parameterised
+# primitives for sitting, grasping, writing, signing, handing over,
+# mud walking, carrying, looking and reacting -- each with a defined
+# COMPLETION POSE (see PRIMITIVE_COMPLETION) that tests measure on the
+# real rig. Every primitive follows the existing conventions: hands
+# start from their CURRENT position (captured lazily, stale-pre-warm
+# re-capture), feet travel on lift arcs, bone lengths are invariant
+# (IK targets clamp at 98% reach in the rig), and no primitive invents
+# story geometry -- chair/desk/paper/pocket positions arrive as
+# parameters from staging. Phase fractions that the prop state machine
+# depends on (grasp / lift / transfer / release moments) are module
+# constants, never magic numbers in two places.
+# ---------------------------------------------------------------------------
+
+# Phase fractions shared with ai_clip_studio/prop_system.py.
+PICK_UP_GRASP_U = 0.45   # pick_up: hand arrives at the prop
+PICK_UP_LIFT_U = 0.60    # pick_up: lift to the hold starts
+KNEEL_PICK_GRASP_U = 0.50  # kneel_pick/bend_pick: hand on the prop
+RECEIVE_REACH_U = 0.60   # receive_prop: hand arrives at the target
+HAND_OVER_TRANSFER_U = 0.60  # hand_over: holder switches giver->receiver
+PUT_AWAY_RELEASE_U = 0.55    # put_away: prop releases at the pocket
+
+# Pen geometry (fractions of H / radians). A held pen points
+# forward-down at ~65 deg below horizontal; the tip sits below and
+# ahead of the gripping hand. write_on_paper / sign_document drive the
+# HAND from a pen-TIP trajectory through pen_tip_position(), so the
+# tip -- not the hand -- is what contacts the paper.
+PEN_LEN_FRAC = 0.10
+PEN_GRIP_ANGLE_RAD = 1.13
+
+# Mud: planted feet sink this far below the ground plane.
+MUD_SINK_FRAC = 0.03
+
+# Mud gait: short steps, long double support, high lift to pull each
+# foot out, forward lean, wide arm swing for balance. No flight phase.
+MUD_GAIT = {
+    "stride_frac": 0.12,
+    "arm_amp": 0.55,
+    "lean": 0.20,
+    "bob_frac": 0.05,
+    "lift_frac": 0.12,
+    "overlap": 0.35,
+}
+
+
+def pen_tip_position(hand_pos, facing, H):
+    """Pen tip for a hand gripping a pen (see PEN_GRIP_ANGLE_RAD)."""
+    length = PEN_LEN_FRAC * float(H)
+    return (hand_pos[0] + facing * math.cos(PEN_GRIP_ANGLE_RAD) * length,
+            hand_pos[1] + math.sin(PEN_GRIP_ANGLE_RAD) * length)
+
+
+# Hammer geometry (fractions of H / radians) + strike-cycle phases
+# (Test F, 2026-11-12). A held hammer's head sits beyond the gripping
+# hand along a fixed grip direction -- forward-down, like the pen
+# tip, but longer and steeper: the head leads the strike. The
+# hammer_strike primitive drives the HAND from a hammer-HEAD
+# trajectory through hammer_head_position(), so the HEAD -- not the
+# hand -- is what contacts the work surface. The strike fractions
+# are shared with the prop system and the audio anchors (the same
+# pattern as PICK_UP_GRASP_U / HAND_OVER_TRANSFER_U): a strike
+# contact is meaningful only at the strike moment of a cycle.
+HAMMER_HANDLE_FRAC = 0.16
+HAMMER_GRIP_ANGLE_RAD = 1.25
+HAMMER_HEAD_HALF_FRAC = 0.035
+HAMMER_CYCLE_RAISE_U = 0.35   # hammer_strike: raise ends, hold begins
+HAMMER_CYCLE_HOLD_U = 0.45    # hammer_strike: hold ends, strike begins
+HAMMER_CYCLE_STRIKE_U = 0.60  # hammer_strike: head contacts surface
+HAMMER_CYCLE_SEC = 0.9        # default duration of one strike cycle
+# Carry angle: the hammer cocks up-back of the hand on the raise, so
+# the head clears the face (a fixed strike angle puts the head ON the
+# face during the raise -- measured on the first Test F proof
+# render). The wrist articulates: the angle eases from the strike
+# angle (hammer hanging at rest) to the carry angle over the raise,
+# holds through the hold, eases back to the strike angle through the
+# strike phase, and stays there through the recovery. At the strike
+# moment the angle IS the strike angle, so the contact measurement
+# (hammer_head_position's default) is exact.
+HAMMER_CARRY_ANGLE_RAD = -2.09
+
+
+def hammer_grip_angle(cycle_u):
+    """Hammer grip angle in force at cycle fraction ``cycle_u``.
+
+    Rest / strike / recovery: HAMMER_GRIP_ANGLE_RAD (head below the
+    hand). Raise / hold: HAMMER_CARRY_ANGLE_RAD (head cocked up-back
+    of the hand). Transitions ease with smoothstep over their phase,
+    so the angle is continuous across cycle boundaries (u=0 and u=1
+    are both the strike angle) and exactly the strike angle at
+    HAMMER_CYCLE_STRIKE_U.
+    """
+    u = min(1.0, max(0.0, float(cycle_u)))
+    if u < HAMMER_CYCLE_RAISE_U:
+        e = smoothstep(u / HAMMER_CYCLE_RAISE_U)
+        return (HAMMER_GRIP_ANGLE_RAD
+                + (HAMMER_CARRY_ANGLE_RAD - HAMMER_GRIP_ANGLE_RAD) * e)
+    if u < HAMMER_CYCLE_HOLD_U:
+        return HAMMER_CARRY_ANGLE_RAD
+    if u < HAMMER_CYCLE_STRIKE_U:
+        v = ((u - HAMMER_CYCLE_HOLD_U)
+             / (HAMMER_CYCLE_STRIKE_U - HAMMER_CYCLE_HOLD_U))
+        e = smoothstep(v)
+        return (HAMMER_CARRY_ANGLE_RAD
+                + (HAMMER_GRIP_ANGLE_RAD - HAMMER_CARRY_ANGLE_RAD) * e)
+    return HAMMER_GRIP_ANGLE_RAD
+
+
+def hammer_head_position(hand_pos, facing, H, angle_rad=None):
+    """Hammer head for a hand gripping a hammer handle.
+
+    Mirrors pen_tip_position: the head is HAMMER_HANDLE_FRAC * H
+    from the hand along the grip direction (forward-down at
+    HAMMER_GRIP_ANGLE_RAD, mirrored by facing). The returned point
+    is the hammer's STRIKING FACE -- the point that contacts the
+    work surface -- so a drawn hammer head sits behind this point
+    (up the handle), never centred on it. ``angle_rad`` overrides
+    the grip angle (the phase angle from hammer_grip_angle, for
+    drawing the swing); the default is the strike angle, which is
+    the angle in force at every strike moment, so contact
+    measurement always uses the default.
+    """
+    if angle_rad is None:
+        angle_rad = HAMMER_GRIP_ANGLE_RAD
+    length = HAMMER_HANDLE_FRAC * float(H)
+    return (hand_pos[0] + facing * math.cos(angle_rad) * length,
+            hand_pos[1] + math.sin(angle_rad) * length)
+
+
+def hammer_cycles(duration) -> int:
+    """Strike cycles in a hammer_strike run of ``duration`` seconds.
+
+    Single source of truth for the cycle count: the primitive and
+    the audio anchors both derive it from the duration (one strike
+    per HAMMER_CYCLE_SEC), so the rendered strikes and the SFX
+    hits can never disagree about how many strikes happened.
+    """
+    return max(1, round(float(duration) / HAMMER_CYCLE_SEC))
+
+
+def hammer_strike_times(duration, cycles):
+    """Contact times (seconds) of every strike in a hammer_strike
+    run: each cycle's HAMMER_CYCLE_STRIKE_U moment. Audio anchors
+    (e.g. a HAMMER_METAL_CONTACT cue) consume these times; they are
+    the only moments the head touches the surface."""
+    duration = float(duration)
+    cycles = max(1, int(cycles))
+    cycle = duration / cycles
+    return [cycle * (i + HAMMER_CYCLE_STRIKE_U) for i in range(cycles)]
+
+
+def _hand_start(char, hand, state, t):
+    """Capture a hand's start position (lazy + stale-pre-warm guard).
+
+    ``state`` is the primitive's private dict; ``hand`` is "l"/"r".
+    Returns the captured start position. Mirrors the point_at /
+    reach_to pattern without duplicating its body in every primitive.
+    """
+    key = "hand_" + hand
+    if key not in state:
+        state[key] = char.joints()[key]
+        state["last_" + hand] = None
+    elif (state.get("last_" + hand) is not None and t < 0.25
+            and _start_moved(char, key, state["last_" + hand])):
+        state[key] = char.joints()[key]
+    return state[key]
+
+
+def _set_hand(char, hand, pos, state):
+    """Set one hand IK target and remember it for the stale guard."""
+    if hand == "r":
+        char.hand_target_r = pos
+    else:
+        char.hand_target_l = pos
+    state["last_" + hand] = pos
+
+
+def _seated_foot_offset(char, seat_h):
+    """Forward foot offset (px) that puts seated knees at ~90 deg.
+
+    With the hip ``seat_h`` above the ground and leg segments
+    (u_leg, l_leg), a 90 deg interior knee angle needs a hip->foot
+    distance of sqrt(u^2 + l^2); the forward offset is the remaining
+    leg of that right triangle. Clamped to [0.05H, 0.30H]: a bar
+    stool (seat too high) folds the knees more, which is geometry,
+    not a bug -- the value is returned, never hidden.
+    """
+    c2 = char.u_leg ** 2 + char.l_leg ** 2
+    dx2 = c2 - float(seat_h) ** 2
+    dx = math.sqrt(dx2) if dx2 > 0.0 else 0.0
+    return max(0.05 * float(char.H), min(0.30 * float(char.H), dx))
+
+
+def _waist_hold(char, ground_y):
+    """The waist hold every grasp ends at (bend_pick's hold)."""
+    leg = char.u_leg + char.l_leg
+    f = char.pose.get("facing", 1)
+    return (char.pose["root_x"] + f * _s(char, 40),
+            ground_y - leg * 0.93 - _s(char, 60))
+
+
+def sit_at_desk(char, chair_x, seat_y, duration, ground_y, desk=None):
+    """Sit on a chair at ``chair_x`` with the seat top at ``seat_y``.
+
+    The root lowers to the seat, the feet plant on the ground ahead
+    of the chair (offset solved for ~90 deg knees -- see
+    _seated_foot_offset), the torso leans slightly forward and the
+    hands settle on the desk top (``desk`` = {"x", "top_y"}) or, with
+    no desk, on the knees. Feet travel on lift arcs, never slid.
+    Completion pose: seated, knees ~90 deg, feet planted, hands on
+    the desk (or knees), head looking down at the work surface.
+    """
+    _start = {}
+    leg = char.u_leg + char.l_leg
+
+    def fn(t):
+        u = min(1.0, max(0.0, t / max(duration, 0.01)))
+        if "root" not in _start:
+            _start["root"] = (char.pose["root_x"], char.pose["root_y"])
+            _start["lean"] = char.pose.get("torso_lean", 0.0)
+            _start["look"] = char.pose.get("head_look", 0.0)
+            _start["foot_l"] = char.joints()["foot_l"]
+            _start["foot_r"] = char.joints()["foot_r"]
+            _start["hand_l"] = char.joints()["hand_l"]
+            _start["hand_r"] = char.joints()["hand_r"]
+        f = char.pose.get("facing", 1)
+        lower = smoothstep(min(1.0, u / 0.55))
+        settle = smoothstep(max(0.0, (u - 0.55) / 0.45))
+        seat_h = ground_y - seat_y
+        dx = _seated_foot_offset(char, seat_h)
+        root_x = lerp(_start["root"][0], chair_x, lower)
+        root_y = lerp(_start["root"][1], seat_y, lower)
+        char.set_pose(root_x=root_x, root_y=root_y,
+                      torso_lean=lerp(_start["lean"], 0.12, lower),
+                      head_look=lerp(_start["look"], 0.25, settle),
+                      bob=0.0)
+        lift = _s(char, 28)
+        foot_targets = {
+            "l": (chair_x + f * dx - _s(char, 18), ground_y),
+            "r": (chair_x + f * dx + _s(char, 18), ground_y),
+        }
+        for side, tgt in foot_targets.items():
+            sx, sy = _start["foot_" + side]
+            gx = lerp(sx, tgt[0], lower)
+            gy = lerp(sy, ground_y, lower) - lift * math.sin(math.pi * lower)
+            if side == "l":
+                char.foot_target_l = (gx, gy)
+            else:
+                char.foot_target_r = (gx, gy)
+        if desk is not None:
+            top_y = float(desk["top_y"])
+            hand_targets = {
+                "l": (chair_x + f * _s(char, 56), top_y + _s(char, 6)),
+                "r": (chair_x + f * _s(char, 112), top_y),
+            }
+        else:
+            hand_targets = {
+                "l": (chair_x + f * _s(char, 80), seat_y + _s(char, 68)),
+                "r": (chair_x + f * _s(char, 96), seat_y + _s(char, 68)),
+            }
+        for side, tgt in hand_targets.items():
+            sx, sy = _start["hand_" + side]
+            _set_hand(char, side,
+                      (lerp(sx, tgt[0], settle), lerp(sy, tgt[1], settle)),
+                      _start)
+        return char
+    return fn
+
+
+def stand_from_chair(char, duration, ground_y, chair_x=None):
+    """Stand up from a seated pose (inverse of sit_at_desk).
+
+    Captures the seated state on the first call, rises to the
+    canonical standing pose, gathers the feet to the standing split
+    on lift arcs, and returns the hands to their hanging position
+    before clearing the IK targets -- the hands never teleport from
+    the desk to the sides. Completion pose: standing() exactly.
+    """
+    _start = {}
+    leg = char.u_leg + char.l_leg
+
+    def fn(t):
+        u = min(1.0, max(0.0, t / max(duration, 0.01)))
+        if "root" not in _start:
+            _start["root"] = (char.pose["root_x"], char.pose["root_y"])
+            _start["foot_l"] = char.joints()["foot_l"]
+            _start["foot_r"] = char.joints()["foot_r"]
+            _start["hand_l"] = char.joints()["hand_l"]
+            _start["hand_r"] = char.joints()["hand_r"]
+            _start["chair_x"] = (chair_x if chair_x is not None
+                                 else char.pose["root_x"])
+        rise = smoothstep(u)
+        stand_y = ground_y - leg * 0.93
+        root_x = _start["chair_x"]
+        char.set_pose(root_x=root_x,
+                      root_y=lerp(_start["root"][1], stand_y, rise),
+                      torso_lean=lerp(char.pose.get("torso_lean", 0.0),
+                                      0.0, rise),
+                      head_look=lerp(char.pose.get("head_look", 0.0),
+                                     0.0, rise),
+                      bob=0.0)
+        f = char.pose.get("facing", 1)
+        lift = _s(char, 28)
+        split = STAND_SPLIT_FRAC * float(char.H)
+        for side, tgt_x in (("l", root_x - split), ("r", root_x + split)):
+            sx, sy = _start["foot_" + side]
+            gx = lerp(sx, tgt_x, rise)
+            gy = lerp(sy, ground_y, rise) - lift * math.sin(math.pi * rise)
+            if side == "l":
+                char.foot_target_l = (gx, gy)
+            else:
+                char.foot_target_r = (gx, gy)
+        hang_y = stand_y + _s(char, 28)
+        for side in ("l", "r"):
+            sx, sy = _start["hand_" + side]
+            hx = lerp(sx, root_x + f * _s(char, 22), rise)
+            hy = lerp(sy, hang_y, rise)
+            _set_hand(char, side, (hx, hy), _start)
+        if u >= 1.0:
+            standing(char, root_x, ground_y, facing=f)
+        return char
+    return fn
+
+
+def pick_up(char, target, duration, ground_y, hand="r", source="ground"):
+    """Grasp a prop at ``target`` and lift it to the waist hold.
+
+    Phases: reach (0-45%), grasp hold (45-60%), lift (60-100%).
+    ``source`` ("ground" | "pocket" | "desk" | "surface") only sets
+    the lean: a pocket/desk grasp barely leans, a ground grasp leans
+    more. A deep ground pickup that must fold the body is bend_pick /
+    kneel_pick, not this primitive. The grasp moment is
+    PICK_UP_GRASP_U (shared with the prop state machine).
+    Completion pose: hand at the waist hold, prop grasped.
+    """
+    _start = {}
+
+    def fn(t):
+        u = min(1.0, max(0.0, t / max(duration, 0.01)))
+        sx, sy = _hand_start(char, hand, _start, t)
+        reach = smoothstep(min(1.0, u / PICK_UP_GRASP_U))
+        lift = smoothstep(max(0.0, (u - PICK_UP_LIFT_U)
+                              / (1.0 - PICK_UP_LIFT_U)))
+        hold = _waist_hold(char, ground_y)
+        hx = lerp(lerp(sx, target[0], reach), hold[0], lift)
+        hy = lerp(lerp(sy, target[1], reach), hold[1], lift)
+        lean_max = 0.05 if source in ("pocket", "desk", "surface") else 0.15
+        char.set_pose(torso_lean=lean_max * reach * (1.0 - 0.7 * lift))
+        head_track(char, (lerp(target[0], hold[0], lift),
+                          lerp(target[1], hold[1], lift)),
+                   max_angle=0.35)
+        _set_hand(char, hand, (hx, hy), _start)
+        return char
+    return fn
+
+
+def open_wallet(char, duration, prop=None):
+    """Bring both hands together and open the wallet they hold.
+
+    The hands converge on a chest-height hold point; ``prop`` (a dict
+    like give_to's) carries open_u 0 -> 1 over the second half of the
+    motion and follows the midpoint of the hands. Completion pose:
+    hands together at chest height, open_u == 1.0.
+    """
+    _start = {}
+    prop = prop if prop is not None else {}
+
+    def fn(t):
+        u = min(1.0, max(0.0, t / max(duration, 0.01)))
+        f = char.pose.get("facing", 1)
+        joints = char.joints()
+        hold = (char.pose["root_x"] + f * _s(char, 68),
+                joints["shoulder"][1] + _s(char, 56))
+        ease = smoothstep(u)
+        hands = {}
+        for side in ("l", "r"):
+            sx, sy = _hand_start(char, side, _start, t)
+            off = _s(char, 14) if side == "l" else -_s(char, 14)
+            pos = (lerp(sx, hold[0] + f * off, ease),
+                   lerp(sy, hold[1], ease))
+            _set_hand(char, side, pos, _start)
+            hands[side] = pos
+        prop["open_u"] = smoothstep(max(0.0, (u - 0.4) / 0.6))
+        prop["x"] = (hands["l"][0] + hands["r"][0]) / 2.0
+        prop["y"] = (hands["l"][1] + hands["r"][1]) / 2.0
+        head_track(char, (prop["x"], prop["y"]), max_angle=0.3)
+        return char
+    return fn
+
+
+def close_wallet(char, duration, prop=None):
+    """Close the wallet (open_u 1 -> 0) and let the hands part.
+
+    Completion pose: hands slightly parted at chest height,
+    open_u == 0.0.
+    """
+    _start = {}
+    prop = prop if prop is not None else {"open_u": 1.0}
+
+    def fn(t):
+        u = min(1.0, max(0.0, t / max(duration, 0.01)))
+        f = char.pose.get("facing", 1)
+        joints = char.joints()
+        hold = (char.pose["root_x"] + f * _s(char, 68),
+                joints["shoulder"][1] + _s(char, 56))
+        prop["open_u"] = 1.0 - smoothstep(min(1.0, u / 0.6))
+        part = smoothstep(max(0.0, (u - 0.6) / 0.4))
+        hands = {}
+        for side in ("l", "r"):
+            sx, sy = _hand_start(char, side, _start, t)
+            off = _s(char, 14) + _s(char, 22) * part
+            off = off if side == "l" else -off
+            pos = (lerp(sx, hold[0] + f * off, smoothstep(u)),
+                   lerp(sy, hold[1], smoothstep(u)))
+            _set_hand(char, side, pos, _start)
+            hands[side] = pos
+        prop["x"] = (hands["l"][0] + hands["r"][0]) / 2.0
+        prop["y"] = (hands["l"][1] + hands["r"][1]) / 2.0
+        return char
+    return fn
+
+
+def hold_pen(char, pen_pos, paper, duration, hand="r"):
+    """Grasp a pen at ``pen_pos`` and bring it to writing-ready above
+    ``paper`` ({"x", "y", "w", "h"}: paper rect, surface at "y").
+
+    Completion pose: hand positioned so the pen tip hovers 12 px
+    above the paper surface at the line start, head looking at it.
+    """
+    _start = {}
+
+    def fn(t):
+        u = min(1.0, max(0.0, t / max(duration, 0.01)))
+        sx, sy = _hand_start(char, hand, _start, t)
+        f = char.pose.get("facing", 1)
+        tip_ready = (float(paper["x"]) + 0.15 * float(paper["w"]),
+                     float(paper["y"]) + 0.30 * float(paper["h"]) - 12.0)
+        ready = (tip_ready[0]
+                 - f * math.cos(PEN_GRIP_ANGLE_RAD) * PEN_LEN_FRAC * float(char.H),
+                 tip_ready[1]
+                 - math.sin(PEN_GRIP_ANGLE_RAD) * PEN_LEN_FRAC * float(char.H))
+        reach = smoothstep(min(1.0, u / 0.40))
+        move = smoothstep(max(0.0, (u - 0.55) / 0.45))
+        hx = lerp(lerp(sx, pen_pos[0], reach), ready[0], move)
+        hy = lerp(lerp(sy, pen_pos[1], reach), ready[1], move)
+        head_track(char, (lerp(pen_pos[0], tip_ready[0], move),
+                          lerp(pen_pos[1], tip_ready[1], move)),
+                   max_angle=0.35)
+        _set_hand(char, hand, (hx, hy), _start)
+        return char
+    return fn
+
+
+def _writing_hand(char, hand, tip, start, blend_u):
+    """Hand IK target for a pen tip at ``tip``, blended in from the
+    captured ``start`` hand position over ``blend_u`` (0..1)."""
+    f = char.pose.get("facing", 1)
+    hx = (tip[0] - f * math.cos(PEN_GRIP_ANGLE_RAD)
+          * PEN_LEN_FRAC * float(char.H))
+    hy = (tip[1] - math.sin(PEN_GRIP_ANGLE_RAD)
+          * PEN_LEN_FRAC * float(char.H))
+    return (lerp(start[0], hx, blend_u), lerp(start[1], hy, blend_u))
+
+
+def write_on_paper(char, paper, duration, hand="r", words=6):
+    """Write one line: the pen tip stays ON the paper plane, tracing
+    small oscillations left to right while the hand follows through
+    the pen geometry (see pen_tip_position). ``paper`` is {"x", "y",
+    "w", "h"}; the writing line sits at 35% of the paper height.
+    ``words`` sets the oscillation count (one cycle per word).
+    Completion pose: hand at the line end, pen tip on the paper.
+    """
+    _start = {}
+
+    def fn(t):
+        u = min(1.0, max(0.0, t / max(duration, 0.01)))
+        sx, sy = _hand_start(char, hand, _start, t)
+        x0 = float(paper["x"]) + 0.12 * float(paper["w"])
+        x1 = float(paper["x"]) + 0.88 * float(paper["w"])
+        base_y = float(paper["y"]) + 0.35 * float(paper["h"])
+        amp = min(0.06 * float(paper["h"]), 0.02 * float(char.H))
+        cycles = max(1, int(words))
+        tip = (lerp(x0, x1, u),
+               base_y + amp * math.sin(2.0 * math.pi * cycles * u))
+        blend = smoothstep(min(1.0, u / 0.15))
+        pos = _writing_hand(char, hand, tip, (sx, sy), blend)
+        char.set_pose(torso_lean=0.15)
+        head_track(char, tip, max_angle=0.3)
+        _set_hand(char, hand, pos, _start)
+        return char
+    return fn
+
+
+def sign_document(char, paper, duration, hand="r"):
+    """Sign with a flourish: 3 loops across 40% of the paper width,
+    then the pen lifts 30 px in the last 20% of the motion.
+    Completion pose: pen lifted above the paper, hand retreating.
+    """
+    _start = {}
+
+    def fn(t):
+        u = min(1.0, max(0.0, t / max(duration, 0.01)))
+        sx, sy = _hand_start(char, hand, _start, t)
+        x0 = float(paper["x"]) + 0.30 * float(paper["w"])
+        x1 = float(paper["x"]) + 0.70 * float(paper["w"])
+        base_y = float(paper["y"]) + 0.60 * float(paper["h"])
+        amp = min(0.10 * float(paper["h"]), 0.03 * float(char.H))
+        if u < 0.8:
+            q = u / 0.8
+            tip = (lerp(x0, x1, q),
+                   base_y + amp * math.sin(math.pi * q)
+                   * math.sin(2.0 * math.pi * 3.0 * q))
+        else:
+            lift = smoothstep((u - 0.8) / 0.2)
+            tip = (x1, base_y - _s(char, 30) * lift)
+        blend = smoothstep(min(1.0, u / 0.15))
+        pos = _writing_hand(char, hand, tip, (sx, sy), blend)
+        char.set_pose(torso_lean=0.15)
+        head_track(char, tip, max_angle=0.3)
+        _set_hand(char, hand, pos, _start)
+        return char
+    return fn
+
+
+def hand_over(giver, receiver, prop, duration,
+              transfer_u=HAND_OVER_TRANSFER_U, receive_hand="l"):
+    """Hand a prop over: both hands converge (give_to), and the prop's
+    recorded holder switches from giver to receiver at ``transfer_u``
+    (shared with the prop state machine). ``receive_hand`` ("l" | "r")
+    is the receiver's taking hand (see give_to). Returns
+    f(t) -> (giver, receiver, prop). Completion pose: prop at the
+    receiver's hand, prop["holder"] == receiver name.
+    """
+    base = give_to(giver, receiver, prop, duration,
+                   receive_hand=receive_hand)
+
+    def fn(t):
+        out = base(t)
+        u = min(1.0, max(0.0, t / max(duration, 0.01)))
+        prop["holder"] = (giver.name if u < transfer_u
+                          else receiver.name)
+        prop["transfer_u"] = transfer_u
+        return out
+    return fn
+
+
+def hammer_strike(char, strike_point, duration, ground_y=None, hand="r",
+                  cycles=None, raise_frac=0.24):
+    """Repetitive hammer work at a surface point: raise / hold /
+    strike / recover, repeated ``cycles`` times.
+
+    General: any character, any anvil-like surface. The strike point
+    is staging data (the surface the staging placed there), the tool
+    is any hammer-like prop gripped in ``hand``, and the surface kind
+    is the staging's business -- the primitive only guarantees the
+    HEAD contacts the strike point. At each cycle's
+    HAMMER_CYCLE_STRIKE_U moment the hand is driven to the strike
+    point minus the hammer grip vector, so
+    hammer_head_position(hand) equals the strike point up to IK
+    reach: a strike point outside arm reach misses honestly (the
+    measurement reports it), it is never faked closer.
+
+    Acting weight: the raise decelerates into a brief hold
+    (anticipation, with a small settle dip), the strike accelerates
+    (ease-in), and the recovery overshoots past the rest position
+    before settling (follow-through). The torso leans back on the
+    raise and thrusts forward on the strike; the head tracks down
+    toward the surface at contact. The feet never move (planted):
+    ``ground_y`` is accepted for signature uniformity with the other
+    work primitives and ignored -- the caller plants the feet with
+    standing() before running this, as for every hand primitive.
+
+    ``cycles`` defaults to duration / HAMMER_CYCLE_SEC (one strike
+    per 0.9 s). Contact times for audio anchors come from
+    hammer_strike_times(duration, cycles). The hammer's grip angle
+    articulates with the swing (hammer_grip_angle): cocked up-back
+    on the raise so the head clears the face, at the strike angle
+    at every strike moment. A renderer draws the hammer with
+    hammer_head_position(hand, facing, H, hammer_grip_angle(u));
+    contact measurement uses the default strike angle. Completion
+    pose: hand at rest, hammer head struck the surface at each
+    cycle's strike moment.
+    """
+    if cycles is None:
+        cycles = hammer_cycles(duration)
+    cycles = max(1, int(cycles))
+    sx, sy = float(strike_point[0]), float(strike_point[1])
+    _start = {}
+
+    def fn(t):
+        u_global = min(1.0, max(0.0, t / max(duration, 0.01)))
+        cycle = min(cycles - 1, int(u_global * cycles))
+        u = u_global * cycles - cycle
+        f = char.pose.get("facing", 1) or 1
+        if "lean" not in _start:
+            _start["lean"] = char.pose.get("torso_lean", 0.0)
+            _start["look"] = char.pose.get("head_look", 0.0)
+        rest = _hand_start(char, hand, _start, t)
+        H = float(char.H)
+        shoulder = char.joints()["shoulder"]
+        raised = (shoulder[0] + f * 0.06 * H,
+                  shoulder[1] - raise_frac * H)
+        grip = (f * math.cos(HAMMER_GRIP_ANGLE_RAD)
+                * HAMMER_HANDLE_FRAC * H,
+                math.sin(HAMMER_GRIP_ANGLE_RAD)
+                * HAMMER_HANDLE_FRAC * H)
+        strike_hand = (sx - grip[0], sy - grip[1])
+        if u < HAMMER_CYCLE_RAISE_U:
+            v = u / HAMMER_CYCLE_RAISE_U
+            e = 1.0 - (1.0 - v) ** 2  # ease-out: decelerate into hold
+            pos = (lerp(rest[0], raised[0], e),
+                   lerp(rest[1], raised[1], e))
+            lean = _start["lean"] - 0.08 * e
+            look = _start["look"] + 0.05 * e
+        elif u < HAMMER_CYCLE_HOLD_U:
+            v = ((u - HAMMER_CYCLE_RAISE_U)
+                 / (HAMMER_CYCLE_HOLD_U - HAMMER_CYCLE_RAISE_U))
+            dip = math.sin(v * math.pi) * 0.008 * H
+            pos = (raised[0], raised[1] + dip)
+            lean = _start["lean"] - 0.08
+            look = _start["look"] + 0.10
+        elif u < HAMMER_CYCLE_STRIKE_U:
+            v = ((u - HAMMER_CYCLE_HOLD_U)
+                 / (HAMMER_CYCLE_STRIKE_U - HAMMER_CYCLE_HOLD_U))
+            e = v * v  # ease-in: accelerate into the strike
+            pos = (lerp(raised[0], strike_hand[0], e),
+                   lerp(raised[1], strike_hand[1], e))
+            lean = _start["lean"] + lerp(-0.08, 0.18, e)
+            look = _start["look"] + lerp(0.10, 0.30, e)
+        else:
+            v = (u - HAMMER_CYCLE_STRIKE_U) / (1.0 - HAMMER_CYCLE_STRIKE_U)
+            e = smoothstep(v)
+            base = (lerp(strike_hand[0], rest[0], e),
+                    lerp(strike_hand[1], rest[1], e))
+            rebound = math.sin(v * math.pi) * 0.18
+            pos = (base[0] + rebound * (raised[0] - rest[0]),
+                   base[1] + rebound * (raised[1] - rest[1]))
+            lean = _start["lean"] + lerp(0.18, 0.0, e)
+            look = _start["look"] + lerp(0.30, 0.05, e)
+        _set_hand(char, hand, pos, _start)
+        char.set_pose(torso_lean=lean, head_look=look)
+        return char
+    return fn
+
+
+def walk_mud(char, from_x, to_x, duration, ground_y, sink=None,
+           profile=None):
+    """Walk through mud on the planted-foot core with a mud gait
+    (short steps, long double support, high lift, forward lean) plus
+    two mud behaviours the clean walk does not have: planted feet
+    SINK ``sink`` px below the ground plane (default 0.03H), and the
+    torso sways gently for balance. Planted feet never slide in x --
+    only their y is offset. Completion pose: standing at to_x, feet
+    sunk in the mud.
+
+    D1: ``profile`` parameterizes the mud gait (step capped at 0.15H,
+    posture/arm/stability from the profile); None = legacy MUD_GAIT.
+    """
+    if sink is None:
+        sink = MUD_SINK_FRAC * float(char.H)
+    gait = _profile_gait(char, profile, terrain="mud")
+    if gait is None:
+        gait = dict(MUD_GAIT)
+    base = _locomote(char, from_x, to_x, duration, ground_y, gait,
+                     phase_name="walk_mud")
+
+    def fn(t):
+        base(t)
+        for attr in ("foot_target_l", "foot_target_r"):
+            tgt = getattr(char, attr)
+            if tgt is not None and abs(tgt[1] - ground_y) <= 1.5:
+                setattr(char, attr, (tgt[0], ground_y + sink))
+        char.set_pose(
+            torso_lean=char.pose.get("torso_lean", 0.0)
+            + 0.05 * math.sin(2.0 * math.pi * 1.1 * t))
+        return char
+    return fn
+
+
+def carry_bag(char, duration, hand="r", bag=None, sway_amp=None,
+              sway_freq=1.6):
+    """Carry a bag hanging from one hand (hand-only overlay).
+
+    The hand settles at a carry position at the character's side and
+    the bag hangs below it on a pendulum sway. This primitive touches
+    ONLY one hand target and the ``bag`` dict, so it composes with a
+    walk: apply the walk first, then this overlay, each frame. With
+    ``bag`` None only the hand is positioned. Completion pose: hand
+    at the carry position, bag hanging below it.
+    """
+    _start = {}
+    if sway_amp is None:
+        sway_amp = 0.02 * float(char.H)
+
+    def fn(t):
+        f = char.pose.get("facing", 1)
+        joints = char.joints()
+        carry = (joints["hip"][0] + f * _s(char, 45),
+                 joints["hip"][1] + _s(char, 68))
+        sx, sy = _hand_start(char, hand, _start, t)
+        blend = smoothstep(min(1.0, t / 0.4))
+        pos = (lerp(sx, carry[0], blend), lerp(sy, carry[1], blend))
+        _set_hand(char, hand, pos, _start)
+        if bag is not None:
+            bag["x"] = pos[0] + sway_amp * math.sin(
+                2.0 * math.pi * sway_freq * t)
+            bag["y"] = pos[1] + _s(char, 68)
+        return char
+    return fn
+
+
+def look_at_point(char, target, duration):
+    """Turn the head toward a screen point (head_track, capped).
+
+    The existing look_at() takes angle keyframes; this is the
+    target-based variant the action compiler emits for "look at X"
+    sentences. Completion pose: head oriented toward the target
+    (head_look at the capped tracking angle).
+    """
+    def fn(t):
+        u = smoothstep(t / max(duration, 0.01))
+        head_track(char, target, max_angle=0.6 * max(u, 0.05))
+        return char
+    return fn
+
+
+def react_event(char, duration, kind="startle"):
+    """React to an environmental event: startle / flinch / duck.
+
+    A fast flinch (0-25%), a tense hold (25-55%), then a partial
+    recovery that KEEPS 60% of the tension -- a startled character
+    does not instantly relax. "flinch" also raises the hands toward
+    the face; "duck" crouches deeper without the arm raise.
+    Completion pose: tense hold (lean ~0.15, head ducked, crouched).
+    """
+    if kind not in ("startle", "flinch", "duck"):
+        raise ValueError(f"react_event: unknown kind {kind!r} "
+                         f"(expected 'startle', 'flinch' or 'duck')")
+    _start = {}
+
+    def fn(t):
+        u = min(1.0, max(0.0, t / max(duration, 0.01)))
+        if "root" not in _start:
+            _start["root"] = (char.pose["root_x"], char.pose["root_y"])
+            _start["lean"] = char.pose.get("torso_lean", 0.0)
+            _start["look"] = char.pose.get("head_look", 0.0)
+            _start["hand_l"] = char.joints()["hand_l"]
+            _start["hand_r"] = char.joints()["hand_r"]
+        f = char.pose.get("facing", 1)
+        up = smoothstep(min(1.0, u / 0.25))
+        recover = smoothstep(max(0.0, (u - 0.55) / 0.45))
+        intensity = up * (1.0 - 0.4 * recover)
+        crouch_px = _s(char, 45) if kind == "duck" else _s(char, 28)
+        back_px = 0.0 if kind == "duck" else _s(char, 17)
+        lean_t = 0.35 if kind == "duck" else 0.25
+        char.set_pose(
+            root_x=_start["root"][0] - f * back_px * intensity,
+            root_y=_start["root"][1] + crouch_px * intensity,
+            torso_lean=_start["lean"] + lean_t * intensity,
+            head_look=_start["look"] + 0.30 * intensity,
+            arm_l=0.5 * intensity, arm_r=0.5 * intensity,
+            elbow_l=0.9 * intensity, elbow_r=0.9 * intensity)
+        if kind == "flinch":
+            head = char.joints()["head"]
+            for side in ("l", "r"):
+                sx, sy = _start["hand_" + side]
+                off = -_s(char, 28) if side == "l" else _s(char, 28)
+                pos = (lerp(sx, head[0] + off, intensity),
+                       lerp(sy, head[1] + _s(char, 56), intensity))
+                _set_hand(char, side, pos, _start)
+        return char
+    return fn
+
+
+def raise_hand(char, duration, hand="r", raise_frac=0.30):
+    """Raise one hand to above shoulder height and hold it (asking a
+    question, volunteering, hailing). Completion pose: hand raised,
+    held above the shoulder line.
+    """
+    _start = {}
+
+    def fn(t):
+        u = smoothstep(t / max(duration, 0.01))
+        sx, sy = _hand_start(char, hand, _start, t)
+        f = char.pose.get("facing", 1)
+        shoulder = char.joints()["shoulder"]
+        tgt = (char.pose["root_x"] + f * _s(char, 84),
+               shoulder[1] - raise_frac * float(char.H))
+        _set_hand(char, hand,
+                  (lerp(sx, tgt[0], u), lerp(sy, tgt[1], u)), _start)
+        char.set_pose(head_look=-0.10 * u)
+        return char
+    return fn
+
+
+def head_tilt(char, duration, head_look=0.30, torso_lean=0.0):
+    """Ease the head (and optionally the torso) to a held tilt.
+
+    Covers bow-head (head_look > 0, head forward/down), lift-head
+    (head_look < 0) and head-tilt holds through parameters -- one
+    primitive, no per-gesture code. Completion pose: head held at
+    the target look angle.
+    """
+    _start = {}
+
+    def fn(t):
+        u = smoothstep(t / max(duration, 0.01))
+        if "look" not in _start:
+            _start["look"] = char.pose.get("head_look", 0.0)
+            _start["lean"] = char.pose.get("torso_lean", 0.0)
+        char.set_pose(head_look=lerp(_start["look"], head_look, u),
+                      torso_lean=lerp(_start["lean"], torso_lean, u))
+        return char
+    return fn
+
+
+def breathe(char, duration, breaths=2):
+    """Visible breathing: slow bob + lean oscillation, feet untouched.
+
+    Starts and ends exactly at the incoming pose (the oscillation
+    completes whole breaths), so it splices cleanly between segments.
+    Completion pose: the incoming standing pose.
+    """
+    _start = {}
+
+    def fn(t):
+        u = min(1.0, max(0.0, t / max(duration, 0.01)))
+        if "bob" not in _start:
+            _start["bob"] = char.pose.get("bob", 0.0)
+            _start["lean"] = char.pose.get("torso_lean", 0.0)
+        phase = 2.0 * math.pi * breaths * u
+        char.set_pose(
+            bob=_start["bob"] + _s(char, 4) * (0.5 - 0.5 * math.cos(phase)),
+            torso_lean=_start["lean"] + 0.02 * math.sin(phase),
+            arm_l=0.08 + 0.02 * math.sin(phase),
+            arm_r=0.08 - 0.02 * math.sin(phase))
+        return char
+    return fn
+
+
+def put_away(char, pocket, duration, hand="r", prop=None):
+    """Put a held prop away at ``pocket`` (x, y) and return the hand
+    to its hanging position. The prop follows the hand until
+    PUT_AWAY_RELEASE_U, then stays at the pocket -- the release
+    position EQUALS the hand position at release, so nothing
+    teleports. Completion pose: hand hanging, prop at the pocket.
+    """
+    _start = {}
+    prop = prop if prop is not None else {}
+
+    def fn(t):
+        u = min(1.0, max(0.0, t / max(duration, 0.01)))
+        sx, sy = _hand_start(char, hand, _start, t)
+        f = char.pose.get("facing", 1)
+        hang = (char.pose["root_x"] + f * _s(char, 22),
+                char.pose["root_y"] + _s(char, 28))
+        reach = smoothstep(min(1.0, u / 0.5))
+        back = smoothstep(max(0.0, (u - 0.6) / 0.4))
+        pos = (lerp(lerp(sx, pocket[0], reach), hang[0], back),
+               lerp(lerp(sy, pocket[1], reach), hang[1], back))
+        _set_hand(char, hand, pos, _start)
+        if u < PUT_AWAY_RELEASE_U:
+            prop["x"], prop["y"] = pos
+            prop["released"] = False
+        else:
+            prop["x"], prop["y"] = pocket
+            prop["released"] = True
+        return char
+    return fn
+
+
+def pose_at_completion(fn, char, duration):
+    """Run a primitive to its end and return the completion joints.
+
+    ``fn`` is a primitive closure (or a hand_over-style closure
+    returning a tuple -- the joints still come from ``char``).
+    """
+    fn(duration)
+    return char.joints()
+
+
+# Completion-pose contract for every recovery primitive: what a test
+# or a proof may assert about the pose at t == duration.
+PRIMITIVE_COMPLETION = {
+    "sit_at_desk": "seated: hips at seat height, knees ~90 deg, feet "
+                   "planted on the ground, hands on desk/knees",
+    "stand_from_chair": "standing() pose at the chair x",
+    "pick_up": "hand at the waist hold, prop grasped",
+    "open_wallet": "hands together at chest height, open_u == 1.0",
+    "close_wallet": "hands parted at chest height, open_u == 0.0",
+    "hold_pen": "pen tip hovering over the paper line start",
+    "write_on_paper": "hand at line end, pen tip on the paper",
+    "sign_document": "pen lifted 30 px above the paper",
+    "hand_over": "prop at receiver hand, holder == receiver",
+    "crouch": "standing() pose restored, feet planted (a held dip, "
+              "not a stance change)",
+    "receive_prop": "hand pulled 25% toward the waist, prop grasped",
+    "walk_mud": "standing at to_x, feet sunk in mud",
+    "carry_bag": "hand at carry position, bag hanging below",
+    "look_at_point": "head oriented toward the target",
+    "react_event": "tense hold: lean ~0.15, head ducked, crouched",
+    "raise_hand": "hand raised above the shoulder line, held",
+    "head_tilt": "head held at the target look angle",
+    "breathe": "incoming standing pose (whole breaths)",
+    "put_away": "hand hanging, prop at the pocket",
+    "seated_idle": "incoming seated pose (breathing only)",
+    "hammer_strike": "hand at rest, hammer head struck the surface "
+                     "at each cycle's strike moment",
+}
+
+
+def crouch(char, duration, ground_y, depth_frac=0.30, lean=0.35):
+    """Crouch: lower the hips with bent knees and a forward torso
+    lean, feet planted, then rise back to standing. The torso bends
+    WITHOUT picking anything up -- the CROUCH semantic action ("cúi
+    người tránh tiếng pháo"), distinct from bend_pick/kneel_pick.
+
+    The feet are captured from the current pose and held as IK
+    targets through the motion, so dropping root_y bends the knees
+    instead of sliding the feet; the root never moves horizontally,
+    so the next segment starts without an offset. Hands are
+    untouched (a crouch carries no prop contact). Phases: descend
+    (0-30%), hold (30-70%), rise (70-100%). Completion pose: the
+    incoming standing pose.
+    """
+    _start = {}
+    leg = char.u_leg + char.l_leg
+
+    def fn(t):
+        u = min(1.0, max(0.0, t / max(duration, 0.01)))
+        if "root_y" not in _start:
+            _start["root_y"] = char.pose["root_y"]
+            _start["lean"] = char.pose.get("torso_lean", 0.0)
+            _start["look"] = char.pose.get("head_look", 0.0)
+            joints = char.joints()
+            _start["foot_l"] = joints["foot_l"]
+            _start["foot_r"] = joints["foot_r"]
+        if u < 0.30:
+            d = smoothstep(u / 0.30)
+        elif u < 0.70:
+            d = 1.0
+        else:
+            d = 1.0 - smoothstep((u - 0.70) / 0.30)
+        char.foot_target_l = _start["foot_l"]
+        char.foot_target_r = _start["foot_r"]
+        char.set_pose(
+            root_y=ground_y - leg * (0.93 - depth_frac * d),
+            torso_lean=lerp(_start["lean"], lean, d),
+            head_look=lerp(_start["look"], 0.12, d))
+        return char
+    return fn
+
+
+def receive_prop(char, target, duration, hand="r"):
+    """Receive a prop: the named hand reaches from its current
+    position to the meeting ``target`` (x, y), holds contact, then
+    draws the prop slightly toward the body (securing it). The
+    receiver side of a transfer (RECEIVE_PROP, "nhận bằng tay
+    phải"); the giver side is hand_over/give_to. When the hand
+    already starts at the target (a hand_over just placed it there),
+    the reach is a no-op and only the securing pull-in moves.
+    Phases: reach (0-60%), hold + pull-in (60-100%). Completion
+    pose: hand at the pulled-in hold, prop secured.
+    """
+    _start = {}
+
+    def fn(t):
+        u = min(1.0, max(0.0, t / max(duration, 0.01)))
+        if "hand" not in _start:
+            _start["hand"] = char.joints()["hand_" + hand]
+            _start["lean"] = char.pose.get("torso_lean", 0.0)
+            f = char.pose.get("facing", 1)
+            _start["waist"] = (char.pose["root_x"] + f * _s(char, 40),
+                               char.pose["root_y"] - _s(char, 60))
+        reach = smoothstep(min(1.0, u / 0.60))
+        pull = smoothstep(max(0.0, (u - 0.60) / 0.40))
+        sx, sy = _start["hand"]
+        tx, ty = target
+        wx, wy = _start["waist"]
+        hx = lerp(lerp(sx, tx, reach), lerp(tx, wx, 0.25), pull)
+        hy = lerp(lerp(sy, ty, reach), lerp(ty, wy, 0.25), pull)
+        char.set_pose(torso_lean=lerp(_start["lean"], 0.10, reach))
+        if hand == "r":
+            char.hand_target_r = (hx, hy)
+        else:
+            char.hand_target_l = (hx, hy)
+        return char
+    return fn
+
+
 PRIMITIVES = {
     "walk_to": walk_to, "run_to": run_to, "turn_to": turn_to,
     "look_at": look_at,
@@ -1305,6 +2458,16 @@ PRIMITIVES = {
     "give_to": give_to, "shrug": shrug, "cover_face": cover_face,
     "nod": nod, "sit_down": sit_down, "stand_up": stand_up,
     "idle": idle, "bend_pick": bend_pick, "kneel_pick": kneel_pick,
+    "sit_at_desk": sit_at_desk, "stand_from_chair": stand_from_chair,
+    "pick_up": pick_up, "open_wallet": open_wallet,
+    "close_wallet": close_wallet, "hold_pen": hold_pen,
+    "write_on_paper": write_on_paper, "sign_document": sign_document,
+    "hand_over": hand_over, "walk_mud": walk_mud,
+    "carry_bag": carry_bag, "look_at_point": look_at_point,
+    "react_event": react_event, "raise_hand": raise_hand,
+    "head_tilt": head_tilt, "breathe": breathe, "put_away": put_away,
+    "seated_idle": seated_idle, "hammer_strike": hammer_strike,
+    "crouch": crouch, "receive_prop": receive_prop,
 }
 
 
@@ -1325,11 +2488,14 @@ def compile_actions(action_list, chars, fps=24):
         if ptype == "give_to":
             giver, receiver = chars[a["char"]], chars[a["other"]]
             prop = {"x": 0, "y": 0}
-            fn = give_to(giver, receiver, prop, dur)
+            fn = give_to(giver, receiver, prop, dur,
+                         receive_hand=a.get("receive_hand", "l"))
             compiled.append((start, dur, lambda t, fn=fn: fn(t)))
         elif ptype in ("walk_to", "run_to"):
             c = chars[a["char"]]
-            fn = PRIMITIVES[ptype](c, a["from_x"], a["to_x"], dur, a["ground_y"])
+            fn = PRIMITIVES[ptype](c, a["from_x"], a["to_x"], dur,
+                                   a["ground_y"],
+                                   profile=a.get("profile"))
             compiled.append((start, dur, lambda t, fn=fn: fn(t)))
         elif ptype == "look_at":
             c = chars[a["char"]]
@@ -1366,6 +2532,110 @@ def compile_actions(action_list, chars, fps=24):
             c = chars[a["char"]]
             fn = kneel_pick(c, tuple(a["target"]), dur, a["ground_y"],
                             hand=a.get("hand", "r"))
+            compiled.append((start, dur, lambda t, fn=fn: fn(t)))
+        elif ptype == "sit_at_desk":
+            c = chars[a["char"]]
+            fn = sit_at_desk(c, a["chair_x"], a["seat_y"], dur,
+                             a["ground_y"], desk=a.get("desk"))
+            compiled.append((start, dur, lambda t, fn=fn: fn(t)))
+        elif ptype == "stand_from_chair":
+            c = chars[a["char"]]
+            fn = stand_from_chair(c, dur, a["ground_y"],
+                                  chair_x=a.get("chair_x"))
+            compiled.append((start, dur, lambda t, fn=fn: fn(t)))
+        elif ptype == "pick_up":
+            c = chars[a["char"]]
+            fn = pick_up(c, tuple(a["target"]), dur, a["ground_y"],
+                         hand=a.get("hand", "r"),
+                         source=a.get("source", "ground"))
+            compiled.append((start, dur, lambda t, fn=fn: fn(t)))
+        elif ptype in ("open_wallet", "close_wallet"):
+            c = chars[a["char"]]
+            fn = PRIMITIVES[ptype](c, dur, prop=a.get("prop"))
+            compiled.append((start, dur, lambda t, fn=fn: fn(t)))
+        elif ptype == "hold_pen":
+            c = chars[a["char"]]
+            fn = hold_pen(c, tuple(a["pen_pos"]), dict(a["paper"]), dur,
+                          hand=a.get("hand", "r"))
+            compiled.append((start, dur, lambda t, fn=fn: fn(t)))
+        elif ptype in ("write_on_paper", "sign_document"):
+            c = chars[a["char"]]
+            fn = PRIMITIVES[ptype](c, dict(a["paper"]), dur,
+                                   hand=a.get("hand", "r"),
+                                   **({"words": a["words"]}
+                                      if ptype == "write_on_paper"
+                                      and "words" in a else {}))
+            compiled.append((start, dur, lambda t, fn=fn: fn(t)))
+        elif ptype == "hand_over":
+            giver, receiver = chars[a["char"]], chars[a["other"]]
+            prop = a.get("prop") or {"x": 0, "y": 0}
+            fn = hand_over(giver, receiver, prop, dur,
+                           transfer_u=a.get("transfer_u",
+                                            HAND_OVER_TRANSFER_U),
+                           receive_hand=a.get("receive_hand", "l"))
+            compiled.append((start, dur, lambda t, fn=fn: fn(t)))
+        elif ptype == "walk_mud":
+            c = chars[a["char"]]
+            fn = walk_mud(c, a["from_x"], a["to_x"], dur, a["ground_y"],
+                          sink=a.get("sink"),
+                          profile=a.get("profile"))
+            compiled.append((start, dur, lambda t, fn=fn: fn(t)))
+        elif ptype == "carry_bag":
+            c = chars[a["char"]]
+            fn = carry_bag(c, dur, hand=a.get("hand", "r"),
+                           bag=a.get("bag"),
+                           sway_amp=a.get("sway_amp"),
+                           sway_freq=a.get("sway_freq", 1.6))
+            compiled.append((start, dur, lambda t, fn=fn: fn(t)))
+        elif ptype == "look_at_point":
+            c = chars[a["char"]]
+            fn = look_at_point(c, tuple(a["target"]), dur)
+            compiled.append((start, dur, lambda t, fn=fn: fn(t)))
+        elif ptype == "react_event":
+            c = chars[a["char"]]
+            fn = react_event(c, dur, kind=a.get("kind", "startle"))
+            compiled.append((start, dur, lambda t, fn=fn: fn(t)))
+        elif ptype == "raise_hand":
+            c = chars[a["char"]]
+            fn = raise_hand(c, dur, hand=a.get("hand", "r"),
+                            raise_frac=a.get("raise_frac", 0.30))
+            compiled.append((start, dur, lambda t, fn=fn: fn(t)))
+        elif ptype == "head_tilt":
+            c = chars[a["char"]]
+            fn = head_tilt(c, dur, head_look=a.get("head_look", 0.30),
+                           torso_lean=a.get("torso_lean", 0.0))
+            compiled.append((start, dur, lambda t, fn=fn: fn(t)))
+        elif ptype == "breathe":
+            c = chars[a["char"]]
+            fn = breathe(c, dur, breaths=a.get("breaths", 2))
+            compiled.append((start, dur, lambda t, fn=fn: fn(t)))
+        elif ptype == "put_away":
+            c = chars[a["char"]]
+            fn = put_away(c, tuple(a["pocket"]), dur,
+                          hand=a.get("hand", "r"), prop=a.get("prop"))
+            compiled.append((start, dur, lambda t, fn=fn: fn(t)))
+        elif ptype == "seated_idle":
+            c = chars[a["char"]]
+            fn = seated_idle(c, dur)
+            compiled.append((start, dur, lambda t, fn=fn: fn(t)))
+        elif ptype == "hammer_strike":
+            c = chars[a["char"]]
+            fn = hammer_strike(c, tuple(a["target"]), dur,
+                               a.get("ground_y"),
+                               hand=a.get("hand", "r"),
+                               cycles=a.get("cycles"),
+                               raise_frac=a.get("raise_frac", 0.24))
+            compiled.append((start, dur, lambda t, fn=fn: fn(t)))
+        elif ptype == "crouch":
+            c = chars[a["char"]]
+            fn = crouch(c, dur, a["ground_y"],
+                        depth_frac=a.get("depth_frac", 0.30),
+                        lean=a.get("lean", 0.35))
+            compiled.append((start, dur, lambda t, fn=fn: fn(t)))
+        elif ptype == "receive_prop":
+            c = chars[a["char"]]
+            fn = receive_prop(c, tuple(a["target"]), dur,
+                              hand=a.get("hand", "r"))
             compiled.append((start, dur, lambda t, fn=fn: fn(t)))
     total = max((s + d for s, d, _ in compiled), default=0.0)
     timeline = {}

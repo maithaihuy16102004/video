@@ -107,9 +107,35 @@ def _horizon_y(scene: Scene25D, cam: PerspectiveCamera,
     return min(max(min(ys), 0.0), float(height))
 
 
+def _projected_footprint(cam: PerspectiveCamera, points,
+                         width: int, height: int):
+    """Half extents (x, y) in screen px of the projected ``points``.
+
+    Returns None when any point is behind the near plane — the caller
+    falls back to the uncapped legacy shadow for that object.
+    """
+    xs, ys = [], []
+    for p in points:
+        px, py, _, vis = cam.project(p, width, height)
+        if not vis:
+            return None
+        xs.append(px)
+        ys.append(py)
+    return ((max(xs) - min(xs)) / 2.0, (max(ys) - min(ys)) / 2.0)
+
+
+def _base_corners(box: Box3D):
+    """The box's 4 bottom corners (y = lowest corner height)."""
+    cs = box.corners()
+    min_y = min(c[1] for c in cs)
+    return [c for c in cs if c[1] <= min_y + 1e-9]
+
+
 def _draw_contact_shadow(img: Image.Image, scene: Scene25D,
                          cam: PerspectiveCamera, ground_pos, height,
-                         base_radius: float, horizon_y: float | None = None):
+                         base_radius: float, horizon_y: float | None = None,
+                         footprint_half_width_px: float | None = None,
+                         footprint_half_depth_px: float | None = None):
     """Blurred ellipse on the ground, from lighting.contact_shadow().
 
     Stage 3: the ellipse is CLIPPED to the ground (never above
@@ -120,21 +146,43 @@ def _draw_contact_shadow(img: Image.Image, scene: Scene25D,
     applied after the blur, so no blurred fringe leaks into the sky.
     ``horizon_y=None`` keeps the old unclipped behaviour for direct
     callers; render_frame always passes the horizon.
+
+    Visual recovery W1: when the caller supplies the object's
+    projected footprint (``footprint_half_width_px`` / ``..._depth``),
+    the ellipse geometry comes from the ratio-capped contract in
+    ``ai_clip_studio.lighting.shadow_ellipse_spec`` — the shadow can
+    never outgrow its object (width <= 1.3x footprint, height <=
+    0.31x width, depth-capped, alpha <= 0.55). Without a footprint
+    the legacy uncapped geometry is kept for direct callers.
     """
-    sh = contact_shadow(ground_pos, height, base_radius, scene.lights.key)
-    cx, cz = sh["center"]
-    # ellipse axes in world units -> project the two axis end points
-    px, py, pscale, vis = cam.project((cx, 0.0, cz), *img.size)
-    if not vis:
-        return
-    rx = sh["radius_x"] * pscale
-    rz = sh["radius_z"] * pscale
-    if rx < 1 or rz < 1:
-        return
+    if footprint_half_width_px is not None:
+        # Lazy import: the contract module lives in the parent package.
+        from ..lighting import shadow_ellipse_spec
+        spec = shadow_ellipse_spec(
+            ground_pos, height, base_radius, scene.lights.key, cam,
+            img.size, footprint_half_width_px,
+            footprint_half_depth_px=footprint_half_depth_px)
+        if spec is None:
+            return
+        px, py = spec["center_px"]
+        rx, rz = spec["rx_px"], spec["ry_px"]
+        alpha = int(255 * spec["alpha"])
+    else:
+        sh = contact_shadow(ground_pos, height, base_radius,
+                            scene.lights.key)
+        cx, cz = sh["center"]
+        # ellipse axes in world units -> project the two axis end points
+        px, py, pscale, vis = cam.project((cx, 0.0, cz), *img.size)
+        if not vis:
+            return
+        rx = sh["radius_x"] * pscale
+        rz = sh["radius_z"] * pscale
+        if rx < 1 or rz < 1:
+            return
+        alpha = int(255 * sh["alpha"])
     blur = max(1, int(2 + height * 6))
     layer = Image.new("RGBA", img.size, (0, 0, 0, 0))
     dl = ImageDraw.Draw(layer)
-    alpha = int(255 * sh["alpha"])
     dl.ellipse([px - rx, py - rz, px + rx, py + rz], fill=(0, 0, 0, alpha))
     layer = layer.filter(ImageFilter.GaussianBlur(blur))
     if horizon_y is not None and horizon_y > 0:
@@ -307,12 +355,23 @@ def render_frame(scene: Scene25D, width: int = 1920, height: int = 1080,
     for box in scene.boxes:
         if box.is_flat_ground_slab():
             continue
+        # W1: measure the box's projected base footprint so the shadow
+        # cap can keep wide walls' shadows thin strips, not blobs.
+        _foot = _projected_footprint(cam, _base_corners(box), width, height)
         _draw_contact_shadow(img, scene, cam, box.ground_pos(),
                              box.height_above_ground(), box.base_radius(),
-                             horizon_y=horizon)
+                             horizon_y=horizon,
+                             footprint_half_width_px=_foot[0] if _foot else None,
+                             footprint_half_depth_px=_foot[1] if _foot else None)
     for ch in scene.characters:
+        _cx, _, _cz = ch.world_pos
+        _mpts = [(_cx - 0.35, 0.0, _cz - 0.35), (_cx + 0.35, 0.0, _cz - 0.35),
+                 (_cx - 0.35, 0.0, _cz + 0.35), (_cx + 0.35, 0.0, _cz + 0.35)]
+        _cfoot = _projected_footprint(cam, _mpts, width, height)
         _draw_contact_shadow(img, scene, cam, ch.world_pos, 0.0, 0.35,
-                             horizon_y=horizon)
+                             horizon_y=horizon,
+                             footprint_half_width_px=_cfoot[0] if _cfoot else None,
+                             footprint_half_depth_px=_cfoot[1] if _cfoot else None)
     # far-to-near painter's order across boxes + characters together
     items = [(_paint_depth(cam, "box", b), "box", b) for b in scene.boxes]
     items += [(_paint_depth(cam, "character", c), "character", c)

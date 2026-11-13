@@ -2985,11 +2985,14 @@ class StudioScriptV1Parser:
             voice_tone = char.fields.get("VOICE_TONE")
             if isinstance(voice_tone, str) and voice_tone:
                 char.voice_style = voice_tone
-            voice_value = char.fields.get("VOICE")
+            # 2026-11-12 (A2 wiring item 5): VOICE:NONE means "does
+            # not speak", NOT "background extra". The old rule marked
+            # every silent character an extra, which excluded the
+            # Cyclopes (who hammer, carry and hand over the bolt)
+            # from the visible cast. Only an explicit background-
+            # extras role marks a character an extra.
             char.is_extra = (
-                (isinstance(voice_value, str)
-                 and voice_value.strip().upper() == "NONE")
-                or _normalize_name(char.role) == "background extras")
+                _normalize_name(char.role) == "background extras")
         # Duplicate IDENTITY_ID detection (V1E001, SPEC §5.1). Two
         # blocks with the same id already reported V1E001 at the
         # header, so only distinct blocks sharing an id are reported.

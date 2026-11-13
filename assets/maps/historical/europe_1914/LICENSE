@@ -1,0 +1,20 @@
+LICENSE — Europe 1914 boundaries (ohm_1914_europe)
+
+This dataset combines two license regimes. See ATTRIBUTION.md for the
+full attribution record.
+
+1. OpenHistoricalMap base data: Creative Commons CC0 1.0 Universal
+   public domain dedication ("unless noted otherwise"), per
+   https://wiki.openstreetmap.org/wiki/OpenHistoricalMap/License.
+   CC0 text: https://creativecommons.org/publicdomain/zero/1.0/
+
+2. CC BY 4.0 segments: 273 member ways (IGN CNIG Spain, Kartverket
+   Norway, eProstor Slovenia, UN OCHA HDX) under Creative Commons
+   Attribution 4.0 International.
+   License text: https://creativecommons.org/licenses/by/4.0/
+
+Commercial use, modification and redistribution are permitted under
+both regimes. The CC BY 4.0 segments require attribution (see
+ATTRIBUTION.md) and a link to the license. No NonCommercial,
+ShareAlike or NoDerivatives element is present in this extract
+(per-element license-tag check, 2026-11-12).

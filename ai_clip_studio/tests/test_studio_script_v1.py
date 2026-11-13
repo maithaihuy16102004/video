@@ -1,6 +1,6 @@
 """Tests for the STUDIO SCRIPT V1 parser (ai_clip_studio/studio_script_v1.py).
 
-Run from /home/hatch/workspace/video-16x9-v2:
+Run from /home/hatch/workspace/agent:
     python3 -m unittest ai_clip_studio.tests.test_studio_script_v1 -v
 
 The upstream fixture is used for schema/parser validation ONLY (no render).
@@ -9,6 +9,7 @@ Synthetic scripts use neutral invented names; nothing here hardcodes a story.
 import json
 import re
 import unittest
+from pathlib import Path
 
 try:
     import jsonschema
@@ -27,10 +28,11 @@ from ai_clip_studio.studio_script_v1 import (
 )
 
 FIXTURE = "/home/hatch/workspace/video-upstream/fixtures/episode01_hitler_1914_munich/script.txt"
-EXAMPLE = "/home/hatch/workspace/video-16x9-v2/examples/hitler_ep01.studio.md"
-TEMPLATE = "/home/hatch/workspace/video-16x9-v2/docs/STUDIO_SCRIPT_V1_TEMPLATE.md"
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+EXAMPLE = str(REPO_ROOT / "examples" / "hitler_ep01.studio.md")
+TEMPLATE = str(REPO_ROOT / "docs" / "STUDIO_SCRIPT_V1_TEMPLATE.md")
 FREEFORM_SCRIPT = "/home/hatch/workspace/acceptance_loop/test_chiec_vi_trong_mua/script.txt"
-SCHEMA_PATH = "/home/hatch/workspace/video-16x9-v2/docs/studio_script_v1.schema.json"
+SCHEMA_PATH = str(REPO_ROOT / "docs" / "studio_script_v1.schema.json")
 
 
 def _read(path):

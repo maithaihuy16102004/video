@@ -80,6 +80,25 @@ class TestViScriptParser(unittest.TestCase):
         self.assertIn("board", cues4)
         self.assertIn("wave", cues4)
 
+    def test_board_cue_requires_a_vehicle(self):
+        # Zeus SC10: "Zeus bước lên bậc thang Olympus" (steps)
+        # matched bare "bước lên" and drew a modern bus behind
+        # every Olympus shot. Boarding needs the vehicle named.
+        self.assertNotIn(
+            "board",
+            extract_action_cues("Zeus bước lên bậc thang Olympus."))
+        self.assertIn(
+            "board",
+            extract_action_cues("Lan bước lên xe buýt."))
+        self.assertIn(
+            "board", extract_action_cues("Lan bước lên xe."))
+
+    def test_bus_cue_requires_a_bus_word(self):
+        self.assertNotIn(
+            "bus", extract_action_cues("Một chiếc xe ngựa kéo qua."))
+        self.assertIn(
+            "bus", extract_action_cues("Một chiếc xe buýt đến."))
+
     def test_parse_other_script_not_hardcoded(self):
         parsed = parse_vi_script(OTHER_SCRIPT)
         self.assertEqual(len(parsed.scenes), 2)

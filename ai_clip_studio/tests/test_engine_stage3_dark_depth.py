@@ -7,7 +7,7 @@ Depth: foreground boxes must occlude characters, but flat ground
 slabs must never swallow feet (they stay in the background layer).
 
 Run: python3 -m unittest ai_clip_studio.tests.test_engine_stage3_dark_depth
-from ~/workspace/video-16x9-v2/
+from ~/workspace/agent/
 """
 import sys
 import unittest

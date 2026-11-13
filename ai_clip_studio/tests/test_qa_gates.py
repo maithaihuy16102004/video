@@ -1,7 +1,7 @@
 """Unit tests for ai_clip_studio.qa_gates (stdlib unittest, no network).
 
 Run:  python3 -m unittest discover -s ai_clip_studio/tests -v
-from ~/workspace/video-16x9-v2/
+from ~/workspace/agent/
 
 Technical tests encode small real videos with ffmpeg (testsrc + sine
 tone) so ffprobe / astats measure real files, not fixtures.

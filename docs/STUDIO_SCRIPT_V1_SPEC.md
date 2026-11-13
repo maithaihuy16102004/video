@@ -1840,7 +1840,7 @@ a pipeline concern (see Appendix B); the parser records the speaker as
 
 - The machine-readable schema for STUDIO SCRIPT V1 lives at
   `docs/studio_script_v1.schema.json` (repository-relative:
-  `video-16x9-v2/docs/studio_script_v1.schema.json`).
+  `agent/docs/studio_script_v1.schema.json`).
 - The schema is OWNED BY THE PARSER STREAM. It is not part of this
   Phase A documentation deliverable; the parser stream creates and
   maintains it, and it lives alongside this specification in `docs/`.

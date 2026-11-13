@@ -1,6 +1,6 @@
 """Unit tests for ai_clip_studio.synth_sfx (stdlib unittest, no network).
 
-Run from ~/workspace/video-16x9-v2/:
+Run from ~/workspace/agent/:
     python3 -m unittest ai_clip_studio.tests.test_synth_sfx -v
 
 Tests verify synthesis properties (determinism, duration, finiteness,
@@ -163,6 +163,39 @@ class TestMixPanIO(unittest.TestCase):
         self.assertEqual(y[0], 0.0)
         self.assertEqual(y[-1], 0.0)
         self.assertEqual(y[2400], 1.0)
+
+
+class TestFootstepQuality(unittest.TestCase):
+    """Phase G verification for the footstep generator: synthesis
+    properties only (duration, headroom, decay, determinism,
+    spectrum). Perceptual quality is a human-listening verdict,
+    recorded on the foley report — never inferred from these
+    numbers."""
+
+    def test_duration_peak_decay(self):
+        y = synth_sfx.footstep(7000)
+        self.assertEqual(len(y), int(0.22 * synth_sfx.SR))
+        self.assertTrue(np.all(np.isfinite(y)))
+        self.assertLessEqual(float(np.max(np.abs(y))), 1.0)
+        early = float(np.sqrt(np.mean(y[:2400] ** 2)))
+        late = float(np.sqrt(np.mean(y[-2400:] ** 2)))
+        self.assertLess(late, early * 0.1)
+
+    def test_deterministic_and_seed_sensitive(self):
+        self.assertTrue(np.array_equal(synth_sfx.footstep(7000),
+                                       synth_sfx.footstep(7000)))
+        self.assertFalse(np.array_equal(synth_sfx.footstep(7000),
+                                        synth_sfx.footstep(7001)))
+
+    def test_spectrum_is_low_frequency_weighted(self):
+        y = synth_sfx.footstep(7000)
+        spec = np.abs(np.fft.rfft(y * np.hanning(len(y))))
+        freqs = np.fft.rfftfreq(len(y), 1 / synth_sfx.SR)
+        centroid = float((freqs * spec).sum() / spec.sum())
+        # A boot thump: energy concentrated below ~1 kHz (measured
+        # 774 Hz at seed 7000; plank modes + click lift it above a
+        # pure sine thump).
+        self.assertLess(centroid, 1000.0)
 
 
 if __name__ == "__main__":

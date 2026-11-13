@@ -299,6 +299,7 @@ _STICKMAN_KWARGS = (
     "height", "suit", "skin", "hat", "moustache", "moustache_style",
     "name", "template",
     "body_variant", "hair_style", "glasses", "cane", "costume", "gait",
+    "eye_count",
 )
 
 
@@ -307,11 +308,12 @@ def make_character(template="male", name=None, suit=None,
     """Build a reusable character on the locked proportion system.
 
     template: 'male' | 'female' | 'child' | 'elderly'.
-    body_variant: 'slim' | 'standard' | 'sturdy' (widths scale together).
+    body_variant: 'slim' | 'standard' | 'sturdy' | 'massive' (widths
+      scale together).
     Any template field (suit, hat, moustache, hair_style, glasses, cane,
-    costume, height, name) can be overridden per instance. Identity is
-    preserved across shots because it lives in these fields, not in a
-    per-story drawing routine.
+    costume, height, name, eye_count) can be overridden per instance.
+    Identity is preserved across shots because it lives in these fields,
+    not in a per-story drawing routine.
     """
     if template not in TEMPLATES:
         raise ValueError(f"unknown character template: {template!r} "
@@ -353,7 +355,8 @@ def make_character_from_data(data):
     traits. ``data`` is a dict with the same fields ``make_character``
     takes: ``template`` ('male' | 'female' | 'child' | 'elderly'),
     ``name``, ``suit``, ``body_variant``, ``height``, and any template
-    field (hat, moustache, hair_style, glasses, cane, costume).
+    field (hat, moustache, hair_style, glasses, cane, costume,
+    eye_count).
     A named ``instance`` key resolves through CHARACTER_INSTANCES
     first (so a pipeline that only knows the name still works); a
     ``template`` key builds a fresh character from the data. Unknown
@@ -504,28 +507,97 @@ def _separate_close_hands(hand_l, hand_r, elbow_l, facing, H):
             el, 0.6, 1.0, 0.7)
 
 
-def _draw_hand(draw, elbow, hand, char, ink, flen_scale=1.0,
-               fan_scale=1.0, fw_scale=1.0):
-    """Minimal hand in the reference language: 3 finger strokes fanning
-    from the wrist along the forearm direction. Never a dot, never a
-    skin circle, never a pasted symbol. ``flen_scale`` / ``fw_scale``
-    shorten and thin the fingers when the two hands hang close (F3):
-    full-length wide fans from two coincident wrists interleave into
-    one 6-finger scribble; short thin strokes stay distinct."""
-    H = float(char.H)
+def _finger_geometry(elbow, hand, H, grip="open",
+                     flen_scale=1.0, fan_scale=1.0):
+    """Finger stroke geometry for _draw_hand: [(angle, length), ...].
+
+    Pure geometry, no drawing, so grip modes are unit-testable. The
+    three strokes always fan from the wrist along the forearm
+    direction (the reference hand language); grip modes vary only
+    length and spread, never topology:
+      open:  full-length fan (the reference hand, unchanged).
+      grip:  short tight strokes -- a closed hand around a held
+             object (pen, wallet, bag handle).
+      point: middle finger full-length, side fingers short -- a
+             pointing hand.
+    """
     dx, dy = hand[0] - elbow[0], hand[1] - elbow[1]
     if math.hypot(dx, dy) < 1e-6:
         dx, dy = 0.0, 1.0
     base = math.atan2(dy, dx)
     flen = STYLE_LOCK["finger_len_frac"] * H * flen_scale
+    if grip == "grip":
+        specs = ((-0.22, 0.55), (0.0, 0.55), (0.22, 0.55))
+    elif grip == "point":
+        specs = ((-0.61, 0.40), (0.0, 1.00), (0.61, 0.40))
+    else:  # "open" (and any unknown value falls back to open)
+        specs = ((-0.61, 1.00), (0.0, 1.00), (0.61, 1.00))
+    return [(base + off * fan_scale, flen * mult)
+            for off, mult in specs]
+
+
+def _draw_hand(draw, elbow, hand, char, ink, flen_scale=1.0,
+               fan_scale=1.0, fw_scale=1.0, grip="open"):
+    """Minimal hand in the reference language: 3 finger strokes fanning
+    from the wrist along the forearm direction. Never a dot, never a
+    skin circle, never a pasted symbol. ``flen_scale`` / ``fw_scale``
+    shorten and thin the fingers when the two hands hang close (F3):
+    full-length wide fans from two coincident wrists interleave into
+    one 6-finger scribble; short thin strokes stay distinct.
+    ``grip`` ("open" | "grip" | "point") varies finger length/spread
+    only -- see _finger_geometry. Default "open" reproduces the
+    previous drawing exactly.
+    """
+    H = float(char.H)
     fw = max(3.0, limb_width(char) * 0.75 * fw_scale)
-    for off in (-0.61 * fan_scale, 0.0, 0.61 * fan_scale):
-        a = base + off
-        tip = (hand[0] + math.cos(a) * flen, hand[1] + math.sin(a) * flen)
+    for angle, flen in _finger_geometry(elbow, hand, H, grip,
+                                        flen_scale, fan_scale):
+        tip = (hand[0] + math.cos(angle) * flen,
+               hand[1] + math.sin(angle) * flen)
         draw.line([hand, tip], fill=ink, width=int(fw))
         r = fw / 2.0
         draw.ellipse([tip[0] - r, tip[1] - r,
                       tip[0] + r, tip[1] + r], fill=ink)
+
+
+def draw_grip_fingers(draw, hand, direction, char, ink):
+    """Re-draw a gripping hand's fingers over a held prop.
+
+    The renderer draws held props AFTER the characters, so a prop
+    paints over the fingers that hold it. This pass repaints the
+    grip-mode finger fan (see _finger_geometry) starting at the
+    prop's grip point ``hand`` along the forearm ``direction``
+    (elbow -> hand, unit-ish), so the hand reads as wrapped around
+    the prop. Same strokes, same ink as _draw_hand with
+    grip="grip" -- repainting is idempotent where the prop does
+    not cover the fingers.
+    """
+    dx, dy = float(direction[0]), float(direction[1])
+    if math.hypot(dx, dy) < 1e-6:
+        dx, dy = 0.0, 1.0
+    elbow = (hand[0] - dx * 50.0, hand[1] - dy * 50.0)
+    _draw_hand(draw, elbow, hand, char, ink, grip="grip")
+
+
+# Single-eye scales (Test F, 2026-11-12): a one-eyed character's eye
+# is drawn WIDER than one eye of a two-eyed face (the script trait is
+# "one LARGE eye") but barely taller -- the reference eyes are
+# already tall ovals, and scaling height equally makes the single eye
+# swallow the face (measured on the first Test F proof render). Same
+# oval + ink language, centred on the face centre. Expression
+# parameters apply to the one eye exactly as they apply to each eye
+# of a two-eyed face.
+SINGLE_EYE_W_SCALE = 1.45
+SINGLE_EYE_H_SCALE = 1.05
+# Single-eye vertical placement: the script trait is one eye "in the
+# middle of the FOREHEAD", so the single eye sits 0.25r above the
+# head centre line -- where the two-eye geometry would put it, its
+# lower half lands inside the moustache band (same centre x) and the
+# two merge into one blob (measured on the proof render). The
+# forehead placement keeps a clear gap above the moustache and below
+# the hairline. Two-eyed faces are untouched (eyes stay on the
+# measured centre line).
+SINGLE_EYE_DY_FRAC = -0.25
 
 
 def _face_eye_xs(hx, r, f, face_dx):
@@ -547,31 +619,59 @@ def _face_eye_xs(hx, r, f, face_dx):
     return ex_near, ex_far, fc
 
 
-def _draw_face(draw, char, hx, hy, view, face_dx, params, ink, pal):
+def _draw_face(draw, char, hx, hy, view, face_dx, params, ink, pal,
+               gaze=(0.0, 0.0)):
     """Eyes + brows + mouth in the same line language. No nose, no
     blush, no sweat drop. ``face_dx``: 1.0 = profile, 0.5 = 3/4,
-    0.0 = front. Back view has no face at all."""
+    0.0 = front. Back view has no face at all. ``gaze`` is an eye
+    shift (gx, gy) in units of head radius -- eye DIRECTION, applied
+    in every view on top of the expression's eye_dx (which only acts
+    in turned views). (0, 0) reproduces the previous drawing exactly.
+    A character with ``eye_count == 1`` gets one wider eye on the
+    forehead, centred on the face centre (SINGLE_EYE_W_SCALE /
+    SINGLE_EYE_H_SCALE / SINGLE_EYE_DY_FRAC); all other characters
+    are unchanged.
+    """
     H = float(char.H)
     r = char.head_r
     f = char.joints()["facing"]
+    eye_count = getattr(char, "eye_count", 2) or 2
     # v4: eyes sit ON the head centre line (measured 0.014r), not above it.
-    eye_y = hy + STYLE_LOCK["eye_dy_frac_of_r"] * r
+    # A single eye sits on the forehead instead (SINGLE_EYE_DY_FRAC).
+    eye_y = hy + STYLE_LOCK["eye_dy_frac_of_r"] * r + gaze[1] * r
+    if eye_count == 1:
+        eye_y += SINGLE_EYE_DY_FRAC * r
     eye_dx = STYLE_LOCK["eye_dx_frac_of_r"]
     # Near eye (facing side) and far eye; front view is symmetric.
     # The face turns with face_dx (see _face_eye_xs).
     ex_near, ex_far, _fc = _face_eye_xs(hx, r, f, face_dx)
     far_scale = 0.88 if face_dx > 0 else 1.0
+    # Single-eye characters (eye_count == 1, a general face trait):
+    # ONE eye, centred on the face centre (hx + fc, so it still turns
+    # with the face), drawn wider (SINGLE_EYE_W_SCALE) and barely
+    # taller (SINGLE_EYE_H_SCALE), with ONE brow above it. The loop
+    # below is unchanged: one eye spec draws one eye + one brow.
+    # eye_count == 2 reproduces the previous drawing exactly.
+    # ``eye_scale`` feeds the mouth clearance so the open mouth never
+    # touches the larger eye.
+    if eye_count == 1:
+        eye_specs = ((hx + _fc, SINGLE_EYE_W_SCALE,
+                      SINGLE_EYE_H_SCALE, False),)
+        eye_scale = SINGLE_EYE_H_SCALE
+    else:
+        eye_specs = ((ex_near, 1.0, 1.0, ex_near < hx),
+                     (ex_far, far_scale, far_scale, ex_far < hx))
+        eye_scale = 1.0
     brow_w = max(3.0, 0.007 * H)
     # v4: the reference face has NO brows. Brows are only drawn when the
     # expression actually moves them, so the neutral face matches the
     # reference exactly (two eyes + a small mouth, nothing else).
     show_brows = (abs(params["brow_in"]) + abs(params["brow_out"])
                   + abs(params["brow_asym"])) > 0.05
-    for ex, scale, is_left in ((ex_near, 1.0, ex_near < hx),
-                               (ex_far, far_scale, ex_far < hx)):
-        ew = STYLE_LOCK["eye_half_w_frac_of_r"] * r * params["eye_w"] * scale
-        eh = STYLE_LOCK["eye_half_h_frac_of_r"] * r * params["eye_h"] * scale
-        ex = ex + f * params["eye_dx"] * r * face_dx
+    for ex, w_scale, h_scale, is_left in eye_specs:
+        ew = STYLE_LOCK["eye_half_w_frac_of_r"] * r * params["eye_w"] * w_scale
+        eh = STYLE_LOCK["eye_half_h_frac_of_r"] * r * params["eye_h"] * h_scale
+        ex = ex + f * params["eye_dx"] * r * face_dx + gaze[0] * r
         if params["eye_h"] <= 0.6:
             # Closed happy eyes: upper-half arcs, same ink.
             draw.arc([ex - ew, eye_y - eh, ex + ew, eye_y + eh],
@@ -616,7 +716,7 @@ def _draw_face(draw, char, hx, hy, view, face_dx, params, ink, pal):
         # mouth down only when it would touch -- neutral / happy /
         # worried already clear and stay exactly where they were.
         _eye_bottom = (eye_y + STYLE_LOCK["eye_half_h_frac_of_r"] * r
-                       * params["eye_h"])
+                       * params["eye_h"] * eye_scale)
         my = max(my, _eye_bottom + 0.05 * r + hh)
         draw.ellipse([mx - mw / 2, my - hh, mx + mw / 2, my + hh], fill=ink)
     elif abs(curve) > 0.15:
@@ -788,8 +888,19 @@ def resolve_view(char, default="profile"):
     return "front"
 
 
+def head_orientation_angle(char):
+    """Head orientation (radians) from the rig pose: torso lean +
+    head look. 0 = head straight above the shoulders; + = head
+    forward/down in the facing direction. A measurement helper for
+    acting proofs -- the rig itself is untouched."""
+    pose = char.pose
+    return float(pose.get("torso_lean", 0.0)
+                 + pose.get("head_look", 0.0))
+
+
 def draw_character_v4(draw, char, expression="neutral", view="profile",
-                      palette=None, expression_blend=None):
+                      palette=None, expression_blend=None,
+                      gaze=None, hand_grips=None):
     """Draw a PREMIUM_STICKMAN v4 character from ``char.joints()``.
 
     draw: PIL ImageDraw (ideally ``ImageDraw.Draw(img, "RGBA")``).
@@ -798,6 +909,13 @@ def draw_character_v4(draw, char, expression="neutral", view="profile",
     view: 'front' | 'three_quarter' | 'profile' | 'back'.
     expression_blend: optional ``(other_expression, u)`` -- morphs from
       ``expression`` toward the other one by ``u`` (0..1).
+    gaze: optional eye shift (gx, gy) in units of head radius -- eye
+      DIRECTION, applied in every view (see _draw_face). Clamped to
+      +/-0.15r so the eyes never leave the face. None = (0, 0), the
+      previous drawing exactly. See expression_library.gaze_for_target.
+    hand_grips: optional {"l": grip, "r": grip} with grip "open" |
+      "grip" | "point" (see _finger_geometry). None = both "open",
+      the previous drawing exactly.
     Returns the joint map from ``char.joints()`` (the rig's own map --
     the 3/4 view compresses the DRAWN x positions but does not rewrite
     the joint map, so bone-length checks still pass on it).
@@ -1003,9 +1121,10 @@ def draw_character_v4(draw, char, expression="neutral", view="profile",
                   hx0 + 0.02 * H, hy0 + 0.02 * H],
                  180, 360, fill=ink, width=max(3, int(limb_w * 0.7)))
     for side in ("l", "r"):
+        _grip = (hand_grips or {}).get(side, "open")
         _draw_hand(draw, limbs[f"elbow_{side}"], limbs[f"hand_{side}"],
                    char, ink, flen_scale=finger_scale,
-                   fan_scale=fan_scale, fw_scale=fw_scale)
+                   fan_scale=fan_scale, fw_scale=fw_scale, grip=_grip)
 
     # --- head ------------------------------------------------------------
     hx, hy = head_d
@@ -1037,7 +1156,11 @@ def draw_character_v4(draw, char, expression="neutral", view="profile",
     if view != "back":
         face_dx = {"front": 0.0, "three_quarter": 0.5,
                    "profile": 1.0}[view]
-        _draw_face(draw, char, hx, hy, view, face_dx, params, ink, pal)
+        _gaze = gaze or (0.0, 0.0)
+        _gaze = (max(-0.15, min(0.15, float(_gaze[0]))),
+                 max(-0.15, min(0.15, float(_gaze[1]))))
+        _draw_face(draw, char, hx, hy, view, face_dx, params, ink, pal,
+                   gaze=_gaze)
     return J
 
 

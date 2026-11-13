@@ -7,7 +7,7 @@ của Mai (`MASTER_PROMPT.md`). Không sửa file gốc nào trong
 ## Chạy
 
 ```bash
-cd ~/workspace/video-16x9-v2
+cd ~/workspace/agent
 python3 -m ai_clip_studio.server --port 8788        # API orchestrator
 python3 -m ai_clip_studio.smoke_test --script <file.txt>
 python3 -m unittest discover -s ai_clip_studio/tests

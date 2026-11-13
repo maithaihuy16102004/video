@@ -1,6 +1,6 @@
 """Unit tests for ai_clip_studio.frame_qa (stdlib unittest, no network).
 
-Run from ~/workspace/video-16x9-v2/:
+Run from ~/workspace/agent/:
     python3 -m unittest ai_clip_studio.tests.test_frame_qa -v
 or via discovery:
     python3 -m unittest discover -s ai_clip_studio/tests -p 'test_frame_qa.py' -v

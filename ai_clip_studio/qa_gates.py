@@ -101,6 +101,16 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+# Pixel silhouette IoU (A-S5 / Phase F): implemented in
+# qa_measurements.py, re-exported here so the QA gates own the
+# entry point. qa_measurements imports no qa_gates code (no cycle).
+from .qa_measurements import (  # noqa: E402
+    SILHOUETTE_IOU_MAX,
+    pairwise_silhouette_report,
+    silhouette_iou,
+    silhouette_mask,
+)
+
 __all__ = [
     "EXPECTED_FPS",
     "EXPECTED_WIDTH",
@@ -127,6 +137,10 @@ __all__ = [
     "combine",
     "rescore_old",
     "probe_video",
+    "SILHOUETTE_IOU_MAX",
+    "silhouette_mask",
+    "silhouette_iou",
+    "pairwise_silhouette_report",
 ]
 
 # ---------------------------------------------------------------------------

@@ -172,6 +172,7 @@ from .gemini_client import (
     RateLimitedError,
 )
 from .planner_fallback import ACTION_LEAD_SECONDS, CHARACTER_HEIGHTS
+from .prop_system import default_energy_spec
 from .studio_script_v1 import (
     HEAD_RATIO_MAX,
     HEAD_RATIO_MIN,
@@ -205,7 +206,8 @@ from .trait_derivation import (
     parse_duration_seconds,
     validate_trait_blocks,
 )
-from .vi_script_parser import extract_action_cues
+from .vi_script_parser import (extract_action_cues,
+                              extract_action_cues_detailed)
 
 # Planner label for V1-routed plans. Distinct from "gemini" (a real
 # Gemini call produced enrichment) and "fallback" (the free-form local
@@ -220,6 +222,7 @@ SUPPORTED_CUES = frozenset({
     "walk", "walk_fast", "run", "stop", "bend_pick", "give", "take",
     "open", "put_away", "take_out", "wave", "turn_back", "smile",
     "look", "search", "board", "sit", "stand", "rain", "bus",
+    "head_tilt",
 })
 
 # Mirror of product_renderer.SHOT_SCALE keys: the shot types plan_shots
@@ -1061,6 +1064,29 @@ def _adapt_document(doc) -> tuple[dict, dict]:
         dropped = [c for c in raw_cues if c not in SUPPORTED_CUES]
         if dropped:
             dropped_cues.append({"scene": number, "cues": dropped})
+        # Per-shot detailed cue records (A2 wiring item 3): the same
+        # extraction, scoped per shot with provenance, so the
+        # conflict mechanism can bind each cue to its shot's compiled
+        # events and the pipeline can discard a losing cue. Scene
+        # actions first, then shots, mirroring the joined text order
+        # above. Only SUPPORTED_CUES records are kept, matching the
+        # tag list: a cue that cannot reach staging cannot conflict.
+        _scene_id = f"SC{number:02d}"
+        _snap = data.get("snapshot_hash") or ""
+        cue_records: list[dict] = []
+        for _action in (sc.get("actions") or []):
+            cue_records.extend(extract_action_cues_detailed(
+                str(_action), source_script_hash=_snap,
+                source_scene_id=_scene_id, source_shot_id=None))
+        for _shot in scene_shots:
+            _text = _shot_action_text(_shot)
+            if _text:
+                cue_records.extend(extract_action_cues_detailed(
+                    _text, source_script_hash=_snap,
+                    source_scene_id=_scene_id,
+                    source_shot_id=_shot.get("id")))
+        cue_records = [r for r in cue_records
+                       if r.get("cue") in SUPPORTED_CUES]
         lead = _action_lead_sec(cues, action_text)
         spoken = sc.get("spoken_lines") or []
         shot_by_id = {sh.get("id"): sh for sh in scene_shots if sh.get("id")}
@@ -1191,6 +1217,7 @@ def _adapt_document(doc) -> tuple[dict, dict]:
             "audio_text": "",
             "animation_reqs": "",
             "action_cues": cues,
+            "cue_records": cue_records,
             "action_lead_sec": lead,
             "lines": lines,
             "location": {
@@ -1387,14 +1414,23 @@ def _adapt_document(doc) -> tuple[dict, dict]:
             prop.get("name", ""),
             " ".join(p for p in (description,
                                  _field_text(fields, "TYPE")) if p))
-        package_props.append({
+        entry = {
             "id": _prop_id(prop.get("name", ""), taken_ids),
             "name": prop.get("name", ""),
             "kind": kind,
             "owner": prop.get("owner") or "",
             "description": description,
             "fields": dict(fields),
-        })
+        }
+        # Energy-carrying kinds (geometry with an emissive slot,
+        # e.g. the bolt) declare their energy spec here so the
+        # state machine's energy_glow_at emits records for the
+        # lighting stage. An explicit script/trait energy spec
+        # would win; none exists yet, so the default applies.
+        energy = default_energy_spec(kind)
+        if energy is not None:
+            entry["energy"] = energy
+        package_props.append(entry)
     for pos, scene in enumerate(package_scenes):
         scene_number = scene["number"]
         relevant = []

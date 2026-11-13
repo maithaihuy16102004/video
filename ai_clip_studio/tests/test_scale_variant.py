@@ -24,7 +24,8 @@ from PIL import Image
 
 from ai_clip_studio.camera_planner import viewpoint_for_shot
 from ai_clip_studio.product_renderer import (
-    CAM, CHAR_H, H, W, _render_shot, char_metrics, plan_shots,
+    CAM, CHAR_H, H, W, _fit_radius_scale, _render_shot, char_metrics,
+    plan_shots,
 )
 from ai_clip_studio.studio_script_v1 import parse_studio_script_v1
 from ai_clip_studio.studio_script_v1_adapter import (
@@ -340,6 +341,65 @@ class TestCharMetricsScale(unittest.TestCase):
         self.assertAlmostEqual(scaled[2] / base[2], 1.8, delta=0.02)
 
 
+class TestViewpointRadiusScale(unittest.TestCase):
+    def test_default_is_unchanged(self):
+        base = viewpoint_for_shot("medium", "eye_level",
+                                  subject_pos=(0.0, 1.2, 0.0))
+        same = viewpoint_for_shot("medium", "eye_level",
+                                  subject_pos=(0.0, 1.2, 0.0),
+                                  radius_scale=1.0)
+        self.assertEqual(tuple(same.position), tuple(base.position))
+        self.assertEqual(tuple(same.target), tuple(base.target))
+
+    def test_radius_scales_offset_target_unchanged(self):
+        import math
+        base = viewpoint_for_shot("medium", "low_angle",
+                                  subject_pos=(0.5, 1.2, 0.0))
+        far = viewpoint_for_shot("medium", "low_angle",
+                                 subject_pos=(0.5, 1.2, 0.0),
+                                 radius_scale=2.0)
+        self.assertEqual(tuple(far.target), tuple(base.target))
+
+        def _dist(cam):
+            return math.dist(cam.position, cam.target)
+        self.assertAlmostEqual(_dist(far) / _dist(base), 2.0, places=6)
+
+    def test_invalid_radius_scale_falls_back(self):
+        base = viewpoint_for_shot("medium", "eye_level",
+                                  subject_pos=(0.0, 1.2, 0.0))
+        for bad in (0, -1, None, "x", float("inf")):
+            with self.subTest(value=bad):
+                cam = viewpoint_for_shot(
+                    "medium", "eye_level",
+                    subject_pos=(0.0, 1.2, 0.0), radius_scale=bad)
+                self.assertEqual(tuple(cam.position),
+                                 tuple(base.position))
+
+
+class TestFitRadiusScale(unittest.TestCase):
+    def test_unscaled_returns_one(self):
+        self.assertEqual(_fit_radius_scale(
+            "medium", "eye_level", 0.0, 0.0, None, 0,
+            [(0.0, 0.0), (-1.0, 0.0)], [1.0, 1.0]), 1.0)
+        self.assertEqual(_fit_radius_scale(
+            "medium", "eye_level", 0.0, 0.0, None, 0, [], []), 1.0)
+        self.assertEqual(_fit_radius_scale(
+            "medium", "eye_level", 0.0, 0.0, None, 0,
+            [(0.0, 0.0)], [0.5]), 1.0)
+
+    def test_scaled_subject_fits_after_fit(self):
+        scale = _fit_radius_scale(
+            "medium", "eye_level", 0.0, 0.0, None, 0,
+            [(0.0, 0.0)], [1.8])
+        self.assertGreater(scale, 1.0)
+        self.assertLessEqual(scale, 3.0)
+        cam = viewpoint_for_shot(
+            "medium", "eye_level", subject_pos=(0.0, 1.2, 0.0),
+            radius_scale=scale)
+        _gx, gy, h = char_metrics(cam, 0.0, 0.0, base_scale=1.8)
+        self.assertGreaterEqual(gy - h, 12.0)
+
+
 def _two_char_package(scale_a=None, scale_b=None):
     chars = [
         {"name": "An", "description": "người thường",
@@ -399,7 +459,8 @@ class TestScaledRender(unittest.TestCase):
     def test_scaled_character_head_is_proportionally_larger(self):
         package = _two_char_package(scale_a=1.8)
         shot = self._planned(package)
-        _rep, img = _render_still(package, shot)
+        rep, img = _render_still(package, shot)
+        self.assertGreater(rep["camera_radius_scale"], 1.0)
         arr = np.asarray(img)
         w_left, top_left = _face_fill_runs(arr, 0, H, 0, 960)
         w_right, top_right = _face_fill_runs(arr, 0, H, 960, 1920)
@@ -418,8 +479,10 @@ class TestScaledRender(unittest.TestCase):
         pkg_b = _two_char_package(scale_a=1.0, scale_b=1.0)
         shot_a = self._planned(copy.deepcopy(pkg_a))
         shot_b = self._planned(copy.deepcopy(pkg_b))
-        _ra, img_a = _render_still(pkg_a, shot_a)
-        _rb, img_b = _render_still(pkg_b, shot_b)
+        ra, img_a = _render_still(pkg_a, shot_a)
+        rb, img_b = _render_still(pkg_b, shot_b)
+        self.assertEqual(ra["camera_radius_scale"], 1.0)
+        self.assertEqual(rb["camera_radius_scale"], 1.0)
         self.assertEqual(np.asarray(img_a).tobytes(),
                          np.asarray(img_b).tobytes())
 

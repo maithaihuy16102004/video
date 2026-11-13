@@ -25,6 +25,10 @@ import math
 
 from PIL import Image
 
+from .cinematic_contracts import (
+    CameraDirective, CameraMode, CameraValidation, DEFAULT_CAMERA_MODE,
+    TRANSFORM_TOLERANCE)
+
 # ---------------------------------------------------------------------------
 # Shot vocabulary
 # ---------------------------------------------------------------------------
@@ -530,7 +534,17 @@ class CameraPlanner:
         """Crop around focus_xy by the shot scale, resize to the input
         size with LANCZOS. focus_xy defaults to frame centre. The crop
         box is clamped inside the frame, so edge focus points are safe.
-        Returns a new PIL Image (input untouched)."""
+        Returns a new PIL Image (input untouched).
+
+        WARNING (Phase C / D2): this is a MECHANISM, not a framing
+        policy. It must NOT be called per frame with a live,
+        pose-dependent focus (e.g. the current head joint): that is
+        the implicit head-tracking defect (W8 audit: background
+        moved within the shot while the head stayed centred). The
+        default path freezes ONE crop per shot from STANDING boxes
+        via :func:`anchor_focus_for_shot` and applies the frozen
+        crop to every frame with :func:`apply_camera_anchored`.
+        """
         w, h = img.size
         scale = float((shot or {}).get("camera", {}).get("scale")
                       or SHOT_SCALE.get((shot or {}).get("shot_type", "medium"), 1.6))
@@ -1095,6 +1109,454 @@ def camera_at(movement, t01, base_camera, direction=1):
     return base_camera
 
 
+# ---------------------------------------------------------------------------
+# Camera Director (Phase C / D2)
+# ---------------------------------------------------------------------------
+# A camera TRANSFORM is a flat 7-tuple of floats:
+#   (pos_x, pos_y, pos_z, target_x, target_y, target_z, fov_deg)
+# Flat, because CameraValidation.is_static compares transforms
+# element-wise. The default mode is STATIC_ANCHORED: the camera is
+# constant within a shot (within TRANSFORM_TOLERANCE) and framing
+# changes by hard cut. Scripted modes are explicit capabilities:
+# every movement traces to a CameraDirective with a non-empty
+# source. Nothing here tracks a live joint.
+
+#: CameraMode -> camera_at movement name (direction >= 0 variant).
+_SCRIPTED_MOVEMENTS = {
+    CameraMode.SCRIPTED_PAN: "PAN_RIGHT",
+    CameraMode.SCRIPTED_DOLLY: "DOLLY_IN",
+    CameraMode.SCRIPTED_TRACKING: "TRACKING",
+    CameraMode.SCRIPTED_REVEAL: "CRANE_UP",
+    CameraMode.SCRIPTED_SHAKE: "HANDHELD",
+}
+
+#: Shot types whose framing is anchored on the head (eyeline checks).
+_HEAD_FRAMING_TYPES = (
+    "close_up", "extreme_close_up", "reaction",
+    "shot_reverse_shot", "medium_close_up",
+)
+
+
+def camera_transform(camera):
+    """Flat 7-tuple transform of a PerspectiveCamera."""
+    return (tuple(float(v) for v in camera.position)
+            + tuple(float(v) for v in camera.target)
+            + (float(camera.fov_deg),))
+
+
+def orientation_basis(camera):
+    """(right, up, fwd) unit vectors — the camera orientation.
+
+    9-tuple of floats, recomputed from position/target/up (no
+    private access): fwd looks from the position at the target,
+    right is fwd x up, up is right x fwd."""
+    def _sub(a, b):
+        return (a[0] - b[0], a[1] - b[1], a[2] - b[2])
+
+    def _cross(a, b):
+        return (a[1] * b[2] - a[2] * b[1],
+                a[2] * b[0] - a[0] * b[2],
+                a[0] * b[1] - a[1] * b[0])
+
+    def _norm(a):
+        n = math.sqrt(sum(v * v for v in a))
+        if n == 0:
+            raise ValueError("zero-length vector has no direction")
+        return tuple(v / n for v in a)
+
+    fwd = _norm(_sub(camera.target, camera.position))
+    right = _norm(_cross(fwd, camera.up))
+    return right + _cross(right, fwd) + fwd
+
+
+def projection_matrix(camera):
+    """16-tuple row-major perspective matrix for the camera.
+
+    Convention (the renderer25d convention): view space is
+    +Z-forward (view depth is positive in FRONT of the camera),
+    NDC depth runs [0, 1] (0 at ``near``, 1 at ``far``), and the
+    matrix applies as ``(M @ [x, y, z, 1]) / w`` with ``w`` equal
+    to the view-space depth. x/y NDC are +/-1 at the frustum
+    edges. The matrix is derived from fov/aspect/near/far only.
+    """
+    tan_half = math.tan(math.radians(camera.fov_deg) / 2.0)
+    aspect = float(camera.aspect)
+    near = float(camera.near)
+    far = float(camera.far)
+    a = far / (far - near)
+    b = -near * far / (far - near)
+    return (1.0 / (tan_half * aspect), 0.0, 0.0, 0.0,
+            0.0, 1.0 / tan_half, 0.0, 0.0,
+            0.0, 0.0, a, b,
+            0.0, 0.0, 1.0, 0.0)
+
+
+def directive_for_shot(mode, start_camera, end_camera, duration_s,
+                       source, anchor="scene"):
+    """Build a CameraDirective from two cameras. Loud on an empty
+    source and on a STATIC_ANCHORED start/end mismatch (the
+    contract enforces both) — a directive that cannot be traced
+    or that moves while claiming to be static is refused, never
+    silently repaired."""
+    if isinstance(mode, str):
+        mode = CameraMode(mode)
+    return CameraDirective(
+        mode=mode, anchor=anchor, source=source,
+        start_transform=camera_transform(start_camera),
+        end_transform=camera_transform(end_camera),
+        duration_s=float(duration_s))
+
+
+def static_directive_for_shot(shot_id, camera, duration_s,
+                              anchor="scene", source=None):
+    """A STATIC_ANCHORED directive: start == end, always.
+
+    Default source ``planner:static:<shot_id>`` keeps the static
+    default traceable without the caller inventing an id."""
+    return CameraDirective(
+        mode=CameraMode.STATIC_ANCHORED, anchor=anchor,
+        source=source or f"planner:static:{shot_id}",
+        start_transform=camera_transform(camera),
+        end_transform=camera_transform(camera),
+        duration_s=float(duration_s))
+
+
+def scripted_transforms(mode, base_camera, direction=1):
+    """(start_camera, end_camera) for a scripted mode.
+
+    The movement geometry is :func:`camera_at` evaluated at
+    t=0 and t=1, so the directive's endpoints are exactly the
+    path the renderer would execute. ``direction`` flips PAN
+    (left/right) and DOLLY (in/out) and sets the TRACKING sign.
+    Raises ValueError for STATIC_ANCHORED (use
+    :func:`static_directive_for_shot`) and unknown modes."""
+    if isinstance(mode, str):
+        mode = CameraMode(mode)
+    if mode is CameraMode.STATIC_ANCHORED:
+        raise ValueError("STATIC_ANCHORED has no scripted path; use "
+                         "static_directive_for_shot")
+    movement = _SCRIPTED_MOVEMENTS.get(mode)
+    if movement is None:
+        raise ValueError(f"no scripted path for camera mode {mode!r}")
+    if float(direction) < 0:
+        if movement == "PAN_RIGHT":
+            movement = "PAN_LEFT"
+        elif movement == "DOLLY_IN":
+            movement = "DOLLY_OUT"
+    start = camera_at(movement, 0.0, base_camera,
+                      direction=direction)
+    end = camera_at(movement, 1.0, base_camera,
+                    direction=direction)
+    return start, end
+
+
+def scripted_directive_for_shot(shot_id, mode, base_camera,
+                                duration_s, source, anchor="scene",
+                                direction=1):
+    """A scripted CameraDirective with endpoints from
+    :func:`scripted_transforms`. ``source`` is required and must
+    be non-empty: an untraced movement is refused. The directive
+    records the INTENT; executing within-shot movement is the
+    renderer's job (ATLAS-owned spec — the current product
+    renderer executes STATIC and records the limitation)."""
+    start, end = scripted_transforms(mode, base_camera,
+                                     direction=direction)
+    if isinstance(mode, str):
+        mode = CameraMode(mode)
+    return CameraDirective(
+        mode=mode, anchor=anchor, source=source,
+        start_transform=camera_transform(start),
+        end_transform=camera_transform(end),
+        duration_s=float(duration_s))
+
+
+def validation_for_camera(camera, crop_rect=None, anchor="scene",
+                          start_transform=None, end_transform=None):
+    """CameraValidation for a camera + optional frozen crop.
+
+    ``crop_rect`` is the frozen (left, top, right, bottom) crop
+    from :func:`crop_rect_for`, or None for a full-frame shot.
+    ``start_transform``/``end_transform`` default to the camera's
+    own transform (a static shot); pass the directive endpoints
+    for a scripted shot so ``is_static()`` reports honestly."""
+    transform = camera_transform(camera)
+    return CameraValidation(
+        position=tuple(float(v) for v in camera.position),
+        orientation=orientation_basis(camera),
+        projection_matrix=projection_matrix(camera),
+        fov_deg=float(camera.fov_deg),
+        crop_rect=(tuple(int(v) for v in crop_rect)
+                   if crop_rect is not None else None),
+        target_anchor=anchor,
+        start_transform=(start_transform if start_transform is not None
+                         else transform),
+        end_transform=(end_transform if end_transform is not None
+                       else transform))
+
+
+def validate_shot_camera_static(transforms, tol=TRANSFORM_TOLERANCE):
+    """(ok, max_delta, issues): is a per-frame transform series
+    constant within tolerance? ``transforms`` is a list of flat
+    7-tuples from :func:`camera_transform` (one per sampled
+    frame). ``max_delta`` is the largest absolute component
+    difference from the first transform. Empty input is an
+    error, never a pass."""
+    issues = []
+    if not transforms:
+        return False, float("inf"), ["no camera transforms sampled"]
+    base = transforms[0]
+    max_delta = 0.0
+    for i, transform in enumerate(transforms):
+        if len(transform) != len(base):
+            issues.append(f"frame {i}: transform length "
+                          f"{len(transform)} != {len(base)}")
+            continue
+        for a, b in zip(base, transform):
+            max_delta = max(max_delta, abs(a - b))
+    if max_delta > tol:
+        issues.append(f"camera moved within shot: max transform "
+                      f"delta {max_delta:.6g} > tolerance {tol:.6g}")
+    return (not issues), max_delta, issues
+
+
+def crop_rect_for(scale, focus_xy, frame_w, frame_h):
+    """Integer (left, top, right, bottom) crop rect — the EXACT
+    rect :func:`CameraPlanner.apply_camera` crops for the same
+    scale + focus, so a frozen crop and the applied crop can
+    never disagree."""
+    scale = max(1.0, float(scale))
+    cw, ch = frame_w / scale, frame_h / scale
+    cx, cy = focus_xy
+    left = min(max(cx - cw / 2.0, 0.0), frame_w - cw)
+    top = min(max(cy - ch / 2.0, 0.0), frame_h - ch)
+    return (int(round(left)), int(round(top)),
+            int(round(left + cw)), int(round(top + ch)))
+
+
+def anchor_focus_for_shot(shot, standing_subjects, others=None,
+                          frame_w=1920, frame_h=1080, max_scale=None):
+    """Freeze ONE crop for a shot from STANDING boxes (Phase C).
+
+    ``standing_subjects`` / ``others`` are {"cx", "head_y",
+    "foot_y", "half_w"} dicts in full-frame coords measured from
+    the STANDING pose — pose-independent by construction (the
+    standing extent does not change when a character kneels,
+    bends or turns). The returned (safe_shot, safe_focus, notes,
+    frozen_crop) must be computed ONCE per shot, before the
+    frame loop, and the frozen crop applied to every frame.
+
+    The anchor focus comes from the standing boxes: the primary
+    subject's standing head position for head framings, the
+    standing body centre otherwise — never a live joint.
+    ``max_scale`` defaults to the F2 cap (1.0) for full-body
+    shot types. ``frozen_crop`` is
+    {scale, focus, crop_rect, frame_size, frozen: True,
+    anchor: "standing_box", shot_type}; it is JSON-safe.
+    """
+    shot = dict(shot or {})
+    shot_type = shot.get("shot_type", "medium")
+    subjects = list(standing_subjects or [])
+    if subjects:
+        primary = subjects[0]
+        if shot_type in _HEAD_FRAMING_TYPES:
+            focus = (float(primary["cx"]), float(primary["head_y"]))
+        else:
+            focus = (float(primary["cx"]),
+                     (float(primary["head_y"])
+                      + float(primary["foot_y"])) / 2.0)
+    else:
+        focus = (frame_w / 2.0, frame_h / 2.0)
+    if max_scale is None and shot_type in FULL_BODY_SHOT_TYPES:
+        max_scale = 1.0
+    safe_shot, safe_focus, notes = CameraPlanner.safe_frame(
+        shot, focus, subjects, list(others or []), frame_w, frame_h,
+        max_scale=max_scale)
+    scale = float(safe_shot.get("camera", {}).get("scale")
+                  or SHOT_SCALE.get(shot_type, 1.6))
+    frozen_crop = {
+        "scale": scale,
+        "focus": [float(safe_focus[0]), float(safe_focus[1])],
+        "crop_rect": list(crop_rect_for(scale, safe_focus,
+                                        frame_w, frame_h)),
+        "frame_size": [int(frame_w), int(frame_h)],
+        "frozen": True,
+        "anchor": "standing_box",
+        "shot_type": shot_type,
+    }
+    return safe_shot, safe_focus, notes, frozen_crop
+
+
+def apply_camera_anchored(img, frozen_crop):
+    """Apply a frozen crop (from :func:`anchor_focus_for_shot`) to
+    a frame: crop the recorded rect, resize to the input size
+    with LANCZOS. The rect is taken as recorded — it is never
+    recomputed from a live focus. Raises ValueError when the
+    image size does not match the frozen frame size (a frozen
+    crop for one frame size applied to another would silently
+    reframe the shot)."""
+    rect = frozen_crop["crop_rect"]
+    size = frozen_crop.get("frame_size")
+    if size is not None and tuple(size) != tuple(img.size):
+        raise ValueError(
+            f"frozen crop frame size {tuple(size)} != image size "
+            f"{tuple(img.size)}")
+    box = (int(rect[0]), int(rect[1]), int(rect[2]), int(rect[3]))
+    return img.crop(box).resize(img.size, Image.LANCZOS)
+
+
+def validate_composition(shot, focus_xy, subjects, others=None,
+                         frame_w=1920, frame_h=1080,
+                         movement_direction=None):
+    """Composition issues for ONE frozen framing (Phase C).
+
+    Builds on :func:`CameraPlanner.validate_framing` (subject
+    survival in the crop) and adds, per shot type:
+
+    * tracking + ``movement_direction`` ("left"/"right" or -1/1):
+      lead room — at least 15% of the crop width must lie ahead
+      of the subject in the direction of movement;
+    * head framings: eyeline — the subject's head must sit in
+      the upper part of the crop (relative head_y in [0.05,
+      0.45] of the crop height), never centred or cut;
+    * object_insert: the object centre must sit within 15% of
+      the crop centre on both axes.
+
+    ``subjects``/``others`` are standing boxes. Returns a list
+    of issue strings (empty = clean). ``others`` half-cut by
+    the crop is an issue here too (safe_frame fixes it; this
+    validator reports it)."""
+    issues, _corrected = CameraPlanner.validate_framing(
+        shot, focus_xy, subjects, frame_w, frame_h)
+    issues = list(issues)
+    shot_type = (shot or {}).get("shot_type", "medium")
+    scale = float((shot or {}).get("camera", {}).get("scale")
+                  or SHOT_SCALE.get(shot_type, 1.6))
+    scale = max(1.0, scale)
+    left, top, right, bottom = _crop_rect(scale, focus_xy,
+                                          frame_w, frame_h)
+    cw, ch = right - left, bottom - top
+    subjects = list(subjects or [])
+    if (shot_type == "tracking" and movement_direction is not None
+            and subjects):
+        direction = movement_direction
+        if isinstance(direction, str):
+            direction = -1 if direction.strip().lower().startswith(
+                "left") else 1
+        for i, s in enumerate(subjects):
+            ahead = ((right - (s["cx"] + s["half_w"])) if direction > 0
+                     else ((s["cx"] - s["half_w"]) - left))
+            if ahead < 0.15 * cw:
+                issues.append(
+                    f"subject {i}: lead room {ahead:.0f}px ahead "
+                    f"of movement < 15% of crop width ({0.15 * cw:.0f}px)")
+    if shot_type in _HEAD_FRAMING_TYPES and subjects:
+        for i, s in enumerate(subjects):
+            rel_y = (s["head_y"] - top) / ch if ch else 0.0
+            if rel_y < 0.05 or rel_y > 0.45:
+                issues.append(
+                    f"subject {i}: eyeline head_y at {rel_y:.2f} of "
+                    f"crop height (expected 0.05-0.45)")
+    if shot_type == "object_insert" and subjects:
+        for i, s in enumerate(subjects):
+            cy = (s["head_y"] + s["foot_y"]) / 2.0
+            if abs(s["cx"] - (left + cw / 2.0)) > 0.15 * cw:
+                issues.append(
+                    f"subject {i}: object off-centre horizontally "
+                    f"(cx={s['cx']:.0f}, crop centre "
+                    f"{left + cw / 2.0:.0f})")
+            if abs(cy - (top + ch / 2.0)) > 0.15 * ch:
+                issues.append(
+                    f"subject {i}: object off-centre vertically "
+                    f"(cy={cy:.0f}, crop centre "
+                    f"{top + ch / 2.0:.0f})")
+    for j, other in enumerate(others or []):
+        status = _other_status(other, (left, top, right, bottom))
+        if status == "partial":
+            issues.append(f"other {j}: half-cut by the crop "
+                          f"(must be fully in or fully out)")
+    return issues
+
+
+def validate_camera_sequence(entries):
+    """Sequence-level camera validation (Phase C).
+
+    ``entries`` are :func:`plan_shot` outputs in render order.
+    Checks:
+
+    * 180-degree rule: a screen-direction flip (LTR<->RTL) is an
+      issue unless the crossing shot is an SRS/OTS pair member
+      or an establishing/graphic_insert reset;
+    * SRS eyeline match: consecutive shot_reverse_shot entries
+      must come from viewpoints at least 30 deg apart in azimuth
+      (a real reverse angle, not the same angle twice) with
+      elevations matching within 2 deg;
+    * repeated framing: consecutive entries with the same
+      viewpoint (azimuth/elevation/radius within the plan_shot
+      tolerances) are one angle, not two;
+    * F2: full-body entries must carry crop_scale <= 1.0.
+
+    Returns {"issues": [{shot_id, rule, message}], "checked": n,
+    "ok": bool}."""
+    issues = []
+    entries = list(entries or [])
+
+    def _add(entry, rule, message):
+        issues.append({"shot_id": entry.get("shot_id", "UNKNOWN"),
+                       "rule": rule, "message": message})
+
+    prev = None
+    for entry in entries:
+        shot_type = entry.get("shot_type_resolved")
+        crop_scale = (entry.get("framing") or {}).get("crop_scale")
+        if (shot_type in FULL_BODY_SHOT_TYPES
+                and crop_scale is not None and crop_scale > 1.0):
+            _add(entry, "F2",
+                 f"full-body shot {shot_type} carries crop_scale "
+                 f"{crop_scale} > 1.0")
+        if prev is not None:
+            prev_dir = prev.get("screen_direction")
+            direction = entry.get("screen_direction")
+            if (prev_dir in ("LTR", "RTL")
+                    and direction in ("LTR", "RTL")
+                    and prev_dir != direction
+                    and shot_type not in ("shot_reverse_shot",
+                                          "over_the_shoulder",
+                                          "establishing",
+                                          "graphic_insert")):
+                _add(entry, "180_degree",
+                     f"screen direction flipped {prev_dir}->{direction} "
+                     f"without an SRS/OTS pair or establishing reset")
+            prev_pose = prev.get("pose") or {}
+            pose = entry.get("pose") or {}
+            if (abs(prev_pose.get("azimuth_deg", 0.0)
+                    - pose.get("azimuth_deg", 0.0)) < 0.5
+                    and abs(prev_pose.get("elevation_deg", 0.0)
+                            - pose.get("elevation_deg", 0.0)) < 0.5
+                    and abs(prev_pose.get("radius", 0.0)
+                            - pose.get("radius", 0.0)) < 0.05):
+                _add(entry, "repeated_framing",
+                     "same viewpoint as previous shot: repeated "
+                     "framing, not a new angle")
+            if (shot_type == "shot_reverse_shot"
+                    and prev.get("shot_type_resolved")
+                    == "shot_reverse_shot"):
+                az_diff = abs(pose.get("azimuth_deg", 0.0)
+                              - prev_pose.get("azimuth_deg", 0.0))
+                el_diff = abs(pose.get("elevation_deg", 0.0)
+                              - prev_pose.get("elevation_deg", 0.0))
+                if az_diff < 30.0:
+                    _add(entry, "srs_eyeline",
+                         f"SRS pair azimuths {az_diff:.1f} deg apart "
+                         f"(< 30 deg): not a reverse angle")
+                if el_diff > 2.0:
+                    _add(entry, "srs_eyeline",
+                         f"SRS pair elevations differ by {el_diff:.1f} "
+                         f"deg (> 2 deg): eyelines do not match")
+        prev = entry
+    return {"issues": issues, "checked": len(entries),
+            "ok": not issues}
+
+
 # size label per shot type
 _SIZE_BY_SHOT = {
     "establishing": "wide",
@@ -1362,3 +1824,490 @@ def direct(segments, scene_package=None):
 
 def validate_direction(shots):
     return ShotDirector.validate_direction(shots)
+
+
+# ---------------------------------------------------------------------------
+# Shot composition (Visual Quality Recovery, P6) — directive accounting.
+#
+# Every original SHOT directive must map to exactly one rendered
+# camera pose, traceably. ``plan_shot`` resolves a directive dict
+# (the adapter's ``shot_directives`` shape: shot_id, shot_type,
+# camera_angle, camera_movement, camera, location_override, subject,
+# counterpart, srs_side, trigger) to a REAL viewpoint via
+# viewpoint_for_shot() plus a framing + accounting record.
+# ``plan_coverage`` maps a whole directive list: 100% accounting —
+# every directive yields exactly one entry, and anything unmapped
+# or overridden is recorded in the entry, never silently dropped.
+#
+# Locked rules (Mai's verdict 2026-11-12 + channel study R9):
+#   * camera FIXED within a shot; viewpoint changes BY CUT only;
+#   * no zoom-as-angle: the pose comes from viewpoint geometry,
+#     never from a crop scale;
+#   * F2 standing-box rule: full-body shot types report a capped
+#     crop scale of 1.0, and all non-establishing poses share the
+#     same camera radius (same distance -> same head size);
+#   * CAMERA_MOVEMENT requests are NOT executed within a shot;
+#     the override is documented in every affected entry
+#     (``movement_decision``) instead of being silently applied
+#     as a crop path.
+# ``frame_range`` is filled by ATLAS at render time from the
+# timeline; the planner records None + the note, never a guess.
+# ---------------------------------------------------------------------------
+def _pose_angles(camera):
+    """(azimuth_deg, elevation_deg, radius) of a camera vs its target."""
+    ox = camera.position[0] - camera.target[0]
+    oy = camera.position[1] - camera.target[1]
+    oz = camera.position[2] - camera.target[2]
+    radius = math.sqrt(ox * ox + oy * oy + oz * oz)
+    if radius == 0:
+        return (0.0, 0.0, 0.0)
+    return (math.degrees(math.atan2(ox, oz)),
+            math.degrees(math.asin(max(-1.0, min(1.0, oy / radius)))),
+            radius)
+
+
+def _staging_for(shot, scene):
+    """(subject_pos, counterpart_x) from scene staging data.
+
+    ``scene`` may carry ``character_positions`` {name: (x, y, z)}
+    (feet positions) or ``subject_pos`` / ``counterpart_x``
+    directly. Defaults: subject at (0, 1.2, 0) (eye height on the
+    subject plane), no counterpart. Never raises."""
+    scene = scene or {}
+    subject = shot.get("subject") or ""
+    counterpart = shot.get("counterpart")
+    positions = scene.get("character_positions") or {}
+    subject_pos = scene.get("subject_pos")
+    if subject_pos is None and subject and subject in positions:
+        feet = positions[subject]
+        subject_pos = (float(feet[0]), float(feet[1]) + 1.2,
+                       float(feet[2]))
+    if subject_pos is None:
+        subject_pos = (0.0, 1.2, 0.0)
+    counterpart_x = scene.get("counterpart_x")
+    if counterpart_x is None and counterpart and counterpart in positions:
+        counterpart_x = float(positions[counterpart][0])
+    return (tuple(float(v) for v in subject_pos), counterpart_x)
+
+
+def plan_shot(directive, scene=None, prev_entry=None, camera_mode=None,
+              camera_source=None):
+    """Resolve ONE shot directive to a camera pose + accounting entry.
+
+    Returns a dict with: shot_id, directive (echo), shot_type_resolved,
+    camera_position, target, fov, pose {angle, azimuth_deg,
+    elevation_deg, radius}, framing {shot_type, crop_scale (F2-capped),
+    focus, composition_rules}, subject, counterpart, location_override,
+    screen_direction, movement_decision, frame_range (None: filled by
+    ATLAS at render), continuity_notes, errors. Never raises on
+    directive data: unknown types degrade to "medium" WITH an error
+    recorded.
+
+    Phase C opt-in: ``camera_mode`` (a CameraMode or its value
+    string) + ``camera_source`` (a non-empty traceable id) record
+    the shot's camera directive + validation as JSON-safe dicts
+    (``camera_directive``, ``camera_validation``) on the entry.
+    With ``camera_mode=None`` (default) the entry is EXACTLY as
+    before — the static default needs no opt-in. A scripted mode
+    WITHOUT a source records an error and falls back to STATIC
+    (plan_shot never raises on directive data); the directive
+    dicts carry ``duration_s: None`` (filled at render from the
+    timeline — the planner must not invent a duration)."""
+    shot = dict(directive or {})
+    errors = []
+    shot_id = shot.get("shot_id") or "UNKNOWN"
+    if not shot.get("shot_id"):
+        errors.append("directive without shot_id")
+    raw_type = str(shot.get("shot_type", "") or "").strip().lower()
+    if raw_type in SHOT_TYPES:
+        shot_type = raw_type
+    else:
+        shot_type = "medium"
+        errors.append(f"unknown shot_type {raw_type!r}; resolved to medium")
+    angle = resolve_viewpoint_angle(shot_type, shot.get("camera_angle"))
+    subject_pos, counterpart_x = _staging_for(shot, scene)
+    srs_side = shot.get("srs_side")
+    try:
+        srs_side = int(srs_side) if srs_side is not None else 0
+    except (TypeError, ValueError):
+        srs_side = 0
+    camera = viewpoint_for_shot(
+        shot_type, shot.get("camera_angle"), subject_pos,
+        counterpart_x=counterpart_x, srs_side=srs_side)
+    azimuth, elevation, radius = _pose_angles(camera)
+    crop_scale = SHOT_SCALE.get(shot_type, 1.6)
+    if shot_type in FULL_BODY_SHOT_TYPES:
+        crop_scale = min(crop_scale, 1.0)  # F2 standing-box cap
+    requested_move = normalize_movement(shot.get("camera_movement"))
+    if requested_move == "STATIC":
+        movement_decision = {
+            "requested": requested_move, "executed": "STATIC",
+            "documented": True,
+            "reason": "STATIC as requested; camera fixed within shot"}
+    else:
+        movement_decision = {
+            "requested": requested_move, "executed": "STATIC",
+            "documented": True,
+            "reason": ("within-shot movement is not executed: camera "
+                       "fixed within a shot, framing changes by hard "
+                       "cut (Mai verdict 2026-11-12; channel study R9). "
+                       "camera_at() geometry kept for preview only.")}
+    # Phase C: explicit camera directive (opt-in; default unchanged).
+    camera_directive = None
+    camera_validation = None
+    if camera_mode is not None:
+        try:
+            mode = (camera_mode if isinstance(camera_mode, CameraMode)
+                    else CameraMode(str(camera_mode)))
+        except ValueError:
+            errors.append(f"unknown camera_mode {camera_mode!r}; "
+                          f"fell back to STATIC")
+            mode = None
+        if mode is not None:
+            start_transform = camera_transform(camera)
+            if mode is CameraMode.STATIC_ANCHORED:
+                end_transform = start_transform
+                source = (camera_source
+                          or f"planner:static:{shot_id}")
+            elif not camera_source:
+                errors.append(
+                    f"scripted camera mode {mode.value} requires a "
+                    f"non-empty camera_source; fell back to STATIC")
+                mode = None
+                end_transform = start_transform
+            else:
+                _start, end_camera = scripted_transforms(
+                    mode, camera)
+                end_transform = camera_transform(end_camera)
+                source = camera_source
+                movement_decision = {
+                    "requested": requested_move,
+                    "executed": mode.value,
+                    "documented": True,
+                    "reason": ("scripted movement recorded by explicit "
+                               f"directive (source: {source}); renderer "
+                               "execution is ATLAS-owned — the current "
+                               "product renderer executes STATIC and "
+                               "records the limitation."),
+                    "source": source}
+            if mode is not None:
+                camera_directive = {
+                    "mode": mode.value, "anchor": "scene",
+                    "source": source,
+                    "start_transform": list(start_transform),
+                    "end_transform": list(end_transform),
+                    "duration_s": None,
+                    "duration_note": ("filled at render from the "
+                                      "timeline"),
+                }
+                validation = validation_for_camera(
+                    camera, crop_rect=None, anchor="scene",
+                    start_transform=start_transform,
+                    end_transform=end_transform)
+                camera_validation = {
+                    "position": list(validation.position),
+                    "orientation": list(validation.orientation),
+                    "projection_matrix":
+                        list(validation.projection_matrix),
+                    "fov_deg": validation.fov_deg,
+                    "crop_rect": validation.crop_rect,
+                    "target_anchor": validation.target_anchor,
+                    "start_transform": list(validation.start_transform),
+                    "end_transform": list(validation.end_transform),
+                    "is_static": validation.is_static(),
+                }
+    subject = shot.get("subject") or ""
+    counterpart = shot.get("counterpart")
+    if counterpart_x is not None and subject_pos is not None:
+        screen_direction = ("LTR" if subject_pos[0] <= counterpart_x
+                            else "RTL")
+    else:
+        screen_direction = "centered"
+    continuity_notes = []
+    if prev_entry is not None:
+        prev_dir = prev_entry.get("screen_direction")
+        if (prev_dir in ("LTR", "RTL") and screen_direction in ("LTR", "RTL")
+                and prev_dir != screen_direction):
+            if shot_type in ("shot_reverse_shot", "over_the_shoulder"):
+                continuity_notes.append(
+                    "axis crossed by cut (SRS/OTS pair — expected)")
+            else:
+                continuity_notes.append(
+                    "axis flip vs previous shot: check 180-degree rule")
+        prev_pose = prev_entry.get("pose") or {}
+        if (abs(prev_pose.get("azimuth_deg", 0.0) - azimuth) < 0.5
+                and abs(prev_pose.get("elevation_deg", 0.0) - elevation)
+                < 0.5 and abs(prev_pose.get("radius", 0.0) - radius) < 0.05):
+            continuity_notes.append(
+                "same viewpoint as previous shot: repeated framing, "
+                "not a new angle (counts as one angle)")
+    if shot.get("location_override"):
+        continuity_notes.append(
+            f"location override: {shot['location_override']}")
+    if shot_type == "graphic_insert":
+        continuity_notes.append("flat graphic insert: straight-on, "
+                                "no camera")
+    entry = {
+        "shot_id": shot_id,
+        "directive": {k: shot.get(k) for k in (
+            "shot_type", "camera_angle", "camera_movement", "camera",
+            "location_override", "subject", "counterpart", "srs_side",
+            "trigger", "scene", "line_index")},
+        "shot_type_resolved": shot_type,
+        "camera_position": tuple(camera.position),
+        "target": tuple(camera.target),
+        "fov": camera.fov_deg,
+        "pose": {"angle": angle, "azimuth_deg": round(azimuth, 2),
+                 "elevation_deg": round(elevation, 2),
+                 "radius": round(radius, 3)},
+        "framing": {"shot_type": shot_type, "crop_scale": crop_scale,
+                    "focus": SHOT_FOCUS.get(shot_type, "subject_full"),
+                    "composition_rules": list(
+                        COMPOSITION_RULES.get(shot_type, []))},
+        "subject": subject,
+        "counterpart": counterpart,
+        "location_override": shot.get("location_override"),
+        "screen_direction": screen_direction,
+        "movement_decision": movement_decision,
+        "frame_range": None,
+        "frame_range_note": "filled by ATLAS at render from the timeline",
+        "continuity_notes": continuity_notes,
+        "errors": errors,
+    }
+    if camera_directive is not None:
+        entry["camera_directive"] = camera_directive
+        entry["camera_validation"] = camera_validation
+    return entry
+
+
+def plan_coverage(directives, scene=None):
+    """Map EVERY directive to a pose: 100% accounting.
+
+    Returns ``{entries, accounting}`` where ``accounting`` counts
+    total/mapped/error entries and lists movement overrides and
+    repeated-framing pairs. No directive is ever silently omitted:
+    len(entries) == len(directives), always. Directives may carry
+    ``camera_mode`` / ``camera_source`` keys, forwarded to
+    :func:`plan_shot` (Phase C opt-in; absent = default static
+    behaviour, unchanged)."""
+    entries = []
+    prev = None
+    for directive in directives or []:
+        entry = plan_shot(
+            directive, scene=scene, prev_entry=prev,
+            camera_mode=(directive or {}).get("camera_mode"),
+            camera_source=(directive or {}).get("camera_source"))
+        entries.append(entry)
+        prev = entry
+    error_entries = [e["shot_id"] for e in entries if e["errors"]]
+    overrides = [e["shot_id"] for e in entries
+                 if e["movement_decision"]["requested"] != "STATIC"]
+    repeated = [e["shot_id"] for e in entries
+                if any("same viewpoint" in n
+                       for n in e["continuity_notes"])]
+    return {
+        "entries": entries,
+        "accounting": {
+            "total_directives": len(entries),
+            "mapped": len(entries) - len(error_entries),
+            "with_errors": error_entries,
+            "movement_overrides": overrides,
+            "repeated_framing": repeated,
+            "all_mapped": len(error_entries) == 0,
+        },
+    }
+
+
+def _jsonable(value):
+    """Deep-convert tuples to lists so accounting is JSON-serializable."""
+    if isinstance(value, tuple):
+        return [_jsonable(v) for v in value]
+    if isinstance(value, dict):
+        return {k: _jsonable(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_jsonable(v) for v in value]
+    return value
+
+
+def build_camera_accounting(directives, shots, staging=None, fps=24,
+                            executed=None):
+    """Join planned shot directives to rendered shots (P6 / W3).
+
+    ``directives`` is the package's ``shot_directives`` list (every V1
+    SHOT directive); ``shots`` is the ``plan_shots`` output in render
+    order (each with ``duration`` and, when a directive drove it,
+    ``directive_shot_id``). ``staging`` is the scene staging dict for
+    ``plan_coverage`` (``character_positions``); ``executed`` is an
+    optional {shot index: _render_shot return dict} map for the
+    planned-vs-executed pose comparison.
+
+    Frame ranges use the SAME cumulative clock as
+    ``render_product_video`` (shot i covers
+    [round(start*fps), round(end*fps))) so they index the rendered
+    frame list exactly; the 0.5 s audio tail is not part of any shot.
+
+    Every directive gets exactly one entry with a status:
+    ``rendered`` (a shot carries its id and renders its resolved
+    type), ``type_defaulted`` (a shot carries its id but renders a
+    different type — the directive's type was invalid/absent), or
+    ``not_rendered`` (no shot carries its id — e.g. only the first
+    scene-level directive per scene drives action leads). Shots with
+    no directive id are listed separately as ``synthesized_shots``
+    (cue defaults / Gemini plan / end card). Nothing is silently
+    omitted: len(entries) == len(directives), always.
+    """
+    coverage = plan_coverage(directives, scene=staging)
+    # Cumulative-clock frame ranges over the shot list.
+    ranges = []
+    cursor = 0.0
+    for shot in shots or []:
+        start = round(cursor * fps)
+        cursor += float(shot.get("duration") or 0.0)
+        ranges.append([start, round(cursor * fps)])
+    total_frames = ranges[-1][1] if ranges else 0
+    by_directive = {}
+    for idx, shot in enumerate(shots or []):
+        did = shot.get("directive_shot_id")
+        if did:
+            by_directive.setdefault(str(did), []).append(idx)
+    executed = executed or {}
+    entries = []
+    for entry in coverage["entries"]:
+        shot_id = entry["shot_id"]
+        indices = by_directive.get(str(shot_id), [])
+        frame_ranges = [ranges[i] for i in indices]
+        rendered_types = [shots[i].get("shot_type") for i in indices]
+        if not indices:
+            status = "not_rendered"
+        elif entry["shot_type_resolved"] in rendered_types:
+            status = "rendered"
+        else:
+            status = "type_defaulted"
+        out = _jsonable(entry)
+        out["frame_range"] = frame_ranges[0] if len(frame_ranges) == 1 \
+            else frame_ranges
+        out["frame_ranges"] = frame_ranges
+        out["frame_range_note"] = (
+            "cumulative clock over plan_shots durations; "
+            "excludes the 0.5 s audio tail")
+        out["shot_indices"] = indices
+        out["rendered_shot_types"] = rendered_types
+        out["status"] = status
+        # Planned-vs-executed comparison (when render results given).
+        exec_blocks = []
+        for i in indices:
+            result = executed.get(i)
+            if not isinstance(result, dict):
+                continue
+            pos = result.get("camera_position")
+            planned = entry.get("camera_position")
+            delta = None
+            if pos is not None and planned is not None:
+                delta = round(math.dist(
+                    [float(v) for v in pos],
+                    [float(v) for v in planned]), 3)
+            exec_blocks.append({
+                "shot_index": i,
+                "camera_position": _jsonable(pos),
+                "camera_target": _jsonable(result.get("camera_target")),
+                "camera_angle": result.get("camera_angle"),
+                "camera_angle_requested": result.get(
+                    "camera_angle_requested"),
+                "camera_movement_executed": result.get(
+                    "camera_movement_executed"),
+                "camera_radius_scale": result.get("camera_radius_scale"),
+                "camera_limitation": result.get("camera_limitation"),
+                "position_delta_vs_plan": delta,
+            })
+        out["executed"] = exec_blocks
+        entries.append(out)
+    synthesized = []
+    for idx, shot in enumerate(shots or []):
+        if shot.get("directive_shot_id"):
+            continue
+        synthesized.append({
+            "shot_index": idx,
+            "scene": shot.get("scene"),
+            "kind": shot.get("kind"),
+            "shot_type": shot.get("shot_type"),
+            "frame_range": ranges[idx],
+            "source": ("end_card" if shot.get("kind") == "end_card"
+                       else "cue_default_or_gemini_plan"),
+        })
+    summary = dict(coverage["accounting"])
+    summary.update({
+        "total_shots": len(shots or []),
+        "total_frames_excluding_tail": total_frames,
+        "rendered": sum(1 for e in entries if e["status"] == "rendered"),
+        "type_defaulted": sum(
+            1 for e in entries if e["status"] == "type_defaulted"),
+        "not_rendered": [e["shot_id"] for e in entries
+                         if e["status"] == "not_rendered"],
+        "synthesized_shots": len(synthesized),
+    })
+    return {"entries": entries, "synthesized_shots": synthesized,
+            "accounting": summary}
+
+
+# ---------------------------------------------------------------------------
+# Measurement functions for the independent camera audit (PIL only).
+# ---------------------------------------------------------------------------
+def _mad_between(img_a, img_b):
+    """Mean absolute per-pixel difference (0..255) of two RGB frames."""
+    from PIL import ImageChops
+    if img_a.size != img_b.size:
+        raise ValueError(f"frame sizes differ: {img_a.size} vs {img_b.size}")
+    diff = ImageChops.difference(img_a.convert("RGB"),
+                                 img_b.convert("RGB")).convert("L")
+    hist = diff.histogram()
+    total = sum(hist)
+    if total == 0:
+        return 0.0
+    return sum(i * count for i, count in enumerate(hist)) / total
+
+
+def sky_band_mad(img_a, img_b, band_h: int = 150) -> float:
+    """MAD of the top ``band_h`` rows (the sky band).
+
+    Within one fixed-camera shot the sky band must be ~0 (the
+    camera does not move) while the lower frame changes (characters
+    animate). The audit compares this against lower-frame MAD."""
+    band_a = img_a.crop((0, 0, img_a.size[0], min(band_h, img_a.size[1])))
+    band_b = img_b.crop((0, 0, img_b.size[0], min(band_h, img_b.size[1])))
+    return _mad_between(band_a, band_b)
+
+
+def frame_mad(img_a, img_b, region=None) -> float:
+    """MAD of a region (default: whole frame). ``region`` is a
+    (left, upper, right, lower) pixel box. Cut MAD between two
+    shots' end/start frames must be large when the viewpoint
+    actually changed, ~0 only for repeated framing."""
+    if region is not None:
+        img_a = img_a.crop(region)
+        img_b = img_b.crop(region)
+    return _mad_between(img_a, img_b)
+
+
+def head_width_stability(head_boxes) -> dict:
+    """Head-width stability across frames (the F2 check).
+
+    ``head_boxes``: a list of (x0, x1) pixel pairs (or dicts with
+    x0/x1) measuring the same subject's head width per frame.
+    Returns widths, mean, max deviation in px and ratio, and
+    ``ok`` (max ratio deviation <= 5%). No zoom pump = stable."""
+    widths = []
+    for box in head_boxes or []:
+        if isinstance(box, dict):
+            widths.append(float(box["x1"]) - float(box["x0"]))
+        else:
+            widths.append(float(box[1]) - float(box[0]))
+    if not widths:
+        return {"widths": [], "mean": 0.0, "max_deviation_px": 0.0,
+                "max_deviation_ratio": 0.0, "ok": False, "n": 0}
+    mean = sum(widths) / len(widths)
+    max_dev = max(abs(w - mean) for w in widths)
+    ratio = (max_dev / mean) if mean else 0.0
+    return {"widths": [round(w, 2) for w in widths],
+            "mean": round(mean, 2), "max_deviation_px": round(max_dev, 2),
+            "max_deviation_ratio": round(ratio, 4),
+            "ok": ratio <= 0.05, "n": len(widths)}

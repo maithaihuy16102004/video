@@ -549,6 +549,32 @@ class TestBusF6(unittest.TestCase):
                            "no headlight in the board still")
 
 
+    def test_scene_cue_union_never_summons_the_bus(self):
+        # Zeus re-render: "board" in scene 10's scene_cues union
+        # drew a bus behind all 12 Olympus shots. Only the shot's
+        # own evidence stages a boarding.
+        from ai_clip_studio.product_renderer import _shot_has_bus
+        shot = {"action_cues": ["stand"],
+                "scene_cues": ["stand", "take", "board", "sit"]}
+        self.assertFalse(_shot_has_bus(shot, {}))
+        self.assertFalse(_shot_has_bus(
+            {"action_cues": ["stand"],
+             "scene_cues": ["bus"]}, {}))
+
+    def test_shot_level_board_and_board_event_summon_the_bus(self):
+        from ai_clip_studio.product_renderer import _shot_has_bus
+        self.assertTrue(_shot_has_bus(
+            {"action_cues": ["board"], "scene_cues": []}, {}))
+        self.assertTrue(_shot_has_bus(
+            {"action_cues": ["bus"], "scene_cues": []}, {}))
+        pkg = {"compiled_actions": {"events": [
+            {"action_id": "E1", "action_type": "BOARD"}]}}
+        self.assertTrue(_shot_has_bus(
+            {"action_cues": ["stand"], "event_ids": ["E1"]}, pkg))
+        self.assertFalse(_shot_has_bus(
+            {"action_cues": ["stand"], "event_ids": ["E2"]}, pkg))
+
+
 class TestRunF10(unittest.TestCase):
     """F10: the run reads as a run in a still frame. Walk baselines
     (same measurement): lean 6.9 deg, flight 0%, arm 22.1 deg,

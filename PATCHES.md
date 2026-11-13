@@ -69,4 +69,4 @@ from the edited files, so the hunk headers are correct) and verified:
 - The 11 unit tests in `youtube_16x9/tests/test_16x9.py` still pass.
 
 Nothing in the upstream repo was changed; only these local files
-in `~/workspace/video-16x9-v2/` were corrected.
+in `~/workspace/agent/` were corrected.
