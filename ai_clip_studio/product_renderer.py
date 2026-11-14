@@ -86,6 +86,7 @@ from .camera_planner import (
     ANGLES, CAMERA_MOVEMENT, FULL_BODY_SHOT_TYPES,
     SHOT_TYPES as CAMERA_SHOT_TYPES, SHOT_SCALE as CAMERA_SHOT_SCALE,
     CameraPlanner, anchor_focus_for_shot, apply_camera_anchored,
+    apply_exposure_floor, apply_micro_dolly,
     build_camera_accounting, normalize_movement,
     resolve_viewpoint_angle, static_directive_for_shot,
     validation_for_camera, viewpoint_for_shot,
@@ -5706,6 +5707,34 @@ def _render_shot(args: dict) -> dict:
         and _split is None
         and (_prop_machine is not None or has_prop))
     _insert_anchor: dict | None = None
+    # ---- T1: executed camera life ----------------------------------
+    # A shot whose actor has no action events renders an otherwise
+    # frozen frame. The reference channel keeps a living camera on every
+    # shot, so DOLLY_*/PAN_* are EXECUTED here as an image-level micro
+    # move (and reported as executed, never as a limitation), and a shot
+    # with nothing to animate gets a gentle auto push-in. The scene
+    # camera itself stays fixed: no parallax is invented, and framing
+    # still changes only by cut.
+    _movement_req_early = normalize_movement(shot.get("camera_movement"))
+    _dolly: dict | None = None
+    _auto_drift = False
+    _executed_movement = "STATIC"
+    if _movement_req_early in ("DOLLY_IN", "DOLLY_OUT"):
+        _dolly = {"zoom": 0.045, "pan": 0.0,
+                  "out": _movement_req_early == "DOLLY_OUT"}
+        _executed_movement = _movement_req_early
+    elif _movement_req_early in ("PAN_LEFT", "PAN_RIGHT"):
+        _dolly = {"zoom": 0.012, "out": False,
+                  "pan": -0.020 if _movement_req_early == "PAN_LEFT" else 0.020}
+        _executed_movement = _movement_req_early
+    _has_action_events = bool(names) and any(
+        _per_actor.get(n) for n in names) if _per_actor else False
+    if (_dolly is None and not still_only and shot["kind"] != "action"
+            and not _has_action_events):
+        _dolly = {"zoom": 0.050, "pan": 0.006, "out": False}
+        _executed_movement = "DOLLY_IN"
+        _auto_drift = True
+    _exposure_gains: list[float] = []
     for fi in range(n_frames):
         t = (duration / 2.0) if still_only else fi / FPS
         for n, fn in fns.items():
@@ -5824,6 +5853,20 @@ def _render_shot(args: dict) -> dict:
             # composite, before subtitles. Pass 2 re-applies it
             # after the deferred crop.
             img.paste(_occluder, (0, 0), _occluder)
+        # ---- T1/T2: camera life, then the exposure floor ---------------
+        # Both are image-level ops applied to the finished frame, so they
+        # run after cropping/occlusion and BEFORE subtitles: the caption
+        # stays the same 64 px white on every frame and is never
+        # brightened or drifted with the picture.
+        if _dolly is not None and not _defer_framing:
+            # Deferred framing (object_insert pass 2) re-crops the saved
+            # frames later; a dolly baked in here would be applied twice,
+            # so those shots keep the fixed camera.
+            _u = 0.0 if n_frames <= 1 else fi / float(n_frames - 1)
+            img = apply_micro_dolly(img, _u, zoom=_dolly["zoom"],
+                                    pan=_dolly["pan"], out=_dolly["out"])
+        img, _exp_gain = apply_exposure_floor(img)
+        _exposure_gains.append(_exp_gain)
         # ---- subtitles last, always at fixed 64 px --------------------
         if windows and not _defer_framing:
             d = ImageDraw.Draw(img, "RGBA")
@@ -5932,7 +5975,7 @@ def _render_shot(args: dict) -> dict:
     # to fill the corners would break the F2 head-size cap).
     _movement_req = normalize_movement(shot.get("camera_movement"))
     _movement_limitation = None
-    if _movement_req != "STATIC":
+    if _movement_req != "STATIC" and _executed_movement == "STATIC":
         _movement_limitation = (
             f"camera_movement {_movement_req} requested but not "
             "executed: the camera is fixed within the shot by design "
@@ -5986,7 +6029,9 @@ def _render_shot(args: dict) -> dict:
         "applied_scale": float(safe_shot["camera"]["scale"]),
         "camera_movement": shot.get("camera_movement", "STATIC"),
         "camera_movement_requested": _movement_req,
-        "camera_movement_executed": "STATIC",
+        "camera_movement_executed": _executed_movement,
+        "camera_auto_drift": _auto_drift,
+        "exposure_gain_max": round(max(_exposure_gains or [1.0]), 4),
         "movement_limitation": _movement_limitation,
         "camera_angle": _angle,
         "camera_angle_requested": _angle_requested,

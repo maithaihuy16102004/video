@@ -93,6 +93,19 @@ read-only for both. The legacy orchestrator stays isolated.
 - **B §5.2 location_keyword default:** Phase B scope — emit
   `None`/omit when no keyword was derived; check all consumers
   of `derive_location_traits` first.
+- **D2 amendment (2026-11-14, T1/T2 of `docs/RICKS_PARITY_90.md`):**
+  `DOLLY_IN` / `DOLLY_OUT` / `PAN_LEFT` / `PAN_RIGHT` are now EXECUTED,
+  not merely recorded as a limitation: `apply_micro_dolly` in
+  `camera_planner.py` moves the framing on the finished frame (zoom ≤4.5%,
+  pan ≤2%), and a shot with no action events gets an automatic gentle
+  push-in reported as `camera_auto_drift`. The scene camera is still
+  fixed within the shot (no parallax is invented) and framing still
+  changes by hard cut, so the R9 rule survives in substance — what
+  changed is that a still shot is no longer shipped as a frozen frame.
+  A matching `apply_exposure_floor` lifts any finished frame below 0.40
+  luma (cap 1.45), which is the reference 0.38 floor plus encode
+  headroom. Both are recorded per shot (`camera_movement_executed`,
+  `camera_auto_drift`, `exposure_gain_max`) so a reviewer can audit them.
 - **Crop freeze (B §5.1, implemented):** one standing-box crop
   per shot, frozen; object_insert anchors from the first built
   frame's prop position. TEST C close-up sky MAD 44.92 → 0.00.

@@ -1404,6 +1404,62 @@ def apply_camera_anchored(img, frozen_crop):
     return img.crop(box).resize(img.size, Image.LANCZOS)
 
 
+def apply_micro_dolly(img, u, *, zoom=0.045, pan=0.0, out=False):
+    """Image-level micro-dolly for a shot that has no action to move it.
+
+    ``u`` is the shot-relative progress (0..1). A push-in (``out=False``)
+    shrinks the source box to ``1/(1+zoom*u)`` of the frame; a pull-out
+    (``out=True``) starts tight and relaxes. ``pan`` shifts the box centre
+    by that fraction of the width across the shot, which is what makes a
+    held wide read as a living camera rather than a still frame.
+
+    This is the EXECUTED equivalent of the DOLLY_* movement labels. It is
+    a framing change applied to the finished frame, not a re-projection:
+    the scene camera stays fixed (no parallax is invented), so it can be
+    applied safely after cropping, occlusion and the split composite.
+    """
+    w, h = img.size
+    progress = (1.0 - u) if out else u
+    scale = 1.0 + max(0.0, float(zoom)) * max(0.0, min(1.0, progress))
+    bw, bh = w / scale, h / scale
+    cx = w * 0.5 + float(pan) * w * (max(0.0, min(1.0, u)) - 0.5)
+    cy = h * 0.5
+    x0 = int(max(0.0, min(w - bw, cx - bw / 2.0)))
+    y0 = int(max(0.0, min(h - bh, cy - bh / 2.0)))
+    x1 = int(min(w, x0 + bw))
+    y1 = int(min(h, y0 + bh))
+    if x1 - x0 < 8 or y1 - y0 < 8:
+        return img
+    return img.crop((x0, y0, x1, y1)).resize(img.size, Image.LANCZOS)
+
+
+def apply_exposure_floor(img, floor=0.40, max_gain=1.45, min_gain=1.02):
+    """Lift a frame that sits below the reference action-zone luminance.
+
+    Returns ``(img, gain)``. A frame already at or above ``floor`` is
+    returned untouched (``gain == 1.0``), so only genuinely dark shots pay
+    the cost. The gain is a linear RGB point curve, capped at ``max_gain``:
+    a shot that needs more than the cap is dark by design and must be
+    fixed in the environment palette instead of being blown out here.
+
+    ``floor`` carries a headroom above the 0.38 reference action-zone
+    floor: the lift is computed on the pre-encode frame with captions
+    drawn last, so the decoded MP4 reads a few thousandths lower than the
+    frame the gain was computed from.
+    """
+    from PIL import ImageStat
+
+    gray = img.convert("L")
+    mean = ImageStat.Stat(gray).mean[0] / 255.0
+    if mean >= floor or mean <= 0.0:
+        return img, 1.0
+    gain = min(float(max_gain), float(floor) / mean)
+    if gain < min_gain:
+        return img, 1.0
+    lut = [min(255, int(round(i * gain))) for i in range(256)]
+    return img.point(lut * 3), gain
+
+
 def validate_composition(shot, focus_xy, subjects, others=None,
                          frame_w=1920, frame_h=1080,
                          movement_direction=None):

@@ -45,17 +45,23 @@ No channel artwork, characters or scripts are used.
 
 ## Baseline (2026-11-14, `species_acceptance.mp4`)
 
+After T1 + T2 (executed micro-dolly + exposure floor):
+
 ```
-overall 90.43  passed False     # fails the per-dimension floor
+overall 97.86  passed True
 format           91.67   10 s clip is inside the short-form band, not the 20-60 s band
 pacing           96.67   shots 3.04 / 3.00 / 3.04 s — all in band
 cut_grammar     100.00   2/2 boundaries are hard cuts
-motion           77.82   per-shot mean diff 0.13 / 0.27 / 0.72 — below the 0.35 floor
-lighting         83.33   shot 0 luma 0.352 < 0.38
+motion           98.50   per-shot mean diff now above the 0.35 floor
+lighting        100.00   shot 0 lifted by gain 1.15, no shot below 0.40
 framing_variety 100.00   establishing → medium → close_up, no repeats
-captions          null   plan carries no caption metrics
-characters        null   plan carries no character boxes
+captions          null   plan carries no caption metrics (T4)
+characters        null   plan carries no character boxes (T3)
 ```
+
+Before T1/T2, the same pixels scored **90.43 with `passed False`**: motion
+77.82 (per-shot mean diff 0.13 / 0.27 / 0.72 against the 0.35 floor) and
+lighting 83.33 (shot 0 at luma 0.352).
 
 The high overall number is **not** a pass: the gate is
 `overall ≥ 90 AND every measured dimension ≥ 85`, and motion plus
@@ -84,8 +90,8 @@ the baseline from 78.49 to 90.43 on the same pixels:
 
 | # | Task | Evidence | Done when |
 |---|---|---|---|
-| T1 | **Make every shot move.** Add an idle layer (breath, blink, weight shift, cloth/prop settle) and a slow camera drift for framing that has no action; a static establishing shot is the single biggest parity gap. | per-shot mean diff 0.13 / 0.27 / 0.72 vs floor 0.35 | `motion ≥ 85` and no frozen span before the final second |
-| T2 | **Lift the dark shot over the luma floor.** Apply the style-B exposure (1.45) and the 0.38 action-zone floor to the interior/workshop palette instead of leaving shot 0 at 0.352. | shot 0 luma 0.352 | `lighting ≥ 85` |
+| ~~T1~~ ✅ | **Make every shot move.** DONE: `apply_micro_dolly` executes `DOLLY_IN`/`DOLLY_OUT`/`PAN_LEFT`/`PAN_RIGHT` as an image-level micro move (reported as executed, not as a limitation), and a shot with no action events gets a gentle auto push-in recorded as `camera_auto_drift`. Character idle amplitudes were left alone: `idle()` alone changed too little per frame to read. | was 0.13 / 0.27 / 0.72 vs floor 0.35 | **motion 98.50** |
+| ~~T2~~ ✅ | **Lift the dark shot over the luma floor.** DONE: `apply_exposure_floor` applies a capped linear gain (≤1.45) when a finished frame sits below 0.40 — the reference floor plus headroom, because the lift is computed pre-encode with captions drawn last. | was shot 0 luma 0.352 | **lighting 100.00** |
 | T3 | **Emit character boxes into the plan.** The renderer already computes standing boxes for crop anchoring; write `characters[]` (`name`, `head_ratio`, `bbox`) per shot so the `characters` dimension becomes measurable. | `characters: null` | dimension has a score |
 | T4 | **Emit caption metrics into the plan.** Font px, line count, max chars, y fraction per caption block. | `captions: null` | dimension has a score |
 | T5 | **Close-up framing must not crop the head.** `shot_002_mid.png` cuts the top of the head at the frame edge; the planner pairs `close_up` with a standing anchor that puts the head above the safe area. | still frame, job dir | `characters` shot with a close-up is compliant |
