@@ -149,6 +149,15 @@ HEADER_KEYS = (
     "MEME_MAX_PER_MINUTE",
 )
 
+# Key aliases accepted at the parser boundary: a documented synonym is
+# the SAME field, not an unknown one. This is a fixed table (never a
+# fuzzy match), so no value is guessed and no section is reassigned;
+# the canonical field name is recorded downstream.
+KEY_ALIASES = {
+    "CAMERA_MOTION": "CAMERA_MOVEMENT",
+    "CAMERA_MOVE": "CAMERA_MOVEMENT",
+}
+
 CHARACTER_KEYS = (
     "ROLE",
     "APPEARANCE",
@@ -194,6 +203,12 @@ CHARACTER_KEYS = (
     "COSTUME_CHILD",
     "COSTUME_KING",
     "HORNS",
+    # Generic visual-profile features (species-neutral): a character's
+    # non-human ears / tail / face markings are declared data, exactly
+    # like HORNS and SPECIES above.
+    "EARS",
+    "TAIL",
+    "FACE_MARKINGS",
     "NAMES",
     "RIG_REQUIREMENT",
     "SIGNATURE_PROP",
@@ -2614,6 +2629,11 @@ class StudioScriptV1Parser:
             return False
         key = m_key.group(1).strip().upper()
         value = m_key.group(2).strip()
+        # Alias boundary (see KEY_ALIASES): resolve a documented synonym
+        # before any section dispatch, so CAMERA_MOTION is the camera
+        # movement field in SCENE and SHOT context alike -- never an
+        # unknown field.
+        key = KEY_ALIASES.get(key, key)
 
         # NARRATION / DIALOGUE with optional explicit [Lnn] after the colon.
         # (Empty NARRATION:/DIALOGUE: lines open sub-blocks and are

@@ -196,6 +196,7 @@ from .trait_derivation import (
     derive_location_traits,
     derive_prop_kind,
     derive_render_traits,
+    merge_render_traits,
     derive_voice_hint,
     map_camera_movement_text,
     map_camera_text_to_shot_type,
@@ -946,7 +947,8 @@ def _adapt_document(doc) -> tuple[dict, dict]:
                 if not (is_narrator or is_extra) else 540
         render_traits = derive_render_traits(
             name, role, appearance, costume_text, trait_list,
-            voice_style, fields=fields, gender=gender, height_px=height)
+            voice_style, fields=fields, gender=gender, height_px=height,
+            notes=v1_notes)
         voice_id = _character_voice_id(char, fields)
         _style, moustache_note = moustache_style_from_fields(fields)
         if moustache_note:
@@ -991,6 +993,18 @@ def _adapt_document(doc) -> tuple[dict, dict]:
             "hat": render_traits["hat"],
             "moustache_style": render_traits["moustache_style"],
             "glasses": render_traits["glasses"],
+            # Generic visual profile (species-neutral) + its flat
+            # feature fields, so map_character reads the contract
+            # regardless of which shape it receives.
+            "visual_profile": dict(render_traits.get("visual_profile") or {}),
+            "ears": (render_traits.get("visual_profile") or {}).get(
+                "ears", "none"),
+            "tail": (render_traits.get("visual_profile") or {}).get(
+                "tail", "none"),
+            "horns": (render_traits.get("visual_profile") or {}).get(
+                "horns", "none"),
+            "face_markings": (render_traits.get("visual_profile") or {}).get(
+                "face_markings", "none"),
         })
     # Speakers that appear in lines but not in the roster still get a
     # character entry (the deterministic planner's rule). Unreachable
@@ -1024,6 +1038,8 @@ def _adapt_document(doc) -> tuple[dict, dict]:
                 "hat": traits["hat"],
                 "moustache_style": traits["moustache_style"],
                 "glasses": traits["glasses"],
+                "visual_profile": dict(
+                    traits.get("visual_profile") or {}),
             })
 
     # --- Scenes ----------------------------------------------------
@@ -1795,8 +1811,8 @@ def _apply_enrichment(package: dict, cleaned: dict, model: str,
             dropped.append(
                 f"character {g['name']!r} has no trait block; dropped")
             continue
-        merged = dict(block["render_traits"])
-        merged.update(g["render_traits"])
+        merged = merge_render_traits(block["render_traits"],
+                                     g["render_traits"])
         block["render_traits"] = merged
         display = char_display.get(key) or g["name"]
         cast_entry = context["cast_by_name"].get(display)
@@ -1807,8 +1823,8 @@ def _apply_enrichment(package: dict, cleaned: dict, model: str,
             cast_entry["jacket_color"] = merged["jacket_color"]
             for trait_key in ("template", "body_variant", "costume",
                               "hair_style", "hat", "moustache_style",
-                              "glasses"):
-                cast_entry[trait_key] = merged[trait_key]
+                              "glasses", "visual_profile"):
+                cast_entry[trait_key] = merged.get(trait_key)
 
     # Locations: overlay render traits on trait blocks + scene dicts.
     scene_loc_index = context["scene_loc_index"]
@@ -1835,8 +1851,8 @@ def _apply_enrichment(package: dict, cleaned: dict, model: str,
                 "location enrichment names no declared location or "
                 "real scene; dropped")
             continue
-        merged = dict(block["render_traits"])
-        merged.update(loc["render_traits"])
+        merged = merge_render_traits(block["render_traits"],
+                                     loc["render_traits"])
         block["render_traits"] = merged
         for scene_no in block["scene_numbers"]:
             for scene in package["scenes"]:

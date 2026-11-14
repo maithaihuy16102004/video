@@ -73,7 +73,10 @@ from .animation.primitives import (
     stand_from_chair, stand_up, standing, turn_to, walk_mud, walk_to, wave,
     write_on_paper,
 )
-from .animation.rig import check_bone_lengths, lerp, smoothstep
+from .animation.rig import (
+    EAR_SHAPES, FACE_MARKING_STYLES, HORN_SHAPES, TAIL_SHAPES,
+    check_bone_lengths, lerp, smoothstep,
+)
 from .expression_library import (
     blink_envelope, gaze_for_target, interpret as interpret_expression,
     interpret_params as interpret_expression_params,
@@ -993,6 +996,21 @@ def map_character(char: dict, index: int, costume_override=None,
         kwargs["glasses"] = False
     elif _has_any_word(desc, _GLASSES_PHRASES):
         kwargs["glasses"] = True
+    # Species features (generic visual profile): explicit contract data
+    # first, then flat trait fields. A value outside the drawing
+    # vocabulary is skipped here (the validator already noted the drop)
+    # and the rig default "none" applies -- no invented feature.
+    profile = char.get("visual_profile")
+    if not isinstance(profile, dict):
+        profile = {}
+    for key, allowed in (("ears", EAR_SHAPES), ("tail", TAIL_SHAPES),
+                         ("horns", HORN_SHAPES),
+                         ("face_markings", FACE_MARKING_STYLES)):
+        value = profile.get(key)
+        if value is None:
+            value = char.get(key)
+        if value in allowed and value != "none":
+            kwargs[key] = value
     return make_character(**kwargs)
 
 

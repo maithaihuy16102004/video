@@ -58,6 +58,18 @@ BODY_WIDTH_SCALE = {"slim": 0.9, "standard": 1.0, "sturdy": 1.15,
 # signature facial trait, carried as template data. See Stickman.
 MOUSTACHE_STYLES = ("none", "toothbrush", "handlebar", "full")
 
+# Species-feature vocabulary (generic visual profile, 2026-11-13).
+# A character's non-human features are DATA, carried like the moustache
+# style -- never a name or story lookup. These closed sets are the
+# drawing vocabulary; trait_derivation keeps an identical mirror and a
+# sync test pins them together. "none" is the default for every
+# character, so an existing character draws exactly as before.
+EAR_SHAPES = ("none", "round", "pointed", "long", "wing")
+TAIL_SHAPES = ("none", "monkey", "curled", "bushy", "long", "tuft")
+HORN_SHAPES = ("none", "small", "curved", "antlers", "crown")
+FACE_MARKING_STYLES = ("none", "brow_patch", "cheek_stripes", "muzzle",
+                       "war_paint")
+
 # Hair styles (v8): "short" | "long" | "tuft" | "side_part" (hair
 # parted on one side -- a slanted hairline, a signature trait for
 # historical-figure-style test instances).
@@ -207,7 +219,8 @@ class Stickman:
                  template="male", body_variant="standard",
                  hair_style=None, glasses=False, cane=False,
                  costume="none", gait=None, gait_profile=None,
-                 eye_count=2):
+                 eye_count=2, ears="none", tail="none", horns="none",
+                 face_markings="none"):
         self.H = height
         self.head_r = HEAD_RATIO * height / 2
         self.torso = TORSO_FRAC * height
@@ -246,6 +259,21 @@ class Stickman:
             raise ValueError(
                 f"unknown eye_count: {eye_count!r} (expected 1 or 2)")
         self.eye_count = int(eye_count)
+        # Species features (generic visual profile): closed vocabularies
+        # validated loudly, like moustache_style. "none" draws nothing.
+        for _label, _value, _allowed in (
+                ("ears", ears, EAR_SHAPES),
+                ("tail", tail, TAIL_SHAPES),
+                ("horns", horns, HORN_SHAPES),
+                ("face_markings", face_markings, FACE_MARKING_STYLES)):
+            if _value not in _allowed:
+                raise ValueError(
+                    f"unknown {_label}: {_value!r} "
+                    f"(expected one of {sorted(_allowed)})")
+        self.ears = ears
+        self.tail = tail
+        self.horns = horns
+        self.face_markings = face_markings
         self.name = name
         # PREMIUM_STICKMAN v4 identity (see animation/character_art.py).
         # template: male | female | child | elderly. body_variant scales

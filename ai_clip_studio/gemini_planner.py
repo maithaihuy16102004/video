@@ -59,6 +59,7 @@ from .trait_derivation import (
     build_character_trait_block,
     build_location_trait_block,
     build_music_event,
+    merge_render_traits,
     build_sfx_event,
     build_trait_blocks,
     derive_location_traits,
@@ -193,7 +194,8 @@ def _merged_render_traits(target: dict, validated: dict) -> dict:
         target.get("traits", []),
         target.get("voice_style", ""),
         height_px=target.get("height_px", 540))
-    derived.update({k: v for k, v in validated.items() if v is not None})
+    derived = merge_render_traits(
+        derived, {k: v for k, v in validated.items() if v is not None})
     if target.get("jacket_color") and "jacket_color" not in validated:
         derived["jacket_color"] = target["jacket_color"]
     return derived

@@ -171,9 +171,12 @@ class TestRenderTraits(unittest.TestCase):
         traits = _traits(height_px=560)
         self.assertEqual(
             set(traits),
+            # visual_profile (2026-11-13): the generic, species-neutral
+            # feature contract is part of every render_traits object.
             {"description", "voice_hint", "template", "body_variant",
              "costume", "hair_style", "hat", "moustache_style",
-             "glasses", "jacket_color", "height_px"})
+             "glasses", "jacket_color", "height_px",
+             "visual_profile"})
         self.assertEqual(traits["height_px"], 560)
         self.assertEqual(_traits()["height_px"], 540)
 

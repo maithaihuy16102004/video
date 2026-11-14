@@ -311,6 +311,193 @@ _GLASSES_MARKERS = ("đeo kính", "kính mắt", "kính cận", "kính râm",
 _HAT_MARKERS = ("bowler", "mũ nồi", "mũ quả dưa", "mũ phớt")
 
 
+# --- Character visual profile (generic species contract) -------------
+#
+# A character's NON-HUMAN features are data with closed vocabularies.
+# Nothing here reads a name or a story: the script's own fields win
+# (SPECIES / EARS / TAIL / HORNS / FACE_MARKINGS), a generic keyword
+# scan of the character's own text is the fallback, then the species
+# default. A declared value outside the vocabulary falls back to the
+# species default WITH A NOTE -- the engine never draws a feature it
+# has no geometry for, and never silently drops one the script asked
+# for. The renderer's drawing vocabulary lives in animation/rig.py and
+# a sync test keeps the two identical.
+SPECIES_KINDS = ("human", "primate", "feline", "canine", "bovine",
+                 "bird", "deity", "mythic", "other")
+EAR_SHAPES = ("none", "round", "pointed", "long", "wing")
+TAIL_SHAPES = ("none", "monkey", "curled", "bushy", "long", "tuft")
+HORN_SHAPES = ("none", "small", "curved", "antlers", "crown")
+FACE_MARKING_STYLES = ("none", "brow_patch", "cheek_stripes", "muzzle",
+                       "war_paint")
+VISUAL_PROFILE_KEYS = ("species", "ears", "tail", "horns",
+                       "face_markings")
+
+# Species -> the features that species has by default. A human has
+# none, so every existing character's drawing is unchanged.
+SPECIES_DEFAULTS: dict[str, dict[str, str]] = {
+    "human": {},
+    "primate": {"ears": "round", "tail": "monkey"},
+    "feline": {"ears": "pointed", "tail": "long"},
+    "canine": {"ears": "pointed", "tail": "bushy"},
+    "bovine": {"ears": "round", "horns": "curved"},
+    "bird": {"tail": "tuft"},
+    "deity": {},
+    "mythic": {"horns": "small"},
+    "other": {},
+}
+
+_SPECIES_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
+    ("primate", ("khỉ", "vượn", "tinh tinh", "đười ươi", "monkey",
+                 "ape", "gorilla", "chimpanzee", "chimp")),
+    # "báo" is deliberately ABSENT: it is the Vietnamese word for
+    # newspaper, and a newspaper seller is not a leopard. Only
+    # unambiguous compounds count.
+    ("feline", ("mèo", "hổ", "báo đốm", "báo hoa mai", "báo tuyết",
+                "sư tử", "beo", "cat", "tiger", "panther", "leopard",
+                "lion", "lynx")),
+    # "cáo" is absent for the same reason: the bare word is far too
+    # common to decide an identity on.
+    ("canine", ("chó", "sói", "dog", "wolf", "fox", "jackal",
+                "coyote")),
+    # "bò" alone is the verb "to crawl": only explicit cattle
+    # compounds (or unambiguous English) count.
+    ("bovine", ("bò tót", "bò sữa", "bò rừng", "trâu", "bull", "cow",
+                "ox", "bison", "buffalo")),
+    ("bird", ("chim", "đại bàng", "quạ", "cú mèo", "diều hâu", "bird",
+              "eagle", "raven", "crow", "owl", "hawk", "falcon")),
+    ("mythic", ("rồng", "quỷ", "yêu tinh", "thuồng luồng", "dragon",
+                "demon", "troll", "goblin", "ogre")),
+    ("deity", ("thần", "nữ thần", "thiên thần", "deity", "god",
+               "goddess", "angel", "titan")),
+]
+
+_EAR_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
+    ("round", ("tai tròn", "tai nhỏ", "round ear", "round ears")),
+    ("pointed", ("tai nhọn", "tai vểnh", "pointed ear", "pointed ears",
+                 "pointy ears")),
+    ("long", ("tai dài", "tai cụp", "long ear", "long ears",
+              "floppy ears")),
+    ("wing", ("đôi cánh", "cánh chim", "wing", "wings")),
+]
+
+_TAIL_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
+    ("monkey", ("đuôi khỉ", "monkey tail")),
+    ("curled", ("đuôi cong", "curled tail", "curly tail")),
+    ("bushy", ("đuôi xù", "bushy tail", "fluffy tail")),
+    ("tuft", ("đuôi chỏm", "tufted tail")),
+    ("long", ("đuôi dài", "long tail")),
+]
+
+_HORN_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
+    ("antlers", ("gạc", "antler", "antlers")),
+    ("crown", ("sừng vương miện", "crown of horns")),
+    ("curved", ("sừng cong", "curved horn", "curved horns",
+                "ram horns")),
+    ("small", ("sừng nhỏ", "small horn", "small horns")),
+]
+
+_FACE_MARKING_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
+    ("cheek_stripes", ("vằn má", "sọc má", "cheek stripes")),
+    ("brow_patch", ("vết lông mày", "lông mày trắng", "brow patch")),
+    ("muzzle", ("mõm trắng", "mõm", "white muzzle", "muzzle")),
+    ("war_paint", ("vẽ mặt", "phẩm đỏ", "war paint", "face paint")),
+]
+
+
+def _enum_field(fields, key: str, allowed) -> str | None:
+    """Structured field -> a closed-vocabulary value, or None.
+
+    None means "the field is absent OR its value is not a vocabulary
+    value"; the caller decides which, so an unrecognised declaration
+    is reported instead of silently replaced.
+    """
+    raw = _field_text(fields, key).strip()
+    if not raw:
+        return None
+    text = _norm(raw)
+    for value in allowed:
+        if value != "none" and _has_word(text, value.replace("_", " ")):
+            return value
+    if text in ("none", "no", "không", "khong"):
+        return "none"
+    return None
+
+
+def _scan_enum(text: str, rules) -> str | None:
+    for value, keywords in rules:
+        if _has_any_word(text, keywords):
+            return value
+    return None
+
+
+def derive_visual_profile(*, fields=None, scan_text: str = "",
+                          who: str = "character") -> tuple[dict, list[str]]:
+    """Generic, species-neutral visual profile + assumption notes.
+
+    Returns (profile, notes). The profile ALWAYS carries all
+    VISUAL_PROFILE_KEYS with closed-vocabulary values; notes explain
+    every declaration that fell back (an unknown SPECIES or feature
+    value) so the drop is visible, never silent. Precedence per
+    feature: explicit field, then the character's own text, then the
+    species default.
+    """
+    notes: list[str] = []
+    scan = _norm(scan_text)
+
+    raw_species = _field_text(fields, "SPECIES").strip()
+    species = _enum_field(fields, "SPECIES", SPECIES_KINDS)
+    if raw_species and species is None:
+        notes.append(
+            f"{who}: species {raw_species!r} is not in "
+            f"{list(SPECIES_KINDS)}; fell back to the text scan / human")
+    if species is None:
+        species = _scan_enum(scan, _SPECIES_KEYWORDS)
+    if species is None:
+        species = "human"
+
+    defaults = SPECIES_DEFAULTS.get(species, {})
+    profile = {"species": species}
+    for key, field_key, allowed, keywords in (
+            ("ears", "EARS", EAR_SHAPES, _EAR_KEYWORDS),
+            ("tail", "TAIL", TAIL_SHAPES, _TAIL_KEYWORDS),
+            ("horns", "HORNS", HORN_SHAPES, _HORN_KEYWORDS),
+            ("face_markings", "FACE_MARKINGS", FACE_MARKING_STYLES,
+             _FACE_MARKING_KEYWORDS)):
+        raw = _field_text(fields, field_key).strip()
+        value = _enum_field(fields, field_key, allowed) if raw else None
+        if raw and value is None:
+            notes.append(
+                f"{who}: {key} {raw!r} is not in {list(allowed)}; "
+                f"fell back to the species default")
+        if value is None:
+            value = _scan_enum(scan, keywords)
+        if value is None:
+            value = defaults.get(key, "none")
+        profile[key] = value
+    return profile, notes
+
+
+def merge_render_traits(base: dict, override: dict) -> dict:
+    """Overlay validated model traits on deterministic derived traits.
+
+    ``visual_profile`` merges FIELD-WISE: a model that supplies only
+    ``ears`` must not erase the derived species, tail or horns. Every
+    other key follows override-if-present. Returns a new dict and
+    never mutates its inputs.
+    """
+    merged = dict(base or {})
+    for key, value in (override or {}).items():
+        if value is None:
+            continue
+        if key == "visual_profile" and isinstance(value, dict):
+            current = dict(merged.get("visual_profile") or {})
+            current.update(value)
+            merged["visual_profile"] = current
+        else:
+            merged[key] = value
+    return merged
+
+
 def _jacket_color_from_text(text: str) -> str:
     low = (text or "").lower()
     for word, color in COLOR_WORDS:
@@ -429,7 +616,7 @@ def _template(scan_text: str, gender: str, fields) -> str:
 def derive_render_traits(name: str, role: str, appearance: str,
                          costume_text: str, traits, voice_style: str,
                          *, fields=None, gender: str = "",
-                         height_px: int = 540) -> dict:
+                         height_px: int = 540, notes=None) -> dict:
     """Deterministic section 15.2 render_traits from script text.
 
     ``traits`` is a list of trait strings (a single string is also
@@ -472,7 +659,12 @@ def derive_render_traits(name: str, role: str, appearance: str,
     else:
         costume = "none"
     hat = "bowler" if _has_any_word(scan, _HAT_MARKERS) else "none"
+    visual_profile, profile_notes = derive_visual_profile(
+        fields=fields, scan_text=scan, who=name or "character")
+    if notes is not None:
+        notes.extend(profile_notes)
     return {
+        "visual_profile": visual_profile,
         "description": " ".join(
             p for p in (role, appearance) if p).strip(),
         "voice_hint": derive_voice_hint(
@@ -931,6 +1123,55 @@ _DIRECTIVE_PARAM_KEYS = (
 )
 
 
+# Sentences that belong to another discipline than animation. They
+# are routed to that discipline's sink with their own category, so a
+# scripted rain cue or a camera note is never reported as a missing
+# animation primitive -- and never silently becomes one.
+_NON_ACTION_ROUTES: list[tuple[str, tuple[str, ...]]] = [
+    ("camera", ("camera", "máy quay", "góc máy", "khung hình", "zoom",
+                "pan", "lia máy", "cú máy", "chuyển động camera")),
+    ("audio", ("âm thanh", "tiếng động", "hiệu ứng âm thanh", "nhạc nền",
+               "sfx", "bgm", "sound effect", "soundtrack")),
+    ("environment", ("mưa", "gió", "sương", "tuyết", "bão", "ánh sáng",
+                     "bầu trời", "mặt trời", "rain", "wind", "fog", "snow",
+                     "storm", "lighting", "sky", "sunlight")),
+]
+
+# A camera sentence whose SUBJECT is the camera is camera
+# language even when it contains a verb the action table also
+# knows ("quay" = turn). Matched on the sentence START only, so
+# "nhin vao camera" stays a character action.
+_CAMERA_SUBJECT_RE = re.compile(
+    r"^(?:the\s+)?(?:camera|máy quay|góc máy|khung hình|cú máy|"
+    r"lia máy)\b",
+    re.IGNORECASE)
+
+_NON_ACTION_REASONS = {
+    "camera": ("describes camera language, not an animation primitive; "
+               "the camera directive path owns it"),
+    "audio": ("describes sound, not an animation primitive; the audio "
+              "cue path owns it"),
+    "environment": ("describes the scene environment, not an animation "
+                    "primitive; the environment stage owns it"),
+}
+
+
+def classify_non_action_text(text: str) -> str | None:
+    """Route a scripted sentence that is not an action, or None.
+
+    Returns "camera" | "audio" | "environment". Word-boundary only,
+    so a substring can never reclassify a sentence; the caller keeps
+    the sentence verbatim in its report either way.
+    """
+    normed = _norm(text or "")
+    if not normed:
+        return None
+    for category, keywords in _NON_ACTION_ROUTES:
+        if _has_any_word(normed, keywords):
+            return category
+    return None
+
+
 def map_action_text_to_primitive(text: str) -> str | None:
     """Map one action sentence to a PRIMITIVES key, or None."""
     normed = _norm(text or "")
@@ -980,16 +1221,22 @@ def derive_action_directives(action_items, char_map=None):
             sentence = sentence.strip(" \t\r\n•*-")
             if not sentence:
                 continue
-            primitive = map_action_text_to_primitive(sentence)
+            category = classify_non_action_text(sentence)
+            if (category == "camera"
+                    and _CAMERA_SUBJECT_RE.match(_norm(sentence))):
+                primitive = None
+            else:
+                primitive = map_action_text_to_primitive(sentence)
             if primitive is None:
                 unmapped.append({
-                    "kind": "action",
+                    "kind": category or "action",
                     "action_text": sentence,
                     "scene_number": scene_number,
                     "shot_id": shot_id,
                     "source_line": source_line,
-                    "reason": ("no PRIMITIVES mapping for this "
-                               "scripted action"),
+                    "reason": (_NON_ACTION_REASONS[category] if category
+                               else ("no PRIMITIVES mapping for this "
+                                     "scripted action")),
                 })
                 continue
             directives.append(build_action_directive(
@@ -1332,6 +1579,39 @@ def _clean_render_traits(raw: dict, who: str, dropped: list) -> dict:
         text = _clean_text(raw.get(key), 200)
         if raw.get(key) is not None and text is not None:
             cleaned[key] = text
+    profile = raw.get("visual_profile")
+    if profile is not None:
+        cleaned_profile = _clean_visual_profile(profile, who, dropped)
+        if cleaned_profile:
+            cleaned["visual_profile"] = cleaned_profile
+    return cleaned
+
+
+def _clean_visual_profile(raw, who: str, dropped: list) -> dict:
+    """Validate a nested visual_profile against the closed vocabularies.
+
+    A partial profile is valid (merge_render_traits fills the rest
+    field-wise); an invalid value is dropped with a note here and then
+    filled by the species default, never drawn.
+    """
+    if not isinstance(raw, dict):
+        dropped.append(f"{who}: visual_profile was not an object; dropped")
+        return {}
+    cleaned: dict[str, Any] = {}
+    for key, allowed in (("species", SPECIES_KINDS),
+                         ("ears", EAR_SHAPES),
+                         ("tail", TAIL_SHAPES),
+                         ("horns", HORN_SHAPES),
+                         ("face_markings", FACE_MARKING_STYLES)):
+        value = raw.get(key)
+        if value is None:
+            continue
+        if isinstance(value, str) and value.strip() in allowed:
+            cleaned[key] = value.strip()
+        else:
+            dropped.append(
+                f"{who}: visual_profile.{key} {value!r} is not in "
+                f"{list(allowed)}; dropped")
     return cleaned
 
 

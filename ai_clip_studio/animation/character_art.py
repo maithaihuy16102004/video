@@ -299,7 +299,7 @@ _STICKMAN_KWARGS = (
     "height", "suit", "skin", "hat", "moustache", "moustache_style",
     "name", "template",
     "body_variant", "hair_style", "glasses", "cane", "costume", "gait",
-    "eye_count",
+    "eye_count", "ears", "tail", "horns", "face_markings",
 )
 
 
@@ -729,6 +729,10 @@ def _draw_face(draw, char, hx, hy, view, face_dx, params, ink, pal,
     else:
         draw.line([(mx - mw / 2, my), (mx + mw / 2, my)],
                   fill=ink, width=int(mouth_w))
+    # Species face markings (generic visual profile): ink strokes on
+    # the closed marking vocabulary; "none" draws nothing.
+    if view != "back":
+        _draw_face_markings(draw, char, hx, hy, r, face_dx, f, ink)
     # Moustache (v8): drawn by STYLE, from template data -- a
     # character's signature trait, never a per-story drawing.
     # toothbrush: small dark block under the nose, centred on the
@@ -898,6 +902,211 @@ def head_orientation_angle(char):
                  + pose.get("head_look", 0.0))
 
 
+def _tapered_stroke(draw, points, widths, fill):
+    """Fill a polyline as a tapering ribbon (half-width per point).
+
+    ``widths[i]`` is the FULL width at point i; points closer than a
+    pixel are skipped by the caller's own geometry, never here.
+    """
+    left, right = [], []
+    n = len(points)
+    for i, (x, y) in enumerate(points):
+        if i == 0:
+            dx, dy = points[1][0] - x, points[1][1] - y
+        elif i == n - 1:
+            dx, dy = x - points[i - 1][0], y - points[i - 1][1]
+        else:
+            dx = points[i + 1][0] - points[i - 1][0]
+            dy = points[i + 1][1] - points[i - 1][1]
+        norm = math.hypot(dx, dy) or 1.0
+        px, py = -dy / norm, dx / norm
+        half = widths[i] * 0.5
+        left.append((x + px * half, y + py * half))
+        right.append((x - px * half, y - py * half))
+    draw.polygon(left + list(reversed(right)), fill=fill)
+
+
+def _draw_tail(draw, char, hip, f, ink, view, H):
+    """Species tail behind the hips (generic visual profile).
+
+    Called BEFORE the torso so the tail sits behind the body. Every
+    shape is a FILLED, tapering silhouette anchored at the hip: a
+    uniform thin line behind the legs reads as a stray limb or a
+    walking stick, which is exactly what earlier passes produced. A
+    front view shows no tail (it is behind the body). "none" draws
+    nothing, so every human character is unchanged.
+    """
+    style = getattr(char, "tail", "none") or "none"
+    if style == "none" or view == "front":
+        return
+    hx, hy = hip
+    back = -float(f)
+    root = (hx - back * 0.01 * H, hy)
+
+    def _w(*fractions):
+        return [f * H for f in fractions]
+
+    if style == "monkey":
+        _tapered_stroke(draw, [
+            root,
+            (hx + back * 0.10 * H, hy + 0.10 * H),
+            (hx + back * 0.20 * H, hy + 0.06 * H),
+            (hx + back * 0.24 * H, hy - 0.05 * H),
+            (hx + back * 0.18 * H, hy - 0.12 * H),
+        ], _w(0.045, 0.040, 0.034, 0.026, 0.014), ink)
+    elif style == "curled":
+        _tapered_stroke(draw, [
+            root,
+            (hx + back * 0.10 * H, hy + 0.08 * H),
+            (hx + back * 0.17 * H, hy + 0.02 * H),
+            (hx + back * 0.19 * H, hy - 0.04 * H),
+        ], _w(0.044, 0.036, 0.026, 0.014), ink)
+    elif style == "bushy":
+        # A plume: the ribbon widens toward the tip instead of ending in
+        # a detached ball.
+        _tapered_stroke(draw, [
+            root,
+            (hx + back * 0.10 * H, hy + 0.07 * H),
+            (hx + back * 0.17 * H, hy + 0.10 * H),
+            (hx + back * 0.21 * H, hy + 0.07 * H),
+        ], _w(0.044, 0.058, 0.070, 0.030), ink)
+    elif style == "tuft":
+        end = (hx + back * 0.13 * H, hy + 0.09 * H)
+        _tapered_stroke(draw, [root, end], _w(0.044, 0.020), ink)
+        for dy in (-0.05, -0.01, 0.03):
+            draw.line([end, (end[0] + back * 0.06 * H,
+                             end[1] + dy * H)],
+                      fill=ink, width=max(3, int(0.012 * H)))
+    else:  # "long"
+        _tapered_stroke(draw, [
+            root,
+            (hx + back * 0.10 * H, hy + 0.09 * H),
+            (hx + back * 0.19 * H, hy + 0.03 * H),
+            (hx + back * 0.22 * H, hy - 0.05 * H),
+        ], _w(0.044, 0.036, 0.026, 0.012), ink)
+
+
+def _draw_ears(draw, char, hx, hy, r, f, view, ink):
+    """Species ears on the head silhouette (generic visual profile).
+
+    Ears sit on the UPPER sides of the head (an ear at eye level reads
+    as headphones). Profile view shows the ONE near ear; front and
+    three-quarter show both. "none" draws nothing.
+    """
+    style = getattr(char, "ears", "none") or "none"
+    if style == "none" or view == "back":
+        return
+    if view == "profile":
+        positions = (hx - f * 0.86 * r,)
+    else:
+        positions = (hx - 0.86 * r, hx + 0.86 * r)
+    for ex in positions:
+        out = f if view == "profile" else (1.0 if ex >= hx else -1.0)
+        if style == "round":
+            er = 0.20 * r
+            cy = hy - 0.30 * r
+            draw.ellipse([ex - er, cy - er, ex + er, cy + er], fill=ink)
+        elif style == "pointed":
+            draw.polygon([(ex - 0.17 * r, hy - 0.18 * r),
+                          (ex + 0.17 * r, hy - 0.06 * r),
+                          (ex + out * 0.42 * r, hy - 0.62 * r)],
+                         fill=ink)
+        elif style == "long":
+            draw.ellipse([ex - 0.10 * r, hy - 0.16 * r,
+                          ex + 0.10 * r, hy + 0.42 * r], fill=ink)
+        elif style == "wing":
+            for dy in (-0.16, 0.0, 0.16):
+                draw.line([(ex, hy + dy * r),
+                           (ex + out * 0.40 * r, hy + (dy - 0.36) * r)],
+                          fill=ink, width=max(2, int(0.009 * char.H)))
+
+
+def _draw_horns(draw, char, hx, hy, r, view, ink, f):
+    """Species horns / antlers / crown (generic visual profile).
+
+    Drawn after the hair cap so horns always read above the hair.
+    Antlers are short, thick and forked -- a thin tall fork reads as an
+    insect antenna, not an antler. "none" draws nothing.
+    """
+    style = getattr(char, "horns", "none") or "none"
+    if style == "none":
+        return
+    w = max(3, int(0.014 * char.H))
+    top = hy - r
+    if style == "crown":
+        for i in range(3):
+            cx = hx + (i - 1) * 0.34 * r
+            draw.polygon([(cx - 0.10 * r, top + 0.14 * r),
+                          (cx, top - 0.34 * r),
+                          (cx + 0.10 * r, top + 0.14 * r)], fill=ink)
+        return
+    sides = (f,) if view == "profile" else (1.0, -1.0)
+    for sgn in sides:
+        bx = hx + sgn * 0.42 * r
+        if style == "small":
+            draw.line([(bx, top + 0.10 * r),
+                       (bx + sgn * 0.08 * r, top - 0.18 * r)],
+                      fill=ink, width=w)
+        elif style == "curved":
+            draw.line([(bx, top + 0.10 * r),
+                       (bx + sgn * 0.18 * r, top - 0.14 * r),
+                       (bx + sgn * 0.38 * r, top - 0.06 * r)],
+                      fill=ink, width=w, joint="curve")
+        elif style == "antlers":
+            tip = (bx + sgn * 0.10 * r, top - 0.24 * r)
+            draw.line([(bx, top + 0.12 * r), tip], fill=ink,
+                      width=max(4, w + 1))
+            for dy in (-0.01, 0.10):
+                draw.line([(bx + sgn * 0.03 * r, top + dy * r),
+                           (bx + sgn * 0.24 * r, top + (dy - 0.14) * r)],
+                          fill=ink, width=max(3, w))
+
+
+def _draw_face_markings(draw, char, hx, hy, r, face_dx, f, ink):
+    """Species face markings (generic visual profile).
+
+    Relative to the face centre, so the markings turn with the face.
+    "none" draws nothing.
+    """
+    style = getattr(char, "face_markings", "none") or "none"
+    if style == "none":
+        return
+    H = float(char.H)
+    w = max(2, int(0.010 * H))
+    cx = hx + f * face_dx * 0.18 * r
+    sides = (f,) if face_dx > 0.8 else (1.0, -1.0)
+    if style == "brow_patch":
+        draw.line([(cx - 0.34 * r, hy - 0.42 * r),
+                   (cx + 0.30 * r, hy - 0.42 * r)],
+                  fill=ink, width=max(4, int(0.030 * H)))
+    elif style == "cheek_stripes":
+        for sgn in sides:
+            for dy in (-0.02, 0.10):
+                draw.line([(cx + sgn * 0.30 * r, hy + dy * r),
+                           (cx + sgn * 0.60 * r, hy + (dy + 0.11) * r)],
+                          fill=ink, width=w)
+    elif style == "muzzle":
+        # Nose dot just above the mouth + cheek whiskers. The old arc
+        # plus centre line read as a moustache, not a muzzle.
+        nr = 0.06 * r
+        ny = hy + 0.05 * r
+        draw.ellipse([cx - nr, ny - nr, cx + nr, ny + nr], fill=ink)
+        for sgn in sides:
+            for dy in (0.18, 0.28):
+                draw.line([(cx + sgn * 0.30 * r, hy + dy * r),
+                           (cx + sgn * 0.62 * r, hy + (dy + 0.04) * r)],
+                          fill=ink, width=max(2, w))
+    elif style == "war_paint":
+        # Diagonal stripes on the OUTER cheeks: clear of the mouth (which
+        # is central) and clear of the eyes, so the paint never reads as
+        # a moustache, a tooth gap or an under-eye shadow.
+        for sgn in sides:
+            for y0 in (0.08, 0.26):
+                draw.line([(cx + sgn * 0.44 * r, hy + y0 * r),
+                           (cx + sgn * 0.70 * r, hy + (y0 + 0.12) * r)],
+                          fill=ink, width=max(3, int(0.013 * H)))
+
+
 def draw_character_v4(draw, char, expression="neutral", view="profile",
                       palette=None, expression_blend=None,
                       gaze=None, hand_grips=None):
@@ -1002,6 +1211,9 @@ def draw_character_v4(draw, char, expression="neutral", view="profile",
         draw.line([(tuft_x, tuft_y),
                    (tuft_x + dx * H, tuft_y + dy * H)],
                   fill=ink, width=2)
+    # Species tail: BEHIND the body, so it is drawn before the legs and
+    # torso ("none" draws nothing).
+    _draw_tail(draw, char, hip_d, f, ink, view, H)
 
     # --- legs: clean uniform lines + flat structured feet --------------
     # F1: the far limbs are LIGHTENED ink, not darkened. The old
@@ -1132,7 +1344,9 @@ def draw_character_v4(draw, char, expression="neutral", view="profile",
         _draw_hair(draw, char, hx, hy, view, ink, part="back")
     draw.ellipse([hx - r, hy - r, hx + r, hy + r], fill=face_fill,
                  outline=ink, width=int(out_w))
+    _draw_ears(draw, char, hx, hy, r, f, view, ink)
     _draw_hair(draw, char, hx, hy, view, ink, part="cap")
+    _draw_horns(draw, char, hx, hy, r, view, ink, f)
     # Bowler hat (Lustig): brim line + dome, same ink, same language.
     _hat = getattr(char, "hat", None)
     if _hat and _hat != "none":
