@@ -38,3 +38,7 @@ user_prompt_*.txt
 
 
 /memes/
+
+# Three.js 3D backend build output (T8): bundle + smoke frames
+ai_clip_studio/motioncanvas25d/World25D.js
+ai_clip_studio/motioncanvas25d/frames_smoke/

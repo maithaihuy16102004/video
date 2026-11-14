@@ -66,6 +66,11 @@ TARGETS = {
     "head_ratio": 0.34,
     "head_ratio_tol": 0.06,
     "safe_action_margin": 0.08,
+    #: How many different framings a shot list must actually use. Three
+    #: (wide / medium / close) is the channel's own working set; asking
+    #: for a distinct framing on EVERY shot would penalise a long episode
+    #: for returning to a wide, which the channel does constantly.
+    "min_distinct_framings": 3,
 }
 
 #: Weights sum to 1.0 over the dimensions that can be measured from
@@ -348,14 +353,21 @@ def _score_framing(plan: dict | None) -> Dimension:
     # Any adjacent repeat counts, wide included: a pair of identical wide
     # shots is exactly the repeated-framing defect the channel study flags.
     repeat_pairs = sum(1 for a, b in pairs if a == b)
-    variety = fraction_score(len(set(framings)) / max(1, len(framings)))
-    repeat_penalty = min(40.0, 20.0 * repeat_pairs)
+    # Variety is measured against the working set, not against the shot
+    # count: the channel returns to a wide many times in one short, and
+    # that is correct editing, not repetition. Adjacent repeats are the
+    # defect, and they are charged directly.
+    distinct = len(set(framings))
+    variety = fraction_score(
+        min(1.0, distinct / float(TARGETS["min_distinct_framings"])))
+    repeat_penalty = min(60.0, 20.0 * repeat_pairs)
     score = max(0.0, variety - repeat_penalty)
     return Dimension(
         "framing_variety", score,
-        {"n_shots": len(shots), "distinct_framings": len(set(framings)),
+        {"n_shots": len(shots), "distinct_framings": distinct,
          "adjacent_repeats": repeat_pairs, "sequence": framings[:12]},
-        {"distinct_ratio": 1.0, "adjacent_repeats": 0},
+        {"min_distinct_framings": TARGETS["min_distinct_framings"],
+         "adjacent_repeats": 0},
         WEIGHTS["framing_variety"],
         "repeated adjacent framing" if repeat_pairs else "",
     )

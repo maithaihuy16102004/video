@@ -96,6 +96,22 @@ class PlanDimensionsTest(unittest.TestCase):
         self.assertIsNone(dim.score)
         self.assertIn("plan", dim.detail)
 
+    def test_reusing_a_wide_later_is_not_a_defect(self):
+        # The channel returns to a wide repeatedly in one short; only an
+        # ADJACENT repeat is the framing defect.
+        seq = ["establishing", "medium", "close_up", "medium",
+               "establishing", "close_up", "establishing", "medium",
+               "close_up"]
+        dim = rp._score_framing({"shots": [{"index": i, "framing": f}
+                                            for i, f in enumerate(seq)]})
+        self.assertEqual(dim.score, 100.0)
+        self.assertEqual(dim.measured["adjacent_repeats"], 0)
+
+    def test_single_framing_for_the_whole_episode_is_penalised(self):
+        dim = rp._score_framing({"shots": [{"index": i, "framing": "wide"}
+                                            for i in range(5)]})
+        self.assertLess(dim.score, 40.0)
+
     def test_repeated_adjacent_framing_costs_points(self):
         plan = {"shots": [{"index": i, "framing": "wide"} for i in range(4)]}
         dim = rp._score_framing(plan)
