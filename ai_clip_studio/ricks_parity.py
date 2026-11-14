@@ -400,23 +400,37 @@ def _score_characters(plan: dict | None) -> Dimension:
     ok_shots = 0
     insights = []
     for s in shots:
-        chars = s.get("characters") or []
+        # Only characters actually IN the frame count: a close-up that
+        # pushes the rest of the cast out of shot is correct framing, not
+        # a safe-area violation.
+        chars = [c for c in (s.get("characters") or [])
+                 if c.get("in_frame", True)]
         if not chars:
-            insights.append({"shot": s.get("index"), "issue": "no character"})
+            insights.append({"shot": s.get("index"), "issue": "no character in frame"})
             continue
         head_ok = all(abs(float(c.get("head_ratio", TARGETS["head_ratio"]))
                           - TARGETS["head_ratio"]) <= tol for c in chars)
         inside = True
+        w, h = TARGETS["width"], TARGETS["height"]
+        m = TARGETS["safe_action_margin"]
         for c in chars:
             box = c.get("bbox")
             if not box:
                 continue
-            w, h = TARGETS["width"], TARGETS["height"]
-            m = TARGETS["safe_action_margin"]
-            x0, y0, x1, y1 = box
-            if x0 < w * m or y0 < h * m or x1 > w * (1 - m) or y1 > h * (1 - m):
+            x0, y0, x1, _y1 = box
+            cx = (x0 + x1) / 2.0
+            # The HEAD is what must stay inside the action area: its top
+            # edge, and its horizontal centre. A tight shot cuts the body
+            # at the bottom by design, so the bottom edge is not checked.
+            if y0 < h * m:
                 inside = False
-                insights.append({"shot": s.get("index"), "issue": "outside safe area",
+                insights.append({"shot": s.get("index"),
+                                 "issue": "head cropped at the top safe line",
+                                 "bbox": box})
+            elif cx < w * m or cx > w * (1 - m):
+                inside = False
+                insights.append({"shot": s.get("index"),
+                                 "issue": "subject centre outside the action area",
                                  "bbox": box})
         if head_ok and inside:
             ok_shots += 1

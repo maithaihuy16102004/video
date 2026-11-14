@@ -86,8 +86,9 @@ from .camera_planner import (
     ANGLES, CAMERA_MOVEMENT, FULL_BODY_SHOT_TYPES,
     SHOT_TYPES as CAMERA_SHOT_TYPES, SHOT_SCALE as CAMERA_SHOT_SCALE,
     CameraPlanner, anchor_focus_for_shot, apply_camera_anchored,
-    apply_exposure_floor, apply_micro_dolly,
-    build_camera_accounting, normalize_movement,
+    apply_gain, apply_micro_dolly, dolly_rect,
+    measured_exposure_gain, normalize_movement,
+    build_camera_accounting,
     resolve_viewpoint_angle, static_directive_for_shot,
     validation_for_camera, viewpoint_for_shot,
 )
@@ -105,7 +106,9 @@ from .prop_system import (
     PropStateMachine, SemanticPropTracker, geometry_for_prop)
 from .semantic_contracts import PropLocation
 from .planner_fallback import ACTION_LEAD_SECONDS
-from .subtitles import draw_phrase, phrase_windows, split_subtitle
+from .subtitles import (
+    caption_metrics, draw_phrase, phrase_windows, split_subtitle,
+)
 
 W, H = 1920, 1080
 FPS = 24
@@ -229,6 +232,20 @@ def _parse_seconds(value, default=None):
         return float(text)
     except (TypeError, ValueError):
         return default
+
+
+def _map_rect_point(pt, rect, out_size):
+    """Map a point from a source rect into the rect's output frame size.
+
+    Used to report character boxes in FINAL frame coordinates after the
+    frozen crop and the micro-dolly, using the same rects the renderer
+    applied (never a re-derivation).
+    """
+    x0, y0, x1, y1 = rect
+    sx = out_size[0] / max(1e-6, float(x1) - float(x0))
+    sy = out_size[1] / max(1e-6, float(y1) - float(y0))
+    return ((float(pt[0]) - float(x0)) * sx,
+            (float(pt[1]) - float(y0)) * sy)
 
 
 def _normalize_camera_movement(value) -> str:
@@ -5735,6 +5752,7 @@ def _render_shot(args: dict) -> dict:
         _executed_movement = "DOLLY_IN"
         _auto_drift = True
     _exposure_gains: list[float] = []
+    _shot_gain: float | None = None
     for fi in range(n_frames):
         t = (duration / 2.0) if still_only else fi / FPS
         for n, fn in fns.items():
@@ -5865,8 +5883,13 @@ def _render_shot(args: dict) -> dict:
             _u = 0.0 if n_frames <= 1 else fi / float(n_frames - 1)
             img = apply_micro_dolly(img, _u, zoom=_dolly["zoom"],
                                     pan=_dolly["pan"], out=_dolly["out"])
-        img, _exp_gain = apply_exposure_floor(img)
-        _exposure_gains.append(_exp_gain)
+        # One gain per shot, measured on the first finished frame: the
+        # dolly/exposure ops happen before captions, and a per-frame gain
+        # would track the moving characters as a slow brightness flicker.
+        if _shot_gain is None:
+            _shot_gain = measured_exposure_gain(img)
+            _exposure_gains.append(_shot_gain)
+        img = apply_gain(img, _shot_gain)
         # ---- subtitles last, always at fixed 64 px --------------------
         if windows and not _defer_framing:
             d = ImageDraw.Draw(img, "RGBA")
@@ -5973,6 +5996,54 @@ def _render_shot(args: dict) -> dict:
     # renders with eye-level geometry and a recorded limitation
     # (the frame tilt is not applied: the rotation overscan needed
     # to fill the corners would break the F2 head-size cap).
+    # ---- T3/T4: parity telemetry in FINAL frame coordinates --------
+    # The scorecard cannot judge character framing or captions from a
+    # plan that does not carry them, so the renderer reports what it
+    # actually drew. Boxes are mapped through the SAME frozen crop and
+    # micro-dolly rects the frames went through, at mid-shot.
+    _parity_boxes: list[dict] = []
+    _parity_captions: list[dict] = []
+    if names and _frozen is not None:
+        _crop_rect = None
+        if float(safe_shot["camera"]["scale"]) > 1.0:
+            _crop_rect = _frozen_crop["crop_rect"]
+        _dolly_apply = _dolly is not None and not _defer_framing
+        for _bn in names:
+            _b = _standing_box(_bn, "full")
+            _p0 = (_b["cx"] - _b["half_w"], _b["head_y"])
+            _p1 = (_b["cx"] + _b["half_w"], _b["foot_y"])
+            if _crop_rect is not None:
+                _p0 = _map_rect_point(_p0, _crop_rect, (W, H))
+                _p1 = _map_rect_point(_p1, _crop_rect, (W, H))
+            if _dolly_apply:
+                _dr = dolly_rect((W, H), 0.5, zoom=_dolly["zoom"],
+                                 pan=_dolly["pan"], out=_dolly["out"])
+                _p0 = _map_rect_point(_p0, _dr, (W, H))
+                _p1 = _map_rect_point(_p1, _dr, (W, H))
+            _bh = float(char_heights.get(_bn) or getattr(chars[_bn], "H", 0.0))
+            _hr = float(getattr(chars[_bn], "head_r", 0.0))
+            _x0, _x1 = sorted((_p0[0], _p1[0]))
+            _y0, _y1 = sorted((_p0[1], _p1[1]))
+            _parity_boxes.append({
+                "name": _bn,
+                "bbox": [round(_x0, 1), round(_y0, 1),
+                         round(_x1, 1), round(_y1, 1)],
+                # head DIAMETER over body height: the 0.34 identity lock
+                # is a diameter ratio, head_r is a radius.
+                "head_ratio": round(2.0 * _hr / _bh, 4) if _bh else None,
+                # A close-up legitimately pushes the other characters out
+                # of frame; measuring them as "not in the safe area"
+                # would be a false failure.
+                "in_frame": bool(_x1 > 0 and _y1 > 0
+                                 and _x0 < W and _y0 < H),
+            })
+    for _cw in windows or []:
+        if not isinstance(_cw, dict) or not _cw.get("phrase"):
+            continue
+        try:
+            _parity_captions.append(caption_metrics(_cw["phrase"]))
+        except Exception:  # noqa: BLE001 - metrics never fail a render
+            continue
     _movement_req = normalize_movement(shot.get("camera_movement"))
     _movement_limitation = None
     if _movement_req != "STATIC" and _executed_movement == "STATIC":
@@ -6032,6 +6103,8 @@ def _render_shot(args: dict) -> dict:
         "camera_movement_executed": _executed_movement,
         "camera_auto_drift": _auto_drift,
         "exposure_gain_max": round(max(_exposure_gains or [1.0]), 4),
+        "character_boxes": _parity_boxes,
+        "captions": _parity_captions,
         "movement_limitation": _movement_limitation,
         "camera_angle": _angle,
         "camera_angle_requested": _angle_requested,

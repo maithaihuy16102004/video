@@ -1404,6 +1404,25 @@ def apply_camera_anchored(img, frozen_crop):
     return img.crop(box).resize(img.size, Image.LANCZOS)
 
 
+def dolly_rect(frame_size, u, *, zoom=0.045, pan=0.0, out=False):
+    """The source rect :func:`apply_micro_dolly` crops for progress ``u``.
+
+    Exposed separately so reporting and measurement (character boxes in
+    final frame coordinates) use the SAME geometry the renderer applies,
+    instead of re-deriving it and drifting.
+    """
+    w, h = frame_size
+    progress = (1.0 - u) if out else u
+    progress = max(0.0, min(1.0, progress))
+    scale = 1.0 + max(0.0, float(zoom)) * progress
+    bw, bh = w / scale, h / scale
+    cx = w * 0.5 + float(pan) * w * (max(0.0, min(1.0, u)) - 0.5)
+    cy = h * 0.5
+    x0 = max(0.0, min(w - bw, cx - bw / 2.0))
+    y0 = max(0.0, min(h - bh, cy - bh / 2.0))
+    return (x0, y0, x0 + bw, y0 + bh)
+
+
 def apply_micro_dolly(img, u, *, zoom=0.045, pan=0.0, out=False):
     """Image-level micro-dolly for a shot that has no action to move it.
 
@@ -1418,19 +1437,38 @@ def apply_micro_dolly(img, u, *, zoom=0.045, pan=0.0, out=False):
     the scene camera stays fixed (no parallax is invented), so it can be
     applied safely after cropping, occlusion and the split composite.
     """
-    w, h = img.size
-    progress = (1.0 - u) if out else u
-    scale = 1.0 + max(0.0, float(zoom)) * max(0.0, min(1.0, progress))
-    bw, bh = w / scale, h / scale
-    cx = w * 0.5 + float(pan) * w * (max(0.0, min(1.0, u)) - 0.5)
-    cy = h * 0.5
-    x0 = int(max(0.0, min(w - bw, cx - bw / 2.0)))
-    y0 = int(max(0.0, min(h - bh, cy - bh / 2.0)))
-    x1 = int(min(w, x0 + bw))
-    y1 = int(min(h, y0 + bh))
-    if x1 - x0 < 8 or y1 - y0 < 8:
+    x0, y0, x1, y1 = dolly_rect(img.size, u, zoom=zoom, pan=pan, out=out)
+    box = (int(x0), int(y0), int(x1), int(y1))
+    if box[2] - box[0] < 8 or box[3] - box[1] < 8:
         return img
-    return img.crop((x0, y0, x1, y1)).resize(img.size, Image.LANCZOS)
+    return img.crop(box).resize(img.size, Image.LANCZOS)
+
+
+def measured_exposure_gain(img, floor=0.40, max_gain=1.45, min_gain=1.02):
+    """The gain :func:`apply_exposure_floor` would use for this frame.
+
+    Separated so a shot can measure the gain ONCE (on its first frame)
+    and apply that constant to every frame: recomputing per frame makes
+    the brightness follow the moving characters and reads as a slow
+    flicker, which is worse than the dark shot it was fixing.
+    """
+    from PIL import ImageStat
+
+    gray = img.convert("L")
+    mean = ImageStat.Stat(gray).mean[0] / 255.0
+    if mean >= floor or mean <= 0.0:
+        return 1.0
+    gain = min(float(max_gain), float(floor) / mean)
+    return 1.0 if gain < min_gain else gain
+
+
+def apply_gain(img, gain):
+    """Apply a linear RGB gain of ``gain`` (identity at 1.0)."""
+    gain = float(gain)
+    if gain <= 1.0001:
+        return img
+    lut = [min(255, int(round(i * gain))) for i in range(256)]
+    return img.point(lut * 3)
 
 
 def apply_exposure_floor(img, floor=0.40, max_gain=1.45, min_gain=1.02):
@@ -1447,17 +1485,9 @@ def apply_exposure_floor(img, floor=0.40, max_gain=1.45, min_gain=1.02):
     drawn last, so the decoded MP4 reads a few thousandths lower than the
     frame the gain was computed from.
     """
-    from PIL import ImageStat
-
-    gray = img.convert("L")
-    mean = ImageStat.Stat(gray).mean[0] / 255.0
-    if mean >= floor or mean <= 0.0:
-        return img, 1.0
-    gain = min(float(max_gain), float(floor) / mean)
-    if gain < min_gain:
-        return img, 1.0
-    lut = [min(255, int(round(i * gain))) for i in range(256)]
-    return img.point(lut * 3), gain
+    gain = measured_exposure_gain(img, floor=floor, max_gain=max_gain,
+                                  min_gain=min_gain)
+    return apply_gain(img, gain), gain
 
 
 def validate_composition(shot, focus_xy, subjects, others=None,

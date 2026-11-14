@@ -205,7 +205,7 @@ def draw_phrase(draw, phrase, width=1920, height=1080, font_px=FONT_PX,
     lines = _wrap_lines(phrase, font)
     line_h = int(font_px * 1.22)
     total_h = len(lines) * line_h
-    y0 = (height - 40 - total_h) if y is None else y
+    y0 = _caption_y0(height, total_h) if y is None else y
     for i, ln in enumerate(lines):
         w = font.getlength(ln)
         x = (width - w) / 2.0
@@ -216,6 +216,43 @@ def draw_phrase(draw, phrase, width=1920, height=1080, font_px=FONT_PX,
         draw.text((x, yy), ln, font=font, fill=fill)
     return ((width - font.getlength(lines[0])) / 2.0 if lines else 0.0,
             y0, font_px)
+
+
+#: The caption block's bottom edge, as a fraction of frame height. The
+#: project's own safe-title rule keeps text inside the inner 80% of the
+#: frame (youtube_16x9.json: safe_title_margin_pct 10); 0.88 leaves that
+#: margin visible on a TV, and a phone crop of a 16:9 upload.
+CAPTION_SAFE_BOTTOM = 0.88
+
+
+def _caption_y0(height, total_h):
+    """Top of the caption block: bottom pinned to the safe-title line."""
+    safe = int(round(float(height) * CAPTION_SAFE_BOTTOM)) - int(total_h)
+    return max(0, min(int(height) - 40 - int(total_h), safe))
+
+
+def caption_metrics(phrase, width=1920, height=1080, font_px=FONT_PX):
+    """What :func:`draw_phrase` will put on screen, without drawing it.
+
+    The parity scorecard needs the caption numbers (font size, line
+    count, longest line, vertical position) and they must come from the
+    same wrapping the renderer uses, not from a second implementation.
+    ``y_frac`` is the TOP line's centre as a fraction of the frame
+    height, which is what a reviewer sees.
+    """
+    font = get_font(font_px)
+    lines = _wrap_lines(phrase, font)
+    line_h = int(font_px * 1.22)
+    total_h = len(lines) * line_h
+    y0 = _caption_y0(height, total_h)
+    return {
+        "font_px": int(font_px),
+        "lines": len(lines),
+        "max_chars": max((len(ln) for ln in lines), default=0),
+        "y_frac": round((y0 + line_h / 2.0) / float(height), 4),
+        "y_px": int(y0),
+        "text": phrase,
+    }
 
 
 def draw_subtitle(draw, text, width=1920, height=1080, font_px=FONT_PX):
