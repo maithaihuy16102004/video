@@ -404,7 +404,7 @@ Known environment notes (verified 2026-11-12):
   RapidOCR is the proven default on this VM.
 - PyAV 19.0.2 breaks faster-whisper 1.2.1's file-path API; `asr.py`
   passes a numpy array instead (same workaround as
-  `acceptance_loop/transcribe_check.py`).
+  `agent/tools/transcribe_check.py`).
 - FFmpeg 8.1.2 on this VM exposes `sidechaincompress`, not
   `sidechaincompressor`; the mix builder probes for either.
 - `pyannote.audio` is not installed: automatic diarization is

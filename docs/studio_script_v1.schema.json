@@ -508,6 +508,12 @@
         },
         "weather": {
           "type": "string"
+        },
+        "landmarks": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         }
       },
       "required": [
