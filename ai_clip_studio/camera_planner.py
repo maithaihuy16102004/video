@@ -17,7 +17,10 @@ Shot scales (crop factor vs. the full frame):
   medium / tracking / over_the_shoulder / shot_reverse_shot /
   medium_close_up  1.6
   close_up / reaction  2.6
-  object_insert / extreme_close_up  3.4
+  extreme_close_up  3.4
+  object_insert  5.0  (hero prop insert: the prop must occupy a
+    readable share of the frame; safe_frame steps the ladder down
+    when the prop+hand box does not fit at 5.0)
 """
 from __future__ import annotations
 
@@ -58,7 +61,7 @@ SHOT_SCALE = {
     "extreme_close_up": 3.4,
     "over_the_shoulder": 1.6,
     "reaction": 2.6,
-    "object_insert": 3.4,
+    "object_insert": 5.0,
     "tracking": 1.6,
     "shot_reverse_shot": 1.6,
     "medium_close_up": 1.6,
@@ -422,10 +425,53 @@ def _fix_partial_others(shot, focus, subjects, others, frame_w, frame_h):
     fully OUT by shifting the crop away from it while the subjects
     still fit. Repeats until no partial other remains or no shift
     helps (then the caller zooms out a step).
+
+    Round 8 (R2-C2): head framings (close_up / ECU / SRS / MCU)
+    try (b) FIRST. Pull-in-first re-centred the crop on the union
+    of subject + bystander, so a medium close-up rendered as a
+    wide two-shot (R7 shot #3: 148 px heads, establishing scale)
+    whenever clearance had pushed the bystander aside. A head
+    framing's subject is one character; the bystander may be
+    excluded outright. Pull-in remains the fallback when the
+    other cannot be pushed out while the subjects still fit.
     """
     scale = float(shot["camera"]["scale"])
     cw, ch = frame_w / scale, frame_h / scale
     notes = []
+    prefer_out = shot.get("shot_type") in _HEAD_FRAMING_TYPES
+
+    def _pull_in(other):
+        boxes = list(subjects) + [other]
+        need_l = min(s["cx"] - s["half_w"] for s in boxes) - 0.02 * cw - 2
+        need_r = max(s["cx"] + s["half_w"] for s in boxes) + 0.02 * cw + 2
+        need_t = min(s["head_y"] for s in boxes) - 0.05 * ch - 2
+        need_b = max(s["foot_y"] for s in boxes) + 0.02 * ch + 2
+        if need_r - need_l <= cw and need_b - need_t <= ch:
+            new_left = _fit_shift((need_l + need_r - cw) / 2.0,
+                                  need_l, need_r, cw, frame_w)
+            new_top = _fit_shift((need_t + need_b - ch) / 2.0,
+                                 need_t, need_b, ch, frame_h)
+            return (new_left + cw / 2.0, new_top + ch / 2.0)
+        return None
+
+    def _push_out(other, _focus):
+        rect = _crop_rect(scale, _focus, frame_w, frame_h)
+        l, t, r, b = rect
+        sl = other["cx"] - other["half_w"]
+        sr = other["cx"] + other["half_w"]
+        st, sb = other["head_y"], other["foot_y"]
+        for dx, dy in ((sr - l + 2.0, 0.0), (sl - r - 2.0, 0.0),
+                       (0.0, st - b - 2.0), (0.0, sb - t + 2.0)):
+            cand = (_focus[0] + dx, _focus[1] + dy)
+            crect = _crop_rect(scale, cand, frame_w, frame_h)
+            if _other_status(other, crect) != "out":
+                continue
+            iss, _ = CameraPlanner.validate_framing(
+                shot, cand, subjects, frame_w, frame_h)
+            if not iss:
+                return cand
+        return None
+
     for _round in range(4):
         rect = _crop_rect(scale, focus, frame_w, frame_h)
         partials = [o for o in others
@@ -439,44 +485,21 @@ def _fix_partial_others(shot, focus, subjects, others, frame_w, frame_h):
         # boundary and float error flips the in/out test back to
         # partial on the next round (the v7 shot test caught this --
         # 4 identical shifts, still partial).
-        boxes = list(subjects) + [other]
-        need_l = min(s["cx"] - s["half_w"] for s in boxes) - 0.02 * cw - 2
-        need_r = max(s["cx"] + s["half_w"] for s in boxes) + 0.02 * cw + 2
-        need_t = min(s["head_y"] for s in boxes) - 0.05 * ch - 2
-        need_b = max(s["foot_y"] for s in boxes) + 0.02 * ch + 2
-        if need_r - need_l <= cw and need_b - need_t <= ch:
-            # Centre the union (two-shot balance), clamped so the
-            # need window still fits — the old clamp parked the
-            # union at the crop's left/top edge.
-            new_left = _fit_shift((need_l + need_r - cw) / 2.0,
-                                  need_l, need_r, cw, frame_w)
-            new_top = _fit_shift((need_t + need_b - ch) / 2.0,
-                                 need_t, need_b, ch, frame_h)
-            focus = (new_left + cw / 2.0, new_top + ch / 2.0)
-            notes.append("shifted crop to include a partially-overlapped "
-                         "character fully (head-safe)")
-            continue
-        # (b) push fully OUT: minimal shift in each of 4 directions
-        # (+2 px clear of the edge, for the same float-boundary
-        # reason as branch (a)); accept the first that keeps the
-        # subjects fitting and puts this other fully out.
-        l, t, r, b = rect
-        sl = other["cx"] - other["half_w"]
-        sr = other["cx"] + other["half_w"]
-        st, sb = other["head_y"], other["foot_y"]
+        attempts = ((_push_out, _pull_in) if prefer_out
+                    else (_pull_in, _push_out))
         fixed = False
-        for dx, dy in ((sr - l + 2.0, 0.0), (sl - r - 2.0, 0.0),
-                       (0.0, st - b - 2.0), (0.0, sb - t + 2.0)):
-            cand = (focus[0] + dx, focus[1] + dy)
-            crect = _crop_rect(scale, cand, frame_w, frame_h)
-            if _other_status(other, crect) != "out":
-                continue
-            iss, _ = CameraPlanner.validate_framing(
-                shot, cand, subjects, frame_w, frame_h)
-            if not iss:
+        for _attempt in attempts:
+            if _attempt is _push_out:
+                cand = _push_out(other, focus)
+                note = ("shifted crop to push a partially-overlapped "
+                        "character fully out of frame (head-safe)")
+            else:
+                cand = _pull_in(other)
+                note = ("shifted crop to include a partially-overlapped "
+                        "character fully (head-safe)")
+            if cand is not None:
                 focus = cand
-                notes.append("shifted crop to push a partially-overlapped "
-                             "character fully out of frame (head-safe)")
+                notes.append(note)
                 fixed = True
                 break
         if not fixed:
@@ -651,9 +674,11 @@ class CameraPlanner:
 
         safe_frame fixes both, in order, never by faking the scale:
         1. Try the planned scale. If the intended subjects do not fit
-           it, step DOWN the scale ladder (3.4 -> 2.6 -> 1.6 -> 1.0)
-           until they do. An insert that must show the whole pick-up
-           becomes a close-up; a reaction that cannot hold two people
+           it, step DOWN the scale ladder (5.0 -> 3.4 -> 2.6 -> 1.6
+           -> 1.0; the 5.0 rung is reachable only by shots planned
+           at 5.0, i.e. object_insert hero framing) until they do.
+           An insert that must show the whole pick-up becomes a
+           close-up; a reaction that cannot hold two people
            becomes a medium. The shot TYPE is kept (so the plan still
            reads as an insert / reaction) but the applied scale is
            recorded on the returned shot dict.
@@ -713,7 +738,8 @@ class CameraPlanner:
         if max_scale is not None:
             planned_scale = min(planned_scale,
                                 max(1.0, float(max_scale)))
-        ladder = [s for s in (3.4, 2.6, 1.6, 1.0) if s <= planned_scale + 1e-9]
+        ladder = [s for s in (5.0, 3.4, 2.6, 1.6, 1.0)
+                  if s <= planned_scale + 1e-9]
         if not ladder:
             ladder = [1.0]
         notes = []
@@ -929,6 +955,24 @@ _ANGLE_ELEV_DEG = {
     "over_shoulder": _BASE_ELEV_DEG,
 }
 
+# Round 11 (R10-D1): an establishing shot must show the place AND
+# the sky. A steep requested angle (high_angle 32 deg, birds_eye
+# 62 deg) pitches the whole frustum below the horizon -- Loop-01
+# #1/#5 rendered 0 px of sky -- so the EXECUTED elevation of an
+# establishing shot is capped here. 15 deg keeps a ~260 px sky
+# band with the clouds fully in frame (cap probe
+# r11_cap_probe.py: 18 deg clips cloud tops, 32 deg shows no sky
+# at all) while still reading elevated. The cap is a shot-function
+# policy applied by the renderer (like the map-board frontal
+# rule); viewpoint_for_shot itself stays a pure resolver with an
+# explicit elevation override.
+ESTABLISHING_MAX_ELEV_DEG = 15.0
+
+
+def elevation_for_angle(angle):
+    """Table elevation (degrees) for an angle name, else the base."""
+    return _ANGLE_ELEV_DEG.get(angle, _BASE_ELEV_DEG)
+
 # Azimuth (degrees) for the two-sided framings.
 _OTS_AZIMUTH_DEG = 28.0
 _SRS_AZIMUTH_DEG = 18.0
@@ -1006,7 +1050,8 @@ def _spherical_offset(azimuth_deg, elevation_deg,
 
 def viewpoint_for_shot(shot_type="medium", camera_angle=None,
                        subject_pos=(0.0, 1.2, 0.0), counterpart_x=None,
-                       srs_side=0, radius_scale=1.0):
+                       srs_side=0, radius_scale=1.0,
+                       azimuth_side=None, elevation_deg=None):
     """Resolve a shot's REAL viewpoint: a PerspectiveCamera.
 
     ``subject_pos`` is the world target point (usually the subject's
@@ -1017,11 +1062,26 @@ def viewpoint_for_shot(shot_type="medium", camera_angle=None,
     angle always gets that angle's camera — never silently the fixed
     legacy camera; only the eye_level default reproduces it exactly.
 
+    ``azimuth_side`` (round-6 staging variation): -2/-1/+1/+2
+    swings an otherwise frontal (azimuth 0) viewpoint by that
+    many SRS steps (18 deg each) to that side -- a real
+    viewpoint change by cut, fixed within the shot. It never
+    overrides an OTS/SRS azimuth, and None (default)
+    reproduces the exact legacy geometry.
+
     ``radius_scale`` (scale-variant rule): multiplies the viewpoint
     radius, dollying the camera out along the same azimuth/elevation
     so a scaled (taller) subject's standing box fits the frame. 1.0
     (default) reproduces the exact legacy geometry; non-positive or
     non-finite values fall back to 1.0.
+
+    ``elevation_deg`` (round-11 establishing cap): an explicit
+    elevation in degrees that replaces the angle table's value
+    (e.g. the renderer capping a steep establishing angle so the
+    sky stays in frame). None (default) uses the table; a
+    non-finite value is ignored. An override disables the
+    eye_level legacy-exact branch below, since the geometry is
+    deliberately not the legacy one.
 
     Returns a PerspectiveCamera (fov 46, aspect 16:9) positioned on
     the viewpoint sphere around ``subject_pos``. Establishing shots
@@ -1031,6 +1091,16 @@ def viewpoint_for_shot(shot_type="medium", camera_angle=None,
     angle = resolve_viewpoint_angle(shot_type, camera_angle)
     tx, ty, tz = (float(v) for v in subject_pos)
     elev = _ANGLE_ELEV_DEG.get(angle, _BASE_ELEV_DEG)
+    try:
+        _elev_override = float(elevation_deg) \
+            if elevation_deg is not None else None
+    except (TypeError, ValueError):
+        _elev_override = None
+    if _elev_override is not None and _elev_override == _elev_override \
+            and _elev_override not in (float("inf"), float("-inf")):
+        elev = _elev_override
+    else:
+        _elev_override = None
     try:
         rscale = float(radius_scale)
     except (TypeError, ValueError):
@@ -1049,8 +1119,10 @@ def viewpoint_for_shot(shot_type="medium", camera_angle=None,
         azimuth = side * _OTS_AZIMUTH_DEG
     elif shot_type == "shot_reverse_shot":
         azimuth = _SRS_AZIMUTH_DEG if int(srs_side or 0) else -_SRS_AZIMUTH_DEG
+    if azimuth_side in (-2, -1, 1, 2) and azimuth == 0.0:
+        azimuth = float(azimuth_side) * _SRS_AZIMUTH_DEG
     if angle == "eye_level" and azimuth == 0.0 \
-            and radius == _VIEWPOINT_RADIUS:
+            and radius == _VIEWPOINT_RADIUS and _elev_override is None:
         # Exact legacy offset: default shots stay pixel-identical.
         off = _EYE_OFFSET
     else:
@@ -2019,7 +2091,8 @@ def plan_shot(directive, scene=None, prev_entry=None, camera_mode=None,
         srs_side = 0
     camera = viewpoint_for_shot(
         shot_type, shot.get("camera_angle"), subject_pos,
-        counterpart_x=counterpart_x, srs_side=srs_side)
+        counterpart_x=counterpart_x, srs_side=srs_side,
+        azimuth_side=shot.get("viewpoint_azimuth_side"))
     azimuth, elevation, radius = _pose_angles(camera)
     crop_scale = SHOT_SCALE.get(shot_type, 1.6)
     if shot_type in FULL_BODY_SHOT_TYPES:

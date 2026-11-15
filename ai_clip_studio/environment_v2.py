@@ -74,11 +74,15 @@ from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 from .lighting import (
     energy_glow_to_point_light,
+    interior_sky_response,
+    key_factor_for,
     light_for,
     point_light_gain,
     point_light_spec_to_light,
+    tod_surface_response,
     rig_for,
     shade_with_points,
+    cast_shadow_spec,
     shadow_ellipse_spec,
 )
 from .paint_textures import (
@@ -274,12 +278,23 @@ ARCHETYPES = {
         "facade_colors": [(74, 66, 60), (62, 56, 52)],
         "roof_color": (52, 46, 42),
         "ground_color": (70, 62, 56),
-        "ground_kind": "dark_stone",
+        "ground_kind": "cave_rock",
         # A cave is dark by nature: it overrides the sky palette
         # regardless of time of day, and is exempt from the day
         # luminance floor (see test_lighting / proof notes).
         "light_override": {"sky_top": (26, 24, 22),
                            "sky_bottom": (52, 48, 44)},
+        # The standing torch is a real light source (round 2,
+        # scene richness): a warm point light AT the flame
+        # element's centre in _build_cave (-1.8, 1.75, -7.8). A
+        # test pins the two together so the spec cannot drift
+        # from the builder. The falloff pools warm light on the
+        # back wall and floor near the torch; without it the
+        # cave's Lambert rig had nothing to shade with.
+        "point_lights": [{"id": "torch_glow",
+                          "position": (-1.8, 1.75, -7.8),
+                          "intensity": 1.0, "falloff_k": 0.08,
+                          "color": (255, 170, 60)}],
         "builder": "_build_cave",
     },
     "BARRACKS": {
@@ -342,6 +357,16 @@ ARCHETYPES = {
         "roof_color": (120, 100, 80),
         "ground_color": (146, 118, 84),
         "ground_kind": "wood_floor",
+        # The floor lamp is a real light source (round 2, scene
+        # richness): a soft warm point light AT the lamp shade
+        # element's centre in _build_interior (-2.5, 1.85, -2.0).
+        # A test pins the two together so the spec cannot drift
+        # from the builder. Intensity stays low (0.8): the room
+        # is daylit, so the lamp is a warm pool, not a second sun.
+        "point_lights": [{"id": "lamp_glow",
+                          "position": (-2.5, 1.85, -2.0),
+                          "intensity": 0.8, "falloff_k": 0.08,
+                          "color": (255, 220, 140)}],
         "builder": "_build_interior",
     },
     "COUNTRYSIDE_ROAD": {
@@ -880,20 +905,298 @@ def _bush(prefix, rng, x, z, layer="MG", scale=1.0,
 
 def _hedge(prefix, x, z, length, layer="MG", height=0.9,
            leaf_color=(96, 110, 66)):
-    """A clipped hedge: box core on the ground + blob top dressing
-    overlapping it (no floating top)."""
-    return [
+    """A clipped hedge that reads as foliage (round 10): three
+    overlapping foliage blobs along the length over a LOW core
+    box. The old tall box + single thin blob top read as a flat
+    box with a disc lid at full-frame distance; the blobs now
+    carry the silhouette and the core only grounds them."""
+    lrng = random.Random(f"{prefix}:{length}:{leaf_color}")
+    elements = [
         _el(f"{prefix}_hedge", "hedgerow", layer, "box",
-            (x, height / 2, z), (length, height, 0.8),
-            leaf_color, "foliage",
+            (x, height * 0.22, z), (length, height * 0.45, 0.7),
+            _blend(leaf_color, (0, 0, 0), 0.15), "foliage",
             attachment={"parent": None, "relation": "on_ground",
                         "local_rect": None}),
-        _el(f"{prefix}_hedge_top", "hedgerow", layer, "blob",
-            (x, height + 0.08, z), (length * 0.92, 0.35, 0.7),
-            _blend(leaf_color, (255, 255, 220), 0.08), "foliage",
-            attachment={"parent": f"{prefix}_hedge",
-                        "relation": "overlaps", "local_rect": None}),
     ]
+    for i in range(3):
+        fx = -0.32 + 0.32 * i
+        elements.append(_el(
+            f"{prefix}_hedge_lobe{i}", "hedgerow", layer, "blob",
+            (x + fx * length, height * (0.55 + 0.08 * (i % 2)), z),
+            (length * 0.48, height * 0.85, 0.85),
+            _blend(leaf_color, (255, 255, 220),
+                   lrng.uniform(0.0, 0.10)),
+            "foliage",
+            attachment={"parent": f"{prefix}_hedge",
+                        "relation": "overlaps",
+                        "local_rect": None}))
+    return elements
+
+
+def _sky_dressing(rng, light, sky_rgb=None):
+    """Clouds + distant hills for the visible sky (round 10).
+
+    No sun/moon disc: the key rig always lights from behind the
+    camera (frontal light, readable faces), so a visible sun
+    would contradict the light direction. Clouds and hills
+    carry the sky interest instead. Elements sit far behind
+    everything (z <= -24); the renderer sorts far-to-near, so
+    enclosing walls occlude them in interiors and they cost
+    nothing there. Cloud white is tod-tinted (warm at dusk, dim
+    at night) via the surface response; hills haze toward the
+    sky-bottom colour. Drawn AFTER the builder in
+    build_environment, so the builder's rng stream -- and every
+    existing layout -- is untouched.
+    """
+    sky_bottom = tuple(light.get("sky_bottom", (180, 190, 205)))
+    hill_base = (96, 110, 88)
+    elements = []
+    for i in range(3):
+        # Rounded masses, not prisms: a gable_prism hill reads as
+        # a pyramid. A wide flat blob sunk into the ground shows
+        # only its rounded top above the horizon -- a rolling
+        # hill. Tops must clear the treeline's apparent height
+        # (farther away, so taller in world units).
+        w = rng.uniform(9.0, 14.0)
+        h = rng.uniform(5.0, 6.0)
+        x = -10.0 + i * 10.0 + rng.uniform(-1.5, 1.5)
+        z = -25.0 - i * 1.5 - rng.uniform(0.0, 1.0)
+        elements.append(_el(
+            f"sky_hill_{i}", "distant_hill", "BG", "blob",
+            (x, rng.uniform(1.2, 1.8), z), (w, h, 2.0),
+            _blend(hill_base, sky_bottom,
+                   rng.uniform(0.25, 0.35)), "silhouette"))
+    # Round 12: a FAR ridge row behind the near hills. Atmospheric
+    # perspective -- the far row is taller in world units (its tops
+    # must clear the near row at greater distance) and hazed much
+    # further toward the sky, so the horizon reads as layered
+    # ranges instead of three smooth domes (tester R11-D2). Distinct
+    # ids (sky_ridge_) so the round-10 sky_hill_ pins still hold.
+    for i in range(4):
+        w = rng.uniform(12.0, 17.0)
+        h = rng.uniform(6.5, 8.0)
+        x = -13.5 + i * 9.0 + rng.uniform(-1.5, 1.5)
+        z = -30.0 - i * 1.2 - rng.uniform(0.0, 1.0)
+        elements.append(_el(
+            f"sky_ridge_{i}", "distant_hill", "BG", "blob",
+            (x, rng.uniform(2.2, 2.8), z), (w, h, 2.0),
+            _blend(hill_base, sky_bottom,
+                   rng.uniform(0.45, 0.60)), "silhouette",
+            extra={"ridge": True}))
+    cloud_white = tod_surface_response(light, (246, 246, 250),
+                                       sky_rgb=sky_rgb)
+    for i in range(4):
+        elements.append(_el(
+            f"sky_cloud_{i}", "cloud", "BG", "blob",
+            (rng.uniform(-11.0, 11.0), rng.uniform(5.5, 7.5),
+             rng.uniform(-30.0, -26.0)),
+            (rng.uniform(3.5, 6.0), rng.uniform(0.9, 1.4), 1.0),
+            cloud_white, "silhouette",
+            extra={"suspension": "cloud: floats in the sky"}))
+    return elements
+
+
+def _distant_skyline(rng, light, spec):
+    """Distant settlement silhouettes on the horizon (round 12).
+
+    The reference backgrounds carry a distant city/towers layer;
+    ours stopped at hills and clouds (tester R11-D2). Four
+    gabled houses + one taller tower stand at z -22..-24, in
+    front of the hill rows, coloured as hazed silhouettes from
+    the archetype palette (facade/roof colours darkened, then
+    blended toward the sky-bottom colour). Enclosing walls
+    occlude them in interiors, exactly like the sky dressing,
+    so they are wired for every archetype. Kinds carry the
+    tokens ``distant``/``house``/``tower``/``window`` so negative
+    constraints ("no houses", "no towers", "no windows") drop
+    each part with its parent: house parts (roof, chimney,
+    windows) drop with "no houses", tower parts (spire, window)
+    with "no towers", all windows with "no windows".
+    """
+    sky_bottom = tuple(light.get("sky_bottom", (180, 190, 205)))
+    facade = (spec.get("facade_colors") or [(170, 168, 164)])[0]
+    wall_base = _blend(tuple(facade), (40, 40, 45), 0.5)
+    roof_base = _blend(tuple(spec.get("roof_color", (120, 118, 114))),
+                       (40, 40, 45), 0.5)
+    # Round 13: windows glow only when the light is dim (dusk
+    # ambient <= 0.38, night <= 0.25; every day palette >= 0.42),
+    # so the skyline reads inhabited at dusk/night and plain
+    # silhouettes by day. Panes sit high on the wall (0.8 h) so
+    # the treeline does not hide them, and use material "glass"
+    # so the round-12 unshaded rule keeps them bright -- the
+    # window-light rule needs kind "window" exactly, so these
+    # kinds never emit lights.
+    lit = light.get("ambient", 0.5) < 0.40
+    elements = []
+    for i in range(4):
+        # Tops must clear the treeline's apparent height at z -8:
+        # the first sizing (h 1.2-2.0) hid every house behind the
+        # trees on the #1 probe -- only the tower read.
+        w = rng.uniform(1.5, 2.5)
+        h = rng.uniform(2.2, 3.2)
+        x = -9.0 + i * 6.0 + rng.uniform(-1.0, 1.0)
+        z = -20.0 - rng.uniform(0.0, 2.0)
+        haze = rng.uniform(0.40, 0.50)
+        wall_id = f"skyline_{i}"
+        elements.append(_el(
+            wall_id, "distant_house", "BG", "box",
+            (x, h / 2, z), (w, h, 1.5),
+            _blend(wall_base, sky_bottom, haze), "silhouette"))
+        roof_h = max(0.4, w * 0.28)
+        roof_id = f"skyline_roof_{i}"
+        elements.append(_el(
+            roof_id, "house_roof", "BG", "gable_prism",
+            (x, h + roof_h / 2, z), (w + 0.2, roof_h, 1.7),
+            _blend(roof_base, sky_bottom, haze), "silhouette",
+            attachment={"parent": wall_id, "relation": "on_top",
+                        "local_rect": None}))
+        elements.append(_el(
+            f"skyline_chimney_{i}", "house_chimney", "BG", "box",
+            (x + w * 0.3, h + roof_h + 0.2, z),
+            (0.25, 0.5, 0.25),
+            _blend(roof_base, sky_bottom, haze), "silhouette",
+            attachment={"parent": roof_id, "relation": "on_top",
+                        "local_rect": None}))
+        win_color = (_blend((255, 190, 110), sky_bottom, haze * 0.7)
+                     if lit else
+                     _blend((30, 32, 38), sky_bottom, haze))
+        for j, dx in enumerate((-0.22, 0.22)):
+            elements.append(_el(
+                f"skyline_win_{i}_{j}", "house_window", "BG",
+                "box",
+                (x + dx * w, h * 0.8, z + 0.78),
+                (0.28, 0.4, 0.05), win_color, "glass",
+                attachment={"parent": wall_id,
+                            "relation": "overlaps",
+                            "local_rect": None}))
+    # One tower, twice the house height, with a spire cap.
+    tx = rng.uniform(-3.0, 3.0)
+    tz = -23.0 - rng.uniform(0.0, 1.0)
+    th = rng.uniform(3.5, 4.5)
+    haze = rng.uniform(0.40, 0.50)
+    elements.append(_el(
+        "skyline_tower", "distant_tower", "BG", "box",
+        (tx, th / 2, tz), (1.1, th, 1.1),
+        _blend(wall_base, sky_bottom, haze), "silhouette"))
+    elements.append(_el(
+        "skyline_spire", "tower_spire", "BG", "gable_prism",
+        (tx, th + 0.45, tz), (1.3, 0.9, 1.3),
+        _blend(roof_base, sky_bottom, haze), "silhouette",
+        attachment={"parent": "skyline_tower", "relation": "on_top",
+                    "local_rect": None}))
+    tower_win = (_blend((255, 190, 110), sky_bottom, haze * 0.7)
+                 if lit else
+                 _blend((30, 32, 38), sky_bottom, haze))
+    elements.append(_el(
+        "skyline_tower_win", "tower_window", "BG", "box",
+        (tx, th * 0.8, tz + 0.58), (0.28, 0.4, 0.05),
+        tower_win, "glass",
+        attachment={"parent": "skyline_tower",
+                    "relation": "overlaps", "local_rect": None}))
+    return elements
+
+
+# Archetypes whose enclosing walls make near-camera foliage
+# wrong (round 12): caves, forges and generic interiors already
+# carry their own FG staging (rocks, barrels, room walls).
+_ENCLOSED_ARCHETYPES = frozenset(
+    ("CAVE", "FORGE", "INTERIOR_GENERIC"))
+
+# Round 15: at most this many emitted window lights per
+# package (stride-sampled across the lit panes). One light
+# per pane floods a dusk street (51 lights -> yellow wash);
+# the unshaded panes carry the lit read on their own.
+_WINDOW_LIGHT_CAP = 8
+
+
+def _fg_foliage(rng, ctx, archetype_id):
+    """Near-camera foliage masses at the frame edges (round 12).
+
+    The blurred-foreground depth cue (fg_blur_radius, round 1)
+    exists in the product flow but almost never fires: outdoor
+    locations carry 1-2 FG elements, none of them foliage. Two
+    large dark leaf blobs sit just in front of the camera plane
+    at the upper left/right edges, following the fenceFG
+    precedent (off-axis, z +1.5..+2). The transparent FG pass
+    blurs them, so they read as out-of-focus foreground. Gated
+    to open archetypes; enclosed archetypes keep their own FG
+    staging. validate_fg_composition governs: in-frame, never
+    over a standing box, <=40% of the frame.
+    """
+    if archetype_id in _ENCLOSED_ARCHETYPES:
+        return []
+    leaf = ctx.get("leaf_color") or (74, 102, 52)
+    dark_leaf = _blend(tuple(leaf), (20, 26, 16), 0.45)
+    bark = _blend((52, 40, 30), dark_leaf, 0.3)
+    elements = []
+    for side, x_sign in (("L", -1.0), ("R", 1.0)):
+        # Corner fringe, not a dominant mass: centres high and
+        # wide so only the lower inner fringe enters the top
+        # corners (~8-12% of frame width each). The first sizing
+        # (centres y 2.8-3.6, sizes up to 3.8x2.8) covered a
+        # quarter of the frame per side and read as voids --
+        # frame-REJECTED on the #1 probe.
+        cx = x_sign * rng.uniform(4.2, 5.2)
+        cy = rng.uniform(3.4, 4.2)
+        cz = rng.uniform(0.8, 1.5)
+        cw = rng.uniform(2.2, 3.0)
+        ch = rng.uniform(1.6, 2.2)
+        core_id = f"fg_foliage_{side}"
+        elements.append(_el(
+            core_id, "canopy", "FG", "blob",
+            (cx, cy, cz), (cw, ch, 1.0),
+            dark_leaf, "silhouette",
+            extra={"suspension":
+                   "foliage: overhanging branches in front of "
+                   "the camera"}))
+        # Round 13 (R12-D1): a single uniform blob reads as an
+        # amorphous dark mass once blurred -- it needs the tree
+        # treatment: a branch line entering from the frame edge
+        # plus jittered satellite lobes, following _tree. The
+        # branch survives the FG blur as a direction; the lobes
+        # break the silhouette into leaf clumps.
+        # Round 14: the branch drops toward the canopy's lower
+        # edge and extends further inward (it hid inside the
+        # canopy's projected silhouette on the right -- verified
+        # on the delivered R13 #1 crops: left branch
+        # silhouetted, right invisible). Kept short enough not
+        # to read as a plank: the first cut (3.2 long) spanned
+        # the frame as a wooden beam.
+        elements.append(_el(
+            f"fg_foliage_{side}_branch", "branch", "FG", "box",
+            (cx - x_sign * 0.7, cy - ch * 0.50, cz),
+            (2.8, 0.26, 0.2), bark, "silhouette",
+            attachment={"parent": core_id, "relation": "overlaps",
+                        "local_rect": None},
+            extra={"suspension":
+                   "foliage: overhanging branch in front of "
+                   "the camera"}))
+        lrng = random.Random(f"fg_foliage_{side}:{dark_leaf}")
+        # Lobes cluster INWARD (toward frame centre) and level/
+        # down from the core: outward/upward offsets pushed
+        # children fully off-frame (the core already bleeds off
+        # its edge), which validate_fg_composition rejects.
+        for i, (dx_in, dy) in enumerate(
+                ((0.55, -0.15), (0.9, 0.25), (0.2, -0.35))):
+            dx = -x_sign * dx_in
+            if i % 2:
+                lobe_color = _blend(dark_leaf, (255, 255, 220),
+                                    lrng.uniform(0.0, 0.12))
+            else:
+                lobe_color = _blend(dark_leaf, (0, 0, 0),
+                                    lrng.uniform(0.0, 0.10))
+            elements.append(_el(
+                f"fg_foliage_{side}_lobe{i}", "canopy", "FG",
+                "blob",
+                (cx + dx * 0.9, cy + dy * 0.9, cz + 0.1 * i),
+                (1.5, 1.1, 1.0), lobe_color, "silhouette",
+                attachment={"parent": core_id,
+                            "relation": "overlaps",
+                            "local_rect": None},
+                extra={"suspension":
+                       "foliage: overhanging branches in front "
+                       "of the camera"}))
+    return elements
 
 
 def _column(prefix, x, z, layer, height, color, with_pediment=False):
@@ -1151,6 +1454,49 @@ def _build_cave(rng, ctx):
             attachment={"parent": "ceiling", "relation": "hangs_from",
                         "local_rect": None},
             extra={"inverted": True}))
+    # Rock articulation (round 10): the three flat wall panels
+    # read as flat slabs at full-frame distance despite the rock
+    # texture. Slabs jutting from the back and side walls, plus
+    # stalagmites and rounded boulders, break the planes with
+    # large depth steps.
+    for i, (sx, sy, sw, sh) in enumerate((
+            (-5.6, 1.2, 2.8, 1.8), (-2.2, 2.6, 2.2, 1.4),
+            (1.2, 1.0, 3.2, 2.0), (4.8, 2.9, 2.4, 1.5),
+            (0.2, 3.9, 1.8, 1.1))):
+        elements.append(_el(
+            f"backslab{i}", "rock_slab", "BG", "box",
+            (sx, sy, -9.3), (sw, sh, rng.uniform(0.5, 0.9)),
+            _blend(rock, (0, 0, 0), rng.uniform(0.0, 0.25)),
+            "rock",
+            attachment={"parent": "backrock", "relation": "overlaps",
+                        "local_rect": None}))
+    for side, sxx in (("L", -6.9), ("R", 6.9)):
+        for i, (sz, sy, sd, sh) in enumerate((
+                (-8.0, 1.4, 2.6, 1.8), (-5.0, 2.8, 2.0, 1.4),
+                (-2.5, 1.1, 2.8, 2.1))):
+            elements.append(_el(
+                f"sideslab_{side}{i}", "rock_slab", "BG", "box",
+                (sxx, sy, sz), (rng.uniform(0.5, 0.9), sh, sd),
+                _blend(dark, rock, rng.uniform(0.0, 0.4)), "rock",
+                attachment={"parent": "leftrock" if side == "L"
+                            else "rightrock", "relation": "overlaps",
+                            "local_rect": None}))
+    for i, (gx, gz) in enumerate([(-4.6, -4.2), (3.6, -2.6),
+                                  (-0.8, -7.6)]):
+        gh = rng.uniform(1.2, 1.8)
+        elements.append(_el(
+            f"stalagmite{i}", "stalagmite", "BG", "gable_prism",
+            (gx, gh / 2, gz), (0.35, gh, 0.35), rock, "rock",
+            attachment={"parent": None, "relation": "on_ground",
+                        "local_rect": None}))
+    for i, (bx, bz, br) in enumerate([(-5.8, -6.8, 0.9),
+                                      (5.2, -7.4, 1.1)]):
+        elements.append(_el(
+            f"roundrock{i}", "boulder", "MG", "blob",
+            (bx, br * 0.55, bz), (br * 2, br * 1.1, br * 1.6),
+            rock, "rock",
+            attachment={"parent": None, "relation": "on_ground",
+                        "local_rect": None}))
     # Floor rocks + torch + glow blobs.
     for i, (x, z) in enumerate([(-3.4, -3.0), (2.8, -4.4), (0.6, -6.2)]):
         elements.append(_el(
@@ -1171,7 +1517,15 @@ def _build_cave(rng, ctx):
                                     "relation": "on_top",
                                     "local_rect": None}))
     elements.append(_el("rockFG", "rock_wall", "FG", "box",
-                        (6.4, 1.8, 1.6), (2.0, 3.6, 1.2), dark, "rock"))
+                        (6.4, 1.8, 1.6), (1.2, 3.6, 1.2), dark, "rock"))
+    # Second foreground rock (round 2, scene richness): the cave
+    # had a single right-side occluder; the mirrored left rock
+    # frames the shot from both sides. Both rocks are 1.2 m wide
+    # (not 2.0): at the shot-camera fit, 2.0 m rocks covered ~60%
+    # of the frame and left only a slit -- 1.2 m leaves a ~1280 px
+    # clear window with the rocks framing the edges.
+    elements.append(_el("rockFG_left", "rock_wall", "FG", "box",
+                        (-6.4, 1.8, 1.6), (1.2, 3.6, 1.2), dark, "rock"))
     return elements
 
 
@@ -1435,9 +1789,11 @@ def _build_interior(rng, ctx):
                         "local_rect": None}))
     # Tall windows on the back wall (u/v fractions -> centres).
     # Interior windows show daylight (pale sky), not the dark glass
-    # of an exterior facade seen from the street.
+    # of an exterior facade seen from the street. The glass colour
+    # comes from the tod sky via ctx (round 11): it warms at dusk
+    # and deepens at night instead of reading one fixed hour.
     win_w, win_h, win_d = 0.9, 2.2, 0.06
-    room_window_color = (170, 195, 220)
+    room_window_color = ctx.get("room_window_color", (170, 195, 220))
     front_z = -6.0 + 0.4 / 2 + win_d / 2 + 0.02
     for i, u in enumerate((0.28, 0.72)):
         v = 0.42
@@ -1464,6 +1820,73 @@ def _build_interior(rng, ctx):
                                    pv - pic_h / 4.5 / 2,
                                    pu + pic_w / 16.0 / 2,
                                    pv + pic_h / 4.5 / 2)}))
+    # Wall dressing (round 10): the back wall read as one flat
+    # plaster panel between the windows. Wainscot + dado rail +
+    # crown molding + pilasters break the plane with large
+    # shapes that read at full-frame distance. Pilaster
+    # positions avoid the windows (u 0.25-0.31, 0.69-0.75) and
+    # the picture (u 0.46-0.54). v measures from the wall top.
+    trim = _blend(wall_color, (0, 0, 0), 0.14)
+    band_z = -6.0 + 0.4 / 2 + 0.04 + 0.02
+    elements.append(_el(
+        "room_wainscot", "wainscot", "BG", "box",
+        (0.0, 0.5, band_z), (15.7, 1.0, 0.08),
+        _blend(wall_color, (0, 0, 0), 0.10), "plaster",
+        attachment={"parent": wall_id, "relation": "on_wall",
+                    "local_rect": (0.01, 0.778, 0.99, 1.0)}))
+    elements.append(_el(
+        "room_dado_rail", "dado_rail", "BG", "box",
+        (0.0, 1.07, band_z), (15.7, 0.14, 0.08), trim, "wood",
+        attachment={"parent": wall_id, "relation": "on_wall",
+                    "local_rect": (0.01, 0.744, 0.99, 0.775)}))
+    elements.append(_el(
+        "room_crown", "crown_molding", "BG", "box",
+        (0.0, 4.35, band_z), (15.7, 0.3, 0.08), trim, "plaster",
+        attachment={"parent": wall_id, "relation": "on_wall",
+                    "local_rect": (0.01, 0.0, 0.99, 0.067)}))
+    for i, pu2 in enumerate((0.12, 0.39, 0.61, 0.88)):
+        elements.append(_el(
+            f"room_pilaster_{i}", "pilaster", "BG", "box",
+            ((pu2 - 0.5) * 16.0, 2.25, band_z), (0.3, 4.5, 0.08),
+            trim, "plaster",
+            attachment={"parent": wall_id, "relation": "on_wall",
+                        "local_rect": (pu2 - 0.0094, 0.0,
+                                       pu2 + 0.0094, 1.0)}))
+    # Window mullions: each tall window gets a cross frame so
+    # the glass does not read as one flat pale slab.
+    mullion = (70, 55, 40)
+    for i, u in enumerate((0.28, 0.72)):
+        wx = (u - 0.5) * 16.0
+        wy = 4.5 - 0.42 * 4.5
+        elements.append(_el(
+            f"room_win_{i}_mull_v", "mullion", "BG", "box",
+            (wx, wy, front_z + 0.05), (0.06, win_h, 0.04),
+            mullion, "wood",
+            attachment={"parent": f"room_win_{i}",
+                        "relation": "on_wall",
+                        "local_rect": (0.467, 0.0, 0.533, 1.0)}))
+        for k, vv in enumerate((0.33, 0.67)):
+            elements.append(_el(
+                f"room_win_{i}_mull_h{k}", "mullion", "BG", "box",
+                (wx, wy + (0.5 - vv) * win_h, front_z + 0.05),
+                (win_w, 0.06, 0.04), mullion, "wood",
+                attachment={"parent": f"room_win_{i}",
+                            "relation": "on_wall",
+                            "local_rect": (0.0, vv - 0.014,
+                                           1.0, vv + 0.014)}))
+    # Foreground wall returns (round 2, scene richness): the room's
+    # near wall edges, framing the shot with blurred depth. The
+    # interior was the only archetype with NO foreground layer, so
+    # every interior shot read flat. These are the room shell
+    # itself (same plaster, same wall height), not invented
+    # furniture -- the trait-gated furniture rules are untouched.
+    # Frustum-fit (W2) pulls them to the frame edges in production.
+    for side, sx in (("L", -5.8), ("R", 5.8)):
+        elements.append(_el(
+            f"room_fg_{side}", "room_wall", "FG", "box",
+            (sx, 2.25, 1.6), (0.4, 4.5, 1.4), wall_color, "plaster",
+            attachment={"parent": None, "relation": "on_ground",
+                        "local_rect": None}))
     # Rug (flat slab, no shadow): muted madder red, never dominant.
     elements.append(_el("room_rug", "rug", "MG", "box",
                         (0.6, 0.03, -0.8), (4.5, 0.06, 3.0),
@@ -1562,26 +1985,75 @@ def _build_countryside_road(rng, ctx):
             (6.5, 0.02, -8.0), (8.0, 0.04, 22.0), (158, 146, 96),
             "grass"),
     ]
-    # Bare trees: trunk + two asymmetric limb boxes, no foliage.
-    # Limb lengths/heights vary per tree so they read as branches,
-    # not utility-pole crossarms. Limbs overlap their trunk (P-S5).
-    for i, (tx, tz) in enumerate(
-            [(-4.5, -6.0), (4.8, -9.0), (-6.5, -13.0), (6.0, -16.0)]):
-        elements.append(_el(
-            f"bare_tree_{i}", "tree_trunk", "BG", "box",
-            (tx, 1.1, tz), (0.18, 2.2, 0.18), (74, 58, 44), "wood",
-            attachment={"parent": None, "relation": "on_ground",
-                        "local_rect": None}))
-        for j, dx in enumerate((-0.4, 0.35)):
-            limb_len = rng.uniform(0.7, 1.0)
+    # Trees: leafy by default (the P-S3 canopy tree). Bare trees
+    # (trunk + limb boxes, no foliage) only when the traits say
+    # the season is bare -- "Cây trụi lá", autumn, winter. The
+    # old unconditional bare trees read as signposts, not trees,
+    # in the establishing shot, and no script in the tree asks
+    # for a bare season by default. The bare branch keeps the
+    # exact old geometry for the traits that ask for it.
+    leaf = ctx.get("leaf_color") or (96, 110, 66)
+    trait_text = (ctx.get("trait_text") or "").lower()
+    bare = any(w in trait_text for w in (
+        "trụi lá", "trơ trụi", "bare", "leafless", "mùa thu",
+        "autumn", "mùa đông", "winter"))
+    tree_spots = [(-4.5, -6.0), (4.8, -9.0), (-6.5, -13.0),
+                  (6.0, -16.0)]
+    if bare:
+        # Bare trees: a branching crown, not a signpost. Five
+        # limbs at staggered heights with decreasing lengths,
+        # alternating sides and axes (three along X, two along
+        # Z), so the silhouette branches from every viewpoint.
+        # The old two horizontal limbs near the trunk top read
+        # as a signpost in the establishing shot.
+        for i, (tx, tz) in enumerate(tree_spots):
             elements.append(_el(
-                f"bare_limb_{i}_{j}", "branch", "BG", "box",
-                (tx + dx, 1.85 + 0.15 * j + rng.uniform(0, 0.1), tz),
-                (limb_len, 0.08, 0.08),
-                (74, 58, 44), "wood",
-                attachment={"parent": f"bare_tree_{i}",
-                            "relation": "overlaps",
+                f"bare_tree_{i}", "tree_trunk", "BG", "box",
+                (tx, 1.1, tz), (0.22, 2.2, 0.22), (74, 58, 44), "wood",
+                attachment={"parent": None, "relation": "on_ground",
                             "local_rect": None}))
+            for j, (axis, side, hy, llen) in enumerate((
+                    ("x", -1, 1.30, 1.00), ("x", 1, 1.55, 0.85),
+                    ("z", -1, 1.75, 0.70), ("x", -1, 1.95, 0.55),
+                    ("z", 1, 2.05, 0.45))):
+                length = llen * rng.uniform(0.85, 1.15)
+                y = hy + rng.uniform(0, 0.08)
+                if axis == "x":
+                    centre = (tx + side * length / 2.0, y, tz)
+                    size = (length, 0.08, 0.08)
+                else:
+                    centre = (tx, y, tz + side * length / 2.0)
+                    size = (0.08, 0.08, length)
+                elements.append(_el(
+                    f"bare_limb_{i}_{j}", "branch", "BG", "box",
+                    centre, size, (74, 58, 44), "wood",
+                    attachment={"parent": f"bare_tree_{i}",
+                                "relation": "overlaps",
+                                "local_rect": None}))
+                # Round 10: upward twigs at the limb ends. Long
+                # bare horizontal limbs read as signposts /
+                # utility-pole crossbars from frontal angles;
+                # the twigs break the cross silhouette into a
+                # branching crown from every viewpoint.
+                for k, frac in enumerate((0.62, 0.85)):
+                    twig_h = rng.uniform(0.25, 0.45)
+                    if axis == "x":
+                        tcentre = (tx + side * length * frac,
+                                   y + twig_h / 2.0, tz)
+                    else:
+                        tcentre = (tx, y + twig_h / 2.0,
+                                   tz + side * length * frac)
+                    elements.append(_el(
+                        f"bare_twig_{i}_{j}_{k}", "branch", "BG",
+                        "box", tcentre, (0.06, twig_h, 0.06),
+                        (74, 58, 44), "wood",
+                        attachment={"parent": f"bare_limb_{i}_{j}",
+                                    "relation": "overlaps",
+                                    "local_rect": None}))
+    else:
+        for i, (tx, tz) in enumerate(tree_spots):
+            elements.extend(_tree(f"tree_{i}", rng, tx, tz,
+                                  leaf_color=leaf))
     # Fence along the road's right edge.
     for i, fz in enumerate(range(-2, -15, -3)):
         elements.append(_el(
@@ -1597,32 +2069,51 @@ def _build_countryside_road(rng, ctx):
                                     "relation": "overlaps",
                                     "local_rect": None}))
     # Hedgerows (P-S3: real hedge builder, not bare blobs).
-    leaf = ctx.get("leaf_color") or (96, 110, 66)
     for i, (hx, hz) in enumerate(
             [(-3.5, -5.0), (5.5, -7.0), (-5.0, -11.0)]):
         elements.extend(_hedge(f"hedge_{i}", hx, hz, 2.2, "MG",
                                height=1.0, leaf_color=leaf))
-    # Distant treeline masses.
-    for i, mx in enumerate((-6.0, 0.5, 6.5)):
+    # Distant treeline masses (round 10): varied heights,
+    # widths, depths and colours with foliage crowns -- the old
+    # three identical boxes read as one flat wall. Seven masses
+    # across the horizon, each crowned with 1-2 canopy blobs so
+    # the silhouette breaks up at full-frame distance.
+    for i, mx in enumerate((-8.5, -5.5, -2.5, 0.5, 3.5, 6.5, 9.0)):
+        mh = rng.uniform(0.8, 1.6)
+        mw = rng.uniform(2.6, 4.2)
+        mz = -19.0 + rng.uniform(-1.5, 1.0)
+        mass_color = _blend((72, 84, 58), (30, 40, 26),
+                            rng.uniform(0.0, 0.5))
         elements.append(_el(
             f"treeline_{i}", "distant_mass", "BG", "box",
-            (mx, 0.8, -19.0), (4.0, 1.6, 0.8), (72, 84, 58),
-            "silhouette"))
+            (mx, mh / 2.0, mz), (mw, mh, rng.uniform(0.6, 1.2)),
+            mass_color, "silhouette"))
+        for j in range(1 + (i % 2)):
+            elements.append(_el(
+                f"treeline_{i}_crown{j}", "canopy", "BG", "blob",
+                (mx + rng.uniform(-0.9, 0.9), mh + 0.3, mz),
+                (rng.uniform(2.0, 3.0), rng.uniform(1.2, 1.8),
+                 rng.uniform(1.2, 1.8)),
+                _blend(leaf, (255, 255, 220),
+                       rng.uniform(0.0, 0.10)), "foliage",
+                attachment={"parent": f"treeline_{i}",
+                            "relation": "overlaps",
+                            "local_rect": None}))
     # Distant cottage: single-story facade + gable roof.
     els, _ = _facade("cottage", rng, -6.5, -13.0, 3.2, 1,
                      ctx["facade_colors"], ctx["roof_color"],
                      ctx["window_color"])
     elements.extend(els)
-    # Foreground: fence post + overhanging bare branch.
+    # Foreground: fence post only. A bare overhanging branch
+    # (branchFG) used to hang here; it rendered as a floating
+    # dark bar at the top-right in every close-up (tester R2-V2,
+    # R6 sky bar) because a bare axis-aligned box cannot read as
+    # an overhang -- it never touched the frame edge and carried
+    # no foliage. Removed round-7; a leafy overhang returns only
+    # as a proper diagonal branch with foliage, not as a box.
     elements.append(_el("fenceFG", "fence_post", "FG", "box",
                         (-3.6, 0.5, 1.7), (0.14, 1.0, 0.14),
                         (90, 70, 50), "wood"))
-    elements.append(_el("branchFG", "branch", "FG", "box",
-                        (3.8, 2.6, 1.8), (1.6, 0.1, 0.1),
-                        (74, 58, 44), "wood",
-                        extra={"suspension": "overhang: bare branch "
-                                            "entering from above the "
-                                            "frame edge"}))
     return elements
 
 
@@ -1756,9 +2247,10 @@ def _build_forge(rng, ctx):
                     "local_rect": None}))
     # Quench steam rising from the barrel water surface.
     elements.append(_el(
-        "quench_steam", "steam", "MG", "blob", (4.8, 1.5, -2.8),
+        "quench_steam", "steam", "MG", "blob", (4.8, 1.15, -2.8),
         (0.5, 0.5, 0.4), (200, 205, 210), "smoke",
-        extra={"suspension": "steam rises from the quench barrel"}))
+        attachment={"parent": "quench_barrel",
+                    "relation": "on_top", "local_rect": None}))
     # Coal pile on the ground beside the furnace.
     elements.append(_el(
         "coal_pile", "coal", "BG", "blob", (-4.9, 0.25, -6.3),
@@ -2030,6 +2522,80 @@ def _landmark_statue(prefix, x, z, rng, ctx):
     ]
 
 
+def _landmark_pedestal(prefix, x, z, rng, ctx):
+    # An EMPTY pedestal: a stand awaiting an object (a core, a
+    # relic, an offering). Unlike _landmark_statue it carries no
+    # figure, so a prop placed on it never overlaps a statue.
+    # Four pieces -- wide base, narrow shaft, wide cap slab, and
+    # a low rim frame on the cap that sockets the placed object
+    # -- with a silhouette that reads as a pedestal at viewing
+    # distance (tester R2/R6/R7: the 1.0 m cube-shaft pedestal
+    # read as a generic dark crate, and the 1.4 m pale version
+    # still read as a small side table). Total height 1.55 m to
+    # the cap plane; the rim rises 0.10 m around the socket. The
+    # shaft keeps kind statue_pedestal, so the prop-rest support
+    # anchor follows the cap plane automatically: the cap top is
+    # the SAME 1.55 m plane as the shaft top (the anchor derives
+    # from the shaft's top face), and the placed object sits in
+    # the open centre of the rim frame at that plane. The stone
+    # is lightened toward warm pale stone so the pedestal
+    # contrasts with dark walls (a cave) instead of blending
+    # into them; the cap catches the light and the rim is dark
+    # trim, so the socket reads even at a distance.
+    stone = _blend(ctx["facade_colors"][0], (190, 182, 168), 0.45)
+    dark = _blend(stone, (0, 0, 0), 0.15)
+    cap = _blend(stone, (255, 255, 255), 0.25)
+    rim = _blend(stone, (0, 0, 0), 0.30)
+    return [
+        _el(f"{prefix}_pedestal_base", "pedestal_trim", "MG", "box",
+            (x, 0.125, z), (1.9, 0.25, 1.9), dark, "stone",
+            attachment={"parent": None, "relation": "on_ground",
+                        "local_rect": None},
+            extra={"landmark": "pedestal",
+                   "tags": ["pedestal", "pedestal_base"]}),
+        _el(f"{prefix}_pedestal", "statue_pedestal", "MG", "box",
+            (x, 0.9, z), (1.0, 1.3, 1.0), stone, "stone",
+            attachment={"parent": f"{prefix}_pedestal_base",
+                        "relation": "on_top",
+                        "local_rect": None},
+            extra={"landmark": "pedestal", "tags": ["pedestal"]}),
+        _el(f"{prefix}_pedestal_cap", "pedestal_trim", "MG", "box",
+            (x, 1.46, z), (1.7, 0.18, 1.7), cap, "stone",
+            attachment={"parent": f"{prefix}_pedestal",
+                        "relation": "overlaps", "local_rect": None},
+            extra={"landmark": "pedestal",
+                   "tags": ["pedestal", "pedestal_cap"]}),
+        _el(f"{prefix}_pedestal_rim", "pedestal_trim", "MG", "box",
+            (x, 1.60, z + 0.78), (1.7, 0.10, 0.14), rim, "stone",
+            attachment={"parent": f"{prefix}_pedestal_cap",
+                        "relation": "on_top",
+                        "local_rect": None},
+            extra={"landmark": "pedestal",
+                   "tags": ["pedestal", "pedestal_rim"]}),
+        _el(f"{prefix}_pedestal_rim_b", "pedestal_trim", "MG", "box",
+            (x, 1.60, z - 0.78), (1.7, 0.10, 0.14), rim, "stone",
+            attachment={"parent": f"{prefix}_pedestal_cap",
+                        "relation": "on_top",
+                        "local_rect": None},
+            extra={"landmark": "pedestal",
+                   "tags": ["pedestal", "pedestal_rim"]}),
+        _el(f"{prefix}_pedestal_rim_l", "pedestal_trim", "MG", "box",
+            (x - 0.78, 1.60, z), (0.14, 0.10, 1.42), rim, "stone",
+            attachment={"parent": f"{prefix}_pedestal_cap",
+                        "relation": "on_top",
+                        "local_rect": None},
+            extra={"landmark": "pedestal",
+                   "tags": ["pedestal", "pedestal_rim"]}),
+        _el(f"{prefix}_pedestal_rim_r", "pedestal_trim", "MG", "box",
+            (x + 0.78, 1.60, z), (0.14, 0.10, 1.42), rim, "stone",
+            attachment={"parent": f"{prefix}_pedestal_cap",
+                        "relation": "on_top",
+                        "local_rect": None},
+            extra={"landmark": "pedestal",
+                   "tags": ["pedestal", "pedestal_rim"]}),
+    ]
+
+
 def _landmark_waterfall(prefix, x, z, rng, ctx):
     rock = _blend(ctx["facade_colors"][0], (90, 88, 84), 0.4)
     return [
@@ -2118,6 +2684,13 @@ LANDMARKS = {
                      "bức tượng"),
         "builder": _landmark_statue, "band": "MG",
     },
+    "pedestal": {
+        # An empty stand. "bệ" alone is the natural word for it
+        # ("bệ lõi", "cái bệ"); the landmarks field is a curated
+        # declaration, so substring matching stays precise here.
+        "keywords": ("bệ đá", "bệ", "pedestal", "bục đá", "bục"),
+        "builder": _landmark_pedestal, "band": "MG",
+    },
     "waterfall": {
         "keywords": ("thác nước", "waterfall", "thác", "cascade"),
         "builder": _landmark_waterfall, "band": "BG",
@@ -2164,19 +2737,61 @@ def select_landmarks(location_traits: dict) -> list[str]:
             if any(kw in joined for kw in LANDMARKS[kind]["keywords"])]
 
 
+# Position words in a landmark declaration choose its staging
+# slot (round-6): "Bệ đá ở giữa hang" must stage center, not at
+# the first slot in cycle order. Center is checked first: bare
+# "phải" is a modal ("must") in Vietnamese, so only the phrases
+# "bên phải"/"phía phải" (and English "right") count for the
+# right slot; bare "trái" is accepted (no modal reading).
+_LANDMARK_POSITION_WORDS = (
+    ("center", ("giữa", "chính giữa", "center", "middle",
+                "centre")),
+    ("left", ("bên trái", "phía trái", "trái", "left")),
+    ("right", ("bên phải", "phía phải", "right")),
+)
+
+
+def _landmark_position(text: str):
+    lowered = str(text or "").lower()
+    for position, words in _LANDMARK_POSITION_WORDS:
+        if any(w in lowered for w in words):
+            return position
+    return None
+
+
 def build_landmarks(location_traits: dict, rng, ctx) -> list[dict]:
     """Landmark elements for the declared landmark kinds."""
     kinds = select_landmarks(location_traits or {})
+    texts = _landmark_field_texts(location_traits or {})
     elements = []
-    bg_i = mg_i = 0
+    used_bg: set[int] = set()
+    used_mg: set[int] = set()
     for kind in kinds:
         spec = LANDMARKS[kind]
+        # The text that declared THIS kind carries its position
+        # words; the joined field would cross-assign positions
+        # between landmarks.
+        declaring = next(
+            (t for t in texts
+             if any(kw in t for kw in spec["keywords"])), "")
+        position = _landmark_position(declaring)
         if spec["band"] == "MG":
-            x, z = _LANDMARK_SLOTS_MG[mg_i % len(_LANDMARK_SLOTS_MG)]
-            mg_i += 1
+            slots = _LANDMARK_SLOTS_MG
+            used = used_mg
+            preferred = {"center": 2, "left": 0, "right": 1}.get(
+                position)
         else:
-            x, z = _LANDMARK_SLOTS_BG[bg_i % len(_LANDMARK_SLOTS_BG)]
-            bg_i += 1
+            slots = _LANDMARK_SLOTS_BG
+            used = used_bg
+            preferred = {"center": 1, "left": 0, "right": 2}.get(
+                position)
+        order = list(range(len(slots)))
+        if preferred is not None:
+            order = [preferred] + [i for i in order
+                                   if i != preferred]
+        slot_i = next((i for i in order if i not in used), order[0])
+        used.add(slot_i)
+        x, z = slots[slot_i]
         elements.extend(spec["builder"](f"lm_{kind}", x, z, rng, ctx))
     return elements
 
@@ -2199,6 +2814,15 @@ _CONSTRAINT_SYNONYMS = {
     "biển quảng cáo": "billboard", "nhà kính": "glass_curtain",
     "điện thoại": "smartphone", "xe tăng": "tank",
     "máy bay": "airplane", "đèn neon": "neon_sign",
+    # Round 12: English plurals for the dressing/skyline
+    # vocabulary. The whole-word token matcher otherwise never
+    # matches "no houses" against kind "distant_house" (the
+    # trailing "s" breaks the word boundary), so the documented
+    # "no clouds"/"no houses" constraints silently matched
+    # nothing. Phrase -> singular token, same mechanism as the
+    # Vietnamese entries above.
+    "houses": "house", "clouds": "cloud", "towers": "tower",
+    "hills": "hill", "windows": "window",
 }
 
 
@@ -2465,6 +3089,25 @@ def _seed_for(traits: dict, period, time_of_day: str) -> int:
                16)
 
 
+def _tod_point_light(spec: dict, light: dict) -> dict:
+    """A point-light spec with its falloff tightened for the time
+    of day (round 12). Returns a copy; the archetype spec is
+    never mutated. See the build_environment note."""
+    out = dict(spec)
+    try:
+        ambient = float(light.get("ambient", 0.5))
+    except (TypeError, ValueError):
+        ambient = 0.5
+    if ambient <= 0:
+        ambient = 0.5
+    scale = min(2.5, max(1.0, 0.5 / ambient))
+    try:
+        out["falloff_k"] = float(spec.get("falloff_k", 0.08)) * scale
+    except (TypeError, ValueError):
+        pass
+    return out
+
+
 def build_environment(location_traits: dict, period: str = "",
                       time_of_day: str = "day", style: dict | None = None
                       ) -> dict:
@@ -2537,10 +3180,67 @@ def build_environment(location_traits: dict, period: str = "",
         "mood") or "warm"
     weather = traits.get("weather") or ""
     light = light_for(tod, mood, weather)
+    # The sky OUTSIDE, before archetype overrides replace it with
+    # an interior backdrop: room windows show this sky, never the
+    # override (a cave's dark backdrop must not fill a window).
+    _outside_sky_top = tuple(light.get("sky_top", (122, 168, 214)))
+    _outside_sky_bottom = tuple(light.get("sky_bottom",
+                                          (205, 224, 240)))
     for key, value in (spec.get("light_override") or {}).items():
-        light[key] = value
+        # Round 9: the interior sky override answers the time of
+        # day instead of freezing one colour at every hour (the
+        # tod response tints + dims the base override; the cave
+        # stays dark, the forge stays warm, but midday, afternoon
+        # and dusk now read differently). Non-sky override keys
+        # pass through untouched.
+        if key in ("sky_top", "sky_bottom"):
+            light[key] = interior_sky_response(light, value)
+        else:
+            light[key] = value
+    # Round 10 (R10-2): the time of day bakes into the surface
+    # base colours -- facade, roof, ground -- AFTER the trait
+    # blend, so the light falls on the trait-coloured wall. The
+    # render-time key tint still applies on top (direct sun);
+    # the baked term is the ambient sky light, which is what
+    # inward-facing walls actually receive. Without this, the
+    # round-9 sky response never reached delivered interior
+    # frames (identical-box gap 0.29 vs 0.28, shot #8 pixel-
+    # identical between rounds).
+    # Round 14: enclosed archetypes get no sky blend -- their
+    # surfaces cannot see the sky (see tod_surface_response).
+    # Outdoor archetypes blend toward the OUTSIDE sky captured
+    # before the override mutation.
+    _blend_sky = archetype_id not in _ENCLOSED_ARCHETYPES
+    facade_colors = [tod_surface_response(light, c,
+                                          sky_rgb=_outside_sky_bottom,
+                                          blend_sky=_blend_sky)
+                     for c in facade_colors]
+    roof_color = tod_surface_response(light, spec["roof_color"],
+                                      sky_rgb=_outside_sky_bottom,
+                                      blend_sky=_blend_sky)
+    ground_color = tod_surface_response(light,
+                                        spec["ground_color"],
+                                        sky_rgb=_outside_sky_bottom,
+                                        blend_sky=_blend_sky)
     is_night = light["time_of_day"] == "night"
-    window_color = (255, 200, 90) if is_night else (52, 66, 88)
+    # Round 15 (R13-D2 lit-window half): facade windows glow
+    # whenever the light is dim -- dusk joins night. The
+    # threshold matches the round-13 skyline rule (dusk
+    # ambient <= 0.38, night <= 0.25; every day palette
+    # >= 0.42), so day facades keep dark glass. The old
+    # night-only rule left every Loop-02 dusk facade dark.
+    window_color = ((255, 200, 90)
+                    if light.get("ambient", 0.5) < 0.40
+                    else (52, 66, 88))
+    # Round 11: interior windows show the sky, so their glass
+    # answers the time of day -- a tall window shows mostly
+    # horizon sky (weighted toward sky_bottom): pink-orange at
+    # dusk, pale blue at midday, deep blue at night. The old
+    # fixed pale-blue glass made every interior read the same
+    # hour whatever the tod, and muted the dusk read exactly
+    # where the window is the brightest tod signal in the room.
+    room_window_color = _blend(_outside_sky_top, _outside_sky_bottom,
+                             0.65)
     sign_text = ""
     for key in ("sign_text", "signage", "shop_sign", "shop_name"):
         if isinstance(traits.get(key), str) and traits[key].strip():
@@ -2550,8 +3250,9 @@ def build_environment(location_traits: dict, period: str = "",
             sign_text = style[key].strip()
             break
     ctx = {"facade_colors": facade_colors,
-           "roof_color": spec["roof_color"],
+           "roof_color": roof_color,
            "window_color": window_color, "is_night": is_night,
+           "room_window_color": room_window_color,
            "sign_text": sign_text, "leaf_color": leaf_color,
            "trait_text": _trait_text(traits)}
     builder = _BUILDERS[archetype_id]
@@ -2564,24 +3265,84 @@ def build_environment(location_traits: dict, period: str = "",
     for extra in style.get("extra_elements") or []:
         if isinstance(extra, dict) and "id" in extra and "kind" in extra:
             elements.append(extra)
+    # Sky dressing (round 10): clouds + distant hills. Added
+    # before negative constraints so a "no clouds" trait can
+    # still drop them, loudly reported like any other element.
+    elements.extend(_sky_dressing(rng, light,
+                                  sky_rgb=_outside_sky_bottom))
+    # Distant skyline + near-camera foliage (round 12): the
+    # horizon settlement layer and the blurred-foreground layer.
+    # Same position as the dressing: negative constraints apply.
+    elements.extend(_distant_skyline(rng, light, spec))
+    elements.extend(_fg_foliage(rng, ctx, archetype_id))
     # Negative constraints drop matching elements, loudly reported.
     constraint_texts = _constraint_field_texts(traits)
     elements, constraint_report = apply_negative_constraints(
         elements, constraint_texts)
+    # Round 12: bright glass windows cast light pools. A window
+    # depicts sky/lamplight, so it lights the surfaces in front
+    # of it (the floor pool under a dusk window, the warm spill
+    # of a lit facade window at night). Computed AFTER negative
+    # constraints, so a dropped window leaves no orphan light.
+    # Dark glass (mean < 80, e.g. day facades) emits nothing --
+    # this keeps the day pins for windowed street archetypes at
+    # zero added lights. The light sits 0.5 m in front of the
+    # pane, toward the viewer/room, with the pane's own colour.
+    # Window lights do NOT take the tod falloff scaling: the
+    # window IS the time-of-day light (its colour already carries
+    # the hour), and tightening it at dusk would mute exactly the
+    # signal it exists to carry. Intensity 1.2 / falloff 0.06: a
+    # first sizing (0.5/0.12) moved the delivered floor by <1
+    # level -- invisible in the composed shot.
+    window_lights = []
+    for el in elements:
+        if el.get("kind") != "window":
+            continue
+        if el.get("material") != "glass":
+            continue
+        colour = tuple(el.get("color") or (0, 0, 0))
+        if sum(colour) / 3.0 < 80.0:
+            continue
+        cx, cy, cz = (float(v) for v in el["center"])
+        window_lights.append(
+            {"id": f"window_light_{el['id']}",
+             "position": (cx, cy, cz + 0.5),
+             "intensity": 1.2, "falloff_k": 0.06,
+             "color": colour})
+    # Round 15: CAP the emitted window lights. A dusk street
+    # has ~50 lit panes; one 1.2-intensity light per pane
+    # floods the facades and ground into a yellow wash (the
+    # panes themselves draw unshaded, so they carry the
+    # lit-window read without any emitted light). At most 8
+    # lights, evenly spaced across the panes so the pools
+    # spread along the street instead of clustering on one
+    # facade. Deterministic: stride sampling, no RNG.
+    if len(window_lights) > _WINDOW_LIGHT_CAP:
+        step = len(window_lights) / float(_WINDOW_LIGHT_CAP)
+        window_lights = [window_lights[int(i * step)]
+                         for i in range(_WINDOW_LIGHT_CAP)]
     layers = {"FG": [e["id"] for e in elements if e["layer"] == "FG"],
               "MG": [e["id"] for e in elements if e["layer"] == "MG"],
               "BG": [e["id"] for e in elements if e["layer"] == "BG"]}
     pkg = {"archetype": archetype_id, "kind": "environment",
            "layers": layers, "elements": elements,
            "palette": {"facade": facade_colors,
-                       "roof": spec["roof_color"],
-                       "ground": spec["ground_color"],
+                       "roof": roof_color,
+                       "ground": ground_color,
                        "trait_colors": trait_colors},
            "light": light,
-           "point_lights": [dict(pl) for pl in
-                            (spec.get("point_lights") or [])],
+           # Round 12: point-light pools tighten as the ambient
+           # falls. Irradiance is 1/(1+k*r^2); at dusk/night the
+           # low ambient lets a fixed-k lamp wash the whole room
+           # and erase the tod bake contrast. Scaling k by
+           # 0.5/ambient (clamped [1.0, 2.5]) keeps the pool local
+           # when the room is dim and leaves daylit rooms nearly
+           # untouched. Positions/intensities/colours untouched.
+           "point_lights": [_tod_point_light(pl, light)
+                            for pl in (spec.get("point_lights") or [])
+                            ] + window_lights,
            "ground": {"kind": spec["ground_kind"],
-                      "color": spec["ground_color"]},
+                      "color": ground_color},
            "provenance": {"trait_source": traits.get("id") or
                           traits.get("location_id") or "anonymous",
                           "archetype": archetype_id,
@@ -2668,6 +3429,174 @@ def _horizon_y(camera, width: int, height: int) -> float:
     return min(max(min(ys), 0.0), float(height))
 
 
+# Round 14 (R13-D1 / dossier "large sun"): a visible sun/moon disc
+# in the sky. The round-10 decision against a disc (the key rig
+# lights frontally, so a physical sun would sit behind the camera)
+# is revisited: the reference's defining dusk trait is a large
+# sun in frame, and stylised animation shows the disc regardless
+# of the key direction -- faces stay front-lit, nobody computes
+# shadow directions from the disc. The disc is screen-space, drawn
+# right after the sky gradient, so clouds and hills pass in front
+# of it naturally; the ground loop clips anything below the
+# horizon. Radius as a fraction of frame width, by time of day:
+# dusk gets the LARGE sun, night gets a smaller pale moon.
+_SUN_RADIUS_FRAC = {
+    "dusk": 0.055, "afternoon": 0.042, "morning": 0.038,
+    "midday": 0.032, "day": 0.032, "night": 0.030,
+}
+_MOON_COLOR = (232, 236, 242)
+
+
+def _sun_clearance_top(elements, camera, width, height):
+    """Per-column top of the highest BG/MG occluder (skyline map).
+
+    Returns a list of 32 y values: for each column, the smallest
+    projected top among the elements covering it, or ``height``
+    when nothing covers the column. Used to place the sun disc
+    in open sky instead of behind a hill (the first two
+    placements hid the disc behind the hill row / a cloud).
+    """
+    cols = 32
+    tops = [float(height)] * cols
+    for el in elements:
+        # FG included: blurred foreground foliage DOES cover the
+        # disc (it draws over it), and the corners it occupies
+        # would otherwise look like the most open sky.
+        if el.get("layer") not in ("BG", "MG", "FG"):
+            continue
+        center = el.get("center")
+        size = el.get("size")
+        if not center or not size:
+            continue
+        cx, cy, cz = (float(v) for v in center)
+        px, _, pscale, vis = camera.project((cx, cy, cz),
+                                            width, height)
+        if not vis or pscale <= 0:
+            continue
+        _, top_y, _, vis_top = camera.project(
+            (cx, cy + float(size[1]) / 2.0, cz), width, height)
+        if not vis_top:
+            continue
+        half_w = float(size[0]) / 2.0 * pscale
+        c0 = max(0, int((px - half_w) / width * cols))
+        c1 = min(cols - 1, int((px + half_w) / width * cols))
+        for c in range(c0, c1 + 1):
+            tops[c] = min(tops[c], top_y)
+    return tops
+
+
+def sun_disc_spec(light: dict, elements, camera, width: int,
+                  height: int, horizon: float,
+                  seed_key: str, visible_rect=None) -> dict | None:
+    """Screen-space sun/moon placement for an outdoor render.
+
+    The disc goes in the most open sky: the column window with
+    the lowest occluder tops (BG/MG elements projected through
+    the shot camera), so the disc reads instead of hiding behind
+    a hill or a cloud. Among near-best windows the seeded
+    preference wins, so different locations keep different suns.
+    Deterministic for one package + camera: every shot of one
+    scene shares its sun.
+
+    Round 15 (R14-D1): ``visible_rect`` is the frozen crop rect
+    in full-frame pixels. The crop is applied to the composited
+    frame AFTER the environment renders, so a disc placed near
+    the top of the full frame clips on tight shots (MCU #0:
+    233x211, bbox y0=0). When given, the disc is placed so the
+    whole disc + margin lies inside the VISIBLE region, not just
+    the full frame. ``None`` keeps the round-14 behaviour.
+    """
+    tod = str(light.get("time_of_day", "day"))
+    rng = random.Random(
+        f"sun:{seed_key}:{tod}:{light.get('mood', 'warm')}")
+    radius = _SUN_RADIUS_FRAC.get(tod, 0.032) * width
+    preferred = width * rng.uniform(0.18, 0.82)
+    tops = _sun_clearance_top(elements, camera, width, height)
+    cols = len(tops)
+    span = max(1, int(2 * radius / width * cols))
+    # Round 15: the disc must fit the VISIBLE region (crop
+    # rect), not just the full frame. The allowed centre-x
+    # range is the intersection of the frame margin and the
+    # rect margin; a rect too narrow for the disc falls back
+    # to the full-frame range and the centre clamp below.
+    _lo_x = radius + 12.0
+    _hi_x = width - radius - 12.0
+    if visible_rect is not None:
+        _vx0, _vy0, _vx1, _vy1 = (float(v) for v in visible_rect)
+        _rlo = _vx0 + radius + 12.0
+        _rhi = _vx1 - radius - 12.0
+        if _rhi >= _rlo:
+            _lo_x = max(_lo_x, _rlo)
+            _hi_x = min(_hi_x, _rhi)
+    best = None
+    for c0 in range(0, cols - span + 1):
+        window_top = min(tops[c0:c0 + span])
+        cx = (c0 + span / 2.0) / cols * width
+        # The whole disc stays in frame with a margin.
+        if cx < _lo_x or cx > _hi_x:
+            continue
+        score = window_top - 0.15 * abs(cx - preferred)
+        if best is None or score > best[0]:
+            best = (score, cx, window_top)
+    if best is None:  # degenerate: fall back to the seeded spot
+        cx = min(max(preferred, _lo_x), _hi_x)
+        window_top = min(tops)
+        best = (0.0, cx, window_top)
+    _, cx, window_top = best
+    # Centre above the occluders with the disc clear of the top
+    # edge; a low horizon pulls it up so the ground loop does
+    # not clip it. When no window fits the whole disc, the disc
+    # still centres as high as possible (best effort). With a
+    # visible rect, the top/bottom bounds are the rect's edges
+    # (margin included): a disc that fits the rect but overlaps
+    # an occluder top reads as sun-behind-hill, which beats a
+    # clipped disc.
+    cy = min(window_top - radius - 8.0, height * 0.30)
+    if visible_rect is not None:
+        _top = _vy0 + radius + 12.0
+        _bottom = _vy1 - radius - 12.0
+        if _bottom < _top:  # rect too short: centre the disc
+            cy = (_vy0 + _vy1) / 2.0
+            _floor = _vy0
+        else:
+            cy = min(max(cy, _top), _bottom)
+            _floor = _top
+    else:
+        cy = max(radius + 12.0, cy)
+        _floor = radius + 12.0
+    if 0.0 < horizon < cy + radius:
+        cy = max(_floor, horizon - radius * 0.4)
+        if visible_rect is not None and _bottom >= _top:
+            cy = min(cy, _bottom)
+    if tod == "night":
+        colour = _MOON_COLOR
+    else:
+        colour = tuple(light.get("sun_color", (255, 244, 214)))
+    return {"center": (cx, cy), "radius": radius, "color": colour,
+            "is_moon": tod == "night"}
+
+
+def _draw_sun_disc(img, spec: dict) -> None:
+    """Disc + halo for a sun_disc_spec, composited onto ``img``."""
+    cx, cy = spec["center"]
+    radius = spec["radius"]
+    colour = spec["color"]
+    halo = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    hdraw = ImageDraw.Draw(halo)
+    for frac, alpha in ((3.2, 18), (2.4, 38), (1.7, 64)):
+        r = radius * frac
+        hdraw.ellipse([cx - r, cy - r, cx + r, cy + r],
+                      fill=colour + (alpha,))
+    halo = halo.filter(ImageFilter.GaussianBlur(6))
+    base = img.convert("RGBA")
+    img.paste(Image.alpha_composite(base, halo).convert("RGB"),
+              (0, 0))
+    draw = ImageDraw.Draw(img)
+    draw.ellipse([cx - radius, cy - radius,
+                  cx + radius, cy + radius], fill=colour)
+
+
+
 def _draw_label_on_face(draw, quad, text):
     xs = [p[0] for p in quad]
     ys = [p[1] for p in quad]
@@ -2750,11 +3679,18 @@ def _draw_box_element(img, draw, el, camera, rig, width, height,
                       textures=True):
     faces = _box_faces(camera, el["center"], el["size"], width, height)
     front_pts = None
+    # Round 12: glass draws UNSHADED. A window pane depicts sky or
+    # lamplight, never a shaded surface: shading the dusk sky
+    # colour (182,126,108) through the rig muted it to muddy brown
+    # and the window read darker than the wall. The element colour
+    # IS the light colour (sky blend, lit-warm, or dark glass).
+    unshaded = el.get("material") == "glass"
     for depth, pts, normal, centre in sorted(faces, key=lambda f: -f[0]):
-        colour = shade_with_points(el["color"], rig, centre, normal)
+        colour = (tuple(el["color"]) if unshaded else
+                  shade_with_points(el["color"], rig, centre, normal))
         outline = tuple(int(c * 0.6) for c in colour)
         tex = None
-        if textures:
+        if textures and not unshaded:
             # Face world size follows the dominant normal axis.
             ax = max(range(3), key=lambda k: abs(normal[k]))
             size = el["size"]
@@ -2763,17 +3699,17 @@ def _draw_box_element(img, draw, el, camera, rig, width, height,
                       (size[0], size[2]))
             tex = _face_texture(el, normal, pts, wm, hm)
         if tex is not None:
-            # Tinted-texture path (B2): neutral ambient+key factor
-            # plus the per-channel point-light gain, so a blue
-            # pulse cools a stone wall instead of only brightening
-            # it. With no point lights the gain is unit and the
-            # factor equals the old total irradiance — identical.
-            key_irr = (rig.key.irradiance(centre, normal)
-                       if rig.key else 0.0)
-            neutral = float(rig.ambient) + float(key_irr)
+            # Tinted-texture path (B2, round 8): the per-channel
+            # key factor folds into the paste gain, so textured
+            # faces carry the sun's colour exactly like the flat
+            # fill does (the old scalar `neutral` kept textured
+            # walls hue-blind to the time of day). A white key
+            # reproduces the old scalar path exactly.
+            _kf = key_factor_for(rig, centre, normal)
+            _pg = point_light_gain(rig, centre, normal)
             paste_textured_quad(
-                img, pts, tex, neutral,
-                point_light_gain(rig, centre, normal))
+                img, pts, tex, 1.0,
+                tuple(_kf[ch] * _pg[ch] for ch in range(3)))
             draw.polygon(pts, outline=outline)
         else:
             draw.polygon(pts, fill=colour, outline=outline)
@@ -2843,16 +3779,253 @@ def _draw_gable_prism(img, draw, el, camera, rig, width, height,
             slope_len = math.hypot(sx, sy)
             tex = _face_texture(el, normal, pts, slope_len, 2 * sz)
         if tex is not None:
-            # Tinted-texture path (B2): see _draw_box_element.
-            key_irr = (rig.key.irradiance(centre, unit)
-                       if rig.key else 0.0)
-            neutral = float(rig.ambient) + float(key_irr)
+            # Tinted-texture path (B2, round 8): see
+            # _draw_box_element -- the per-channel key factor
+            # folds into the paste gain.
+            _kf = key_factor_for(rig, centre, unit)
+            _pg = point_light_gain(rig, centre, unit)
             paste_textured_quad(
-                img, pts, tex, neutral,
-                point_light_gain(rig, centre, unit))
+                img, pts, tex, 1.0,
+                tuple(_kf[ch] * _pg[ch] for ch in range(3)))
             draw.polygon(pts, outline=outline)
         else:
             draw.polygon(pts, fill=colour, outline=outline)
+
+
+# Blob structure (RicksClips loop round 1): one flat ellipse reads
+# as a sticker -- the ENV-BLOB defect (flat magenta shrub, flat blue
+# domes, flat grey clouds). Foliage, domes and clouds carry internal
+# structure driven ONLY by the element kind, so every archetype
+# benefits and no per-scene code is involved. Footprints too small
+# for structure to read keep the plain ellipse.
+_BLOB_FOLIAGE_KINDS = frozenset(
+    ("canopy", "bush", "undergrowth", "hedgerow", "flowering_shrub"))
+_BLOB_CLOUD_KINDS = frozenset(("cloud", "smoke", "steam"))
+# Heap shapes: a dome's highlight cap reads as a pile; a flat
+# ellipse reads as a hole (the coal pile's defect). Boulders
+# are heaps too (round 10: plain-ellipse boulders read as dark
+# voids on the cave floor).
+_BLOB_DOME_KINDS = frozenset(("dome", "coal", "boulder"))
+# Distant hills: a flat ellipse reads as a grey-green cutout
+# against the sky (the R10 establishing frame). Hills get a
+# ridge cap, a shaded base and slope streaks instead.
+_BLOB_HILL_KINDS = frozenset(("distant_hill",))
+_BLOB_MIN_STRUCTURE_RX = 14.0
+
+
+def _stable_seed(text: str) -> int:
+    """A deterministic seed from an element id (``hash`` is salted
+    per process and must never drive pixels)."""
+    seed = 7
+    for ch in text:
+        seed = (seed * 31 + ord(ch)) & 0xFFFFFFFF
+    return seed
+
+
+def _scale_color(color, factor):
+    return tuple(max(0, min(255, int(round(c * factor))))
+                 for c in color[:3])
+
+
+def _draw_foliage_blob(draw, x, y, rx, ry, colour, outline, rng):
+    """A leafy mass: bumpy silhouette + seeded light/shadow lobes.
+
+    Round 13: the silhouette is a radius-modulated polygon (two
+    seeded harmonics, +-16%) instead of a perfect ellipse, so
+    crowns, bushes and hedges stop reading as flat discs (the
+    cloud painter's bump trick, generalized). Lobe offsets and
+    radii are bounded so every lobe stays inside even the
+    modulated silhouette's concave dips (|dx| + lr <= 0.80 rx,
+    |dy| + lr <= 0.72 ry < the 0.84 minimum radius factor).
+    """
+    ph1 = rng.uniform(0.0, 2.0 * math.pi)
+    ph2 = rng.uniform(0.0, 2.0 * math.pi)
+    pts = []
+    for k in range(72):
+        ang = 2.0 * math.pi * k / 72.0
+        mod = (1.0 + 0.10 * math.sin(5.0 * ang + ph1)
+               + 0.06 * math.sin(9.0 * ang + ph2))
+        pts.append((x + rx * mod * math.cos(ang),
+                    y + ry * mod * math.sin(ang)))
+    draw.polygon(pts, fill=colour)
+    light = _scale_color(colour, 1.18)
+    dark = _scale_color(colour, 0.82)
+    lobes = 5 if rx >= 40 else 3
+    for i in range(lobes):
+        dx = rng.uniform(-0.34, 0.34) * rx
+        dy = rng.uniform(-0.26, 0.26) * ry
+        lrx = rng.uniform(0.38, 0.46) * rx
+        lry = rng.uniform(0.38, 0.46) * ry
+        tone = light if i % 2 == 0 else dark
+        draw.ellipse([x + dx - lrx, y + dy - lry,
+                      x + dx + lrx, y + dy + lry], fill=tone)
+    draw.polygon(pts, outline=outline)
+
+
+def _draw_dome_blob(draw, x, y, rx, ry, colour, outline):
+    """A dome: base ellipse + a sunlit upper-left cap.
+
+    The highlight ellipse is sized and placed to stay inside the
+    base silhouette (worst corner norm 0.75 < 1).
+    """
+    draw.ellipse([x - rx, y - ry, x + rx, y + ry], fill=colour)
+    hx, hy = x - 0.26 * rx, y - 0.32 * ry
+    hrx, hry = 0.38 * rx, 0.26 * ry
+    draw.ellipse([hx - hrx, hy - hry, hx + hrx, hy + hry],
+                 fill=_blend(colour, (255, 255, 255), 0.35))
+    draw.ellipse([x - rx, y - ry, x + rx, y + ry], outline=outline)
+
+
+def _draw_cloud_blob(draw, x, y, rx, ry, colour, outline):
+    """A puffy cloud: base ellipse + light puffs + a shaded base.
+
+    The fixed puff layout keeps every cloud in one package
+    coherent; puff extents stay inside the base silhouette
+    (worst corner norm 0.97 < 1).
+    """
+    light = _scale_color(colour, 1.25)
+    # Bumps beyond the base silhouette: puffs kept strictly
+    # inside the ellipse leave a perfect ball silhouette (the
+    # steam sphere). Three light bumps along the top edge break
+    # it into a cloud; the base ellipse drawn over them keeps
+    # their centers hidden. Round 14: the bumps grow ~30% so the
+    # top edge reads broken-up at full-frame distance.
+    for fx, fy, prx, pry in ((-0.55, -0.75, 0.58, 0.52),
+                             (0.05, -0.90, 0.65, 0.55),
+                             (0.60, -0.70, 0.55, 0.50)):
+        px, py = x + fx * rx, y + fy * ry
+        draw.ellipse([px - prx * rx, py - pry * ry,
+                      px + prx * rx, py + pry * ry], fill=light)
+    draw.ellipse([x - rx, y - ry, x + rx, y + ry], fill=colour)
+    for fx, fy, pr in ((-0.52, 0.08, 0.46), (-0.18, -0.18, 0.58),
+                       (0.18, -0.22, 0.62), (0.52, 0.02, 0.44)):
+        px, py = x + fx * rx, y + fy * ry
+        draw.ellipse([px - pr * rx, py - pr * ry,
+                      px + pr * rx, py + pr * ry], fill=light)
+    # Round 14: a FLAT-BOTTOMED underside -- a shaded trapezoid
+    # with a straight base edge, the classic cloud read. The old
+    # shaded ellipse left a round belly; the straight base is
+    # what separates a cloud from a blob at a glance. Corners
+    # stay inside the silhouette (half-chord 0.95rx at 0.30ry,
+    # 0.71rx at 0.70ry).
+    draw.polygon([(x - 0.62 * rx, y + 0.30 * ry),
+                  (x + 0.62 * rx, y + 0.30 * ry),
+                  (x + 0.55 * rx, y + 0.70 * ry),
+                  (x - 0.55 * rx, y + 0.70 * ry)],
+                 fill=_scale_color(colour, 0.72))
+    # No outline: a hard edge turns steam/smoke into a grey
+    # sphere. The puffs + shaded base carry the soft shape.
+
+
+def _draw_hill_blob(draw, x, y, rx, ry, colour, outline, rng,
+                    peaked=False):
+    """A distant hill: a smooth vertical light gradient, a shaded
+    flank, and a lit rim.
+
+    The gradient is 20 thin ellipse slices sampled from the
+    ellipse equation (half-chord per row), toned from 1.22 at the
+    ridge to 0.80 at the base -- thin enough that no step reads,
+    unlike hard cap/base slices, which left strata lines across
+    the hill. A soft flank shadow (an offset ellipse kept inside
+    the silhouette) gives the slope direction; seeded streak
+    quads read as towers and are not used. All tones derive from
+    the element colour.
+
+    Round 13: the silhouette is SKEWED -- each side gets its own
+    seeded half-width (0.82-1.0 of rx) and the flank side varies
+    -- so the seven hills in a row no longer read as identical
+    domes (tester R11-D2). The skew is seeded per element id by
+    the caller, so a hill keeps its shape across frames.
+
+    Round 14: ``peaked`` draws a rocky RIDGE instead of a dome --
+    a seeded multi-peak ridgeline with a lit rim and facet lines
+    (the far ridge row, flagged via extra ridge=True). The far
+    row's job is silhouette variety at haze distance, so it
+    keeps a flat fill: the peaks, not the shading, carry it.
+    """
+    if peaked:
+        # Gentle rocky ridgeline, not alpine spikes: the first
+        # cut (peaks 0.55-1.0, valleys 0.30-0.55, hard outline)
+        # read as a row of grey cardboard triangles. Peaks and
+        # valleys now stay close, the edge is a softened tone of
+        # the fill, and a lighter upper polygon gives the ridge
+        # the same top-lit read as the domes' gradient.
+        n = rng.randint(4, 6)
+        ridge = []
+        for i in range(2 * n + 1):
+            fx = -1.0 + 2.0 * i / (2 * n)
+            if i == 0 or i == 2 * n:
+                h = rng.uniform(0.45, 0.55)  # low foothill ends
+            elif i % 2 == 0:
+                h = rng.uniform(0.70, 0.95)  # peak
+            else:
+                h = rng.uniform(0.55, 0.70)  # valley
+            ridge.append((x + fx * rx, y - h * ry))
+        soft_outline = _scale_color(colour, 0.92)
+        poly = ridge + [(x + rx, y + ry), (x - rx, y + ry)]
+        draw.polygon(poly, fill=_scale_color(colour, 0.94),
+                     outline=soft_outline)
+        cap = ridge + [(x + rx, y + 0.05 * ry),
+                       (x - rx, y + 0.05 * ry)]
+        draw.polygon(cap, fill=_scale_color(colour, 1.10))
+        for i in range(0, 2 * n + 1, 2):
+            px_, py_ = ridge[i]
+            draw.line([(px_, py_),
+                       (px_ + rng.uniform(-0.08, 0.08) * rx,
+                        y + 0.45 * ry)],
+                      fill=_scale_color(colour, 0.88),
+                      width=max(2, int(ry // 40)))
+        draw.line(ridge, fill=_scale_color(colour, 1.25),
+                  width=max(2, int(ry // 30)), joint="curve")
+        return
+    skew_l = rng.uniform(0.82, 1.0)
+    skew_r = rng.uniform(0.82, 1.0)
+    flank_sign = rng.choice((-1.0, 1.0))
+
+    def half_chord(yy, side):
+        base = rx * math.sqrt(max(0.0, 1.0 - ((yy - y) / ry) ** 2))
+        return base * (skew_r if side > 0 else skew_l)
+
+    steps = 20
+    for i in range(steps):
+        frac_top = i / steps
+        frac_bottom = (i + 1) / steps
+        tone = 1.22 - 0.42 * (frac_top + frac_bottom) / 2.0
+        y0 = y - ry + 2.0 * ry * frac_top
+        y1 = y - ry + 2.0 * ry * frac_bottom
+        pts = []
+        sub = 6
+        for j in range(sub + 1):
+            yy = y0 + (y1 - y0) * j / sub
+            pts.append((x + half_chord(yy, 1), yy))
+        for j in range(sub, -1, -1):
+            yy = y0 + (y1 - y0) * j / sub
+            pts.append((x - half_chord(yy, -1), yy))
+        draw.polygon(pts, fill=_scale_color(colour, tone))
+    # Shaded flank: offset ellipse, worst corner norm
+    # 0.28 + 0.36 = 0.64 < 0.82 (the minimum skew), so it stays
+    # inside the silhouette on either side.
+    fx, fy = x + flank_sign * 0.28 * rx, y + 0.22 * ry
+    frx, fry = 0.36 * rx, 0.34 * ry
+    draw.ellipse([fx - frx, fy - fry, fx + frx, fy + fry],
+                 fill=_scale_color(colour, 0.88))
+    # Lit rim + outline follow the skewed silhouette: sample the
+    # ellipse equation per side instead of drawing circles.
+    rim = []
+    for k in range(25):
+        ang = math.radians(195.0 + (345.0 - 195.0) * k / 24.0)
+        rside = skew_r if math.cos(ang) > 0 else skew_l
+        rim.append((x + rx * rside * math.cos(ang),
+                    y + ry * math.sin(ang)))
+    draw.line(rim, fill=_scale_color(colour, 1.35),
+              width=max(2, int(ry // 30)))
+    outline_pts = []
+    for k in range(65):
+        ang = 2.0 * math.pi * k / 64.0
+        rside = skew_r if math.cos(ang) > 0 else skew_l
+        outline_pts.append((x + rx * rside * math.cos(ang),
+                            y + ry * math.sin(ang)))
+    draw.polygon(outline_pts, outline=outline)
 
 
 def _draw_blob(img, draw, el, camera, rig, width, height):
@@ -2866,8 +4039,71 @@ def _draw_blob(img, draw, el, camera, rig, width, height):
     colour = shade_with_points(el["color"], rig, el["center"],
                                (0.0, 0.0, 1.0))
     outline = tuple(int(c * 0.6) for c in colour)
-    draw.ellipse([x - rx, y - ry, x + rx, y + ry], fill=colour,
-                 outline=outline)
+    kind = el.get("kind", "")
+    if kind in ("flame", "fire"):
+        # A flame reads as a teardrop with a hot core, not a flat
+        # oval on a stick (tester R2). Three nested shapes from
+        # the element colour: deep-orange outer flame, yellow
+        # inner flame, near-white core at the base. Static: the
+        # background renders once per shot, so no flicker is
+        # possible in this architecture (same limit as sparks).
+        outer = _blend(colour, (255, 110, 0), 0.45)
+        inner = _blend(colour, (255, 255, 255), 0.35)
+        core = (255, 248, 220)
+
+        def _teardrop(cx, cy, wrx, wry):
+            return [(cx, cy - wry),
+                    (cx + wrx, cy + 0.1 * wry),
+                    (cx + 0.55 * wrx, cy + wry),
+                    (cx, cy + wry),
+                    (cx - 0.55 * wrx, cy + wry),
+                    (cx - wrx, cy + 0.1 * wry)]
+
+        if rx > ry:
+            # Wide opening (a furnace mouth): a fire bed. No
+            # outlines anywhere -- nested outlined ellipses
+            # read as a flat ring -- with three flame tongues
+            # rising from the top edge and a bright core.
+            draw.ellipse([x - rx, y - ry, x + rx, y + ry],
+                         fill=outer)
+            for fx in (-0.5, 0.0, 0.5):
+                draw.polygon(_teardrop(x + fx * rx, y - 0.35 * ry,
+                                       0.28 * rx, 0.75 * ry),
+                             fill=inner)
+            draw.ellipse([x - 0.55 * rx, y - 0.1 * ry,
+                          x + 0.55 * rx, y + 0.6 * ry], fill=core)
+            return
+        draw.polygon(_teardrop(x, y, rx, ry), fill=outer,
+                     outline=outline)
+        draw.polygon(_teardrop(x, y + 0.18 * ry, 0.58 * rx,
+                               0.62 * ry), fill=inner)
+        draw.ellipse([x - 0.3 * rx, y + 0.3 * ry,
+                      x + 0.3 * rx, y + 0.85 * ry], fill=core)
+        return
+    if (kind not in _BLOB_FOLIAGE_KINDS
+            and kind not in _BLOB_CLOUD_KINDS
+            and kind not in _BLOB_DOME_KINDS
+            and kind not in _BLOB_HILL_KINDS):
+        draw.ellipse([x - rx, y - ry, x + rx, y + ry], fill=colour,
+                     outline=outline)
+        return
+    if (rx < _BLOB_MIN_STRUCTURE_RX
+            and kind not in _BLOB_CLOUD_KINDS
+            and kind not in _BLOB_DOME_KINDS):
+        draw.ellipse([x - rx, y - ry, x + rx, y + ry], fill=colour,
+                     outline=outline)
+        return
+    if kind in _BLOB_FOLIAGE_KINDS:
+        rng = random.Random(_stable_seed(str(el.get("id", ""))))
+        _draw_foliage_blob(draw, x, y, rx, ry, colour, outline, rng)
+    elif kind in _BLOB_HILL_KINDS:
+        rng = random.Random(_stable_seed(str(el.get("id", ""))))
+        _draw_hill_blob(draw, x, y, rx, ry, colour, outline, rng,
+                        peaked=bool((el.get("extra") or {}).get("ridge")))
+    elif kind in _BLOB_DOME_KINDS:
+        _draw_dome_blob(draw, x, y, rx, ry, colour, outline)
+    else:
+        _draw_cloud_blob(draw, x, y, rx, ry, colour, outline)
 
 
 # Controlled sparks (B2): a fixed-count, seeded, bounded spark
@@ -2887,6 +4123,28 @@ _SPARK_VZ_MAX = 0.01
 _SPARK_GRAVITY = 0.0012  # world units per frame^2 (downward)
 _SPARK_HOT = (255, 230, 170)
 _SPARK_EMBER = (255, 120, 30)
+# Round 9 (R7-D4 residual): the contact burst. One burst per strike,
+# fired from the element centre (the anvil contact point) with
+# outward, upward-biased velocities ~3x the ambient field, living 12
+# frames (0.5 s). The renderer passes the burst age via the element's
+# ``extra`` (``burst_age_frames`` + ``burst_strike_index``); without
+# those keys there is no burst, so static renders are unchanged.
+_SPARK_BURST_LIFETIME = 12  # frames
+_SPARK_BURST_COUNT = 12
+_SPARK_BURST_SPEED = 3.0
+# Round 11 (R11-4): strike debris. The burst streaks vanish
+# mid-flight; a real strike throws hot fragments that land, stick,
+# and cool on the floor. Debris is heavier than sparks: its own
+# gravity (far stronger than the ambient drift), landing in ~14-18
+# frames, then persisting as cooling glow dots for 44 frames
+# (~1.8 s) in total. Same determinism contract as the burst: a
+# pure function of (element, strike_index, age), via the
+# element's ``extra`` (``debris_age_frames`` +
+# ``debris_strike_index``); without those keys there is no debris.
+_DEBRIS_LIFETIME = 44  # frames
+_DEBRIS_COUNT = 6
+_DEBRIS_GRAVITY = 0.02  # world units per frame^2
+_DEBRIS_GROUND_Y = 0.02
 
 
 def spark_positions(el, frame: int):
@@ -2899,8 +4157,15 @@ def spark_positions(el, frame: int):
     birth and 1 at death. Positions stay inside the envelope:
     x/z within the element footprint + 0.4 world units, y from
     the element bottom to ``center_y + size_y/2 + vy_max *
-    lifetime``. Deterministic: same (element, frame) -> same
-    list, always. ``frame`` must be a finite number >= 0.
+    (lifetime + 3)``. Deterministic: same (element, frame) ->
+    same list, always. ``frame`` must be a finite number >= 0.
+
+    Round 9: each spark has its OWN lifetime in
+    [lifetime-3, lifetime+3] (deterministic per index). A shared
+    lifetime made the whole field repeat exactly every 18 frames
+    -- the R8 period-18 loop the tester caught (f24-35 == f6-17).
+    Per-spark lifetimes push the combined repeat out to the LCM
+    of 15..21 (360,360 frames): effectively aperiodic in any shot.
     """
     extra = el.get("extra", {}) or {}
     count = int(extra.get("spark_count", 14))
@@ -2919,20 +4184,266 @@ def spark_positions(el, frame: int):
     out = []
     for i in range(count):
         rng = random.Random(seed * 100003 + i)
-        birth = rng.randrange(lifetime)
+        # Own lifetime: base + a deterministic per-index offset in
+        # [-3, +3] (all seven values occur across the field).
+        life_i = max(1, lifetime + ((i * 5) % 7) - 3)
+        birth = rng.randrange(life_i)
         ox = cx + rng.uniform(-sx / 4.0, sx / 4.0)
         oz = cz + rng.uniform(-sz / 4.0, sz / 4.0)
         oy = cy - sy / 2.0
         vx = rng.uniform(-_SPARK_VX_MAX, _SPARK_VX_MAX)
         vy = rng.uniform(_SPARK_VY_MIN, _SPARK_VY_MAX)
         vz = rng.uniform(-_SPARK_VZ_MAX, _SPARK_VZ_MAX)
-        age = (frame_i - birth) % lifetime
+        age = (frame_i - birth) % life_i
         t = float(age)
         pos = (ox + vx * t,
                oy + vy * t - 0.5 * _SPARK_GRAVITY * t * t,
                oz + vz * t)
-        out.append((pos, age / lifetime, (vx, vy, vz)))
+        out.append((pos, age / life_i, (vx, vy, vz)))
     return out
+
+
+def burst_positions(el, age_frames: int, strike_index: int = 0):
+    """Flying contact-burst sparks ``age_frames`` after a strike.
+
+    Same ``(position, age_frac, velocity)`` shape as
+    ``spark_positions``. All sparks are born at the element centre
+    (the anvil contact point) at age 0 and fly outward on ballistic
+    paths ~3x faster than the ambient field, cooling with age.
+    Deterministic per (element, strike_index, age): each strike
+    gets its own seeded spray, so repeated strikes do not replay
+    the same pattern. Ages outside [0, _SPARK_BURST_LIFETIME)
+    return [] (the burst is dead).
+    """
+    age = int(age_frames)
+    if age < 0 or age >= _SPARK_BURST_LIFETIME:
+        return []
+    extra = el.get("extra", {}) or {}
+    count = int(extra.get("burst_count", _SPARK_BURST_COUNT))
+    seed = int(extra.get("spark_seed", 1))
+    ox, oy, oz = (float(v) for v in el["center"])
+    out = []
+    for i in range(count):
+        rng = random.Random(seed * 7919 + strike_index * 104729 + i)
+        ang = rng.uniform(0.0, 2.0 * math.pi)
+        speed = rng.uniform(0.5, 1.0) * _SPARK_BURST_SPEED
+        vx = math.cos(ang) * _SPARK_VX_MAX * speed
+        vz = math.sin(ang) * _SPARK_VZ_MAX * speed
+        # Upward-biased: every burst spark rises (a strike throws
+        # sparks UP off the anvil; none dive into the floor).
+        vy = rng.uniform(_SPARK_VY_MIN, _SPARK_VY_MAX) * speed \
+            * rng.uniform(1.0, 1.6)
+        t = float(age)
+        pos = (ox + vx * t,
+               oy + vy * t - 0.5 * _SPARK_GRAVITY * t * t,
+               oz + vz * t)
+        out.append((pos, age / _SPARK_BURST_LIFETIME, (vx, vy, vz)))
+    return out
+
+
+def debris_positions(el, age_frames: int, strike_index: int = 0):
+    """Hot strike debris ``age_frames`` after a strike.
+
+    Returns ``(position, cool_frac, landed)`` per fragment: the
+    fragments fly ballistic arcs from the element centre, land on
+    the floor (``_DEBRIS_GROUND_Y``) at a per-fragment landing
+    time solved from the arc, then stick at the landing point and
+    cool for the rest of ``_DEBRIS_LIFETIME``. Deterministic per
+    (element, strike_index, age); ages outside
+    [0, _DEBRIS_LIFETIME) return [] (the debris is gone).
+    """
+    age = int(age_frames)
+    if age < 0 or age >= _DEBRIS_LIFETIME:
+        return []
+    extra = el.get("extra", {}) or {}
+    count = int(extra.get("debris_count", _DEBRIS_COUNT))
+    seed = int(extra.get("spark_seed", 1))
+    ox, oy, oz = (float(v) for v in el["center"])
+    a = 0.5 * _DEBRIS_GRAVITY
+    out = []
+    for i in range(count):
+        rng = random.Random(seed * 104729 + strike_index * 7919
+                            + i * 13 + 5)
+        ang = rng.uniform(0.0, 2.0 * math.pi)
+        speed = rng.uniform(0.6, 1.0)
+        vx = math.cos(ang) * _SPARK_VX_MAX * speed * 2.0
+        vz = math.sin(ang) * _SPARK_VZ_MAX * speed * 2.0
+        vy = rng.uniform(0.08, 0.12)
+        disc = vy * vy + 4.0 * a * (oy - _DEBRIS_GROUND_Y)
+        t_land = (vy + math.sqrt(max(0.0, disc))) / (2.0 * a)
+        t = float(age)
+        if t < t_land:
+            pos = (ox + vx * t,
+                   oy + vy * t - a * t * t,
+                   oz + vz * t)
+            landed = False
+        else:
+            pos = (ox + vx * t_land, _DEBRIS_GROUND_Y,
+                   oz + vz * t_land)
+            landed = True
+        out.append((pos, age / _DEBRIS_LIFETIME, landed))
+    return out
+
+
+def _draw_streak(draw, camera, pos, vel, tail_frames, age_frac,
+                 width, height, line_w):
+    """One emissive motion streak: ``tail_frames`` back along
+    ``vel`` from ``pos``, cooling hot -> ember with ``age_frac``.
+    Skipped when both endpoints fall outside the frame."""
+    tail = (pos[0] - vel[0] * tail_frames,
+            pos[1] - vel[1] * tail_frames,
+            pos[2] - vel[2] * tail_frames)
+    x0, y0, _, vis0 = camera.project(tail, width, height)
+    x1, y1, _, vis1 = camera.project(pos, width, height)
+    if not (vis0 or vis1):
+        return
+    colour = tuple(
+        int(round(_SPARK_HOT[ch] * (1.0 - age_frac)
+                  + _SPARK_EMBER[ch] * age_frac))
+        for ch in range(3))
+    draw.line([(x0, y0), (x1, y1)], fill=colour, width=line_w)
+
+
+def _draw_debris(img, draw, camera, pos, cool_frac, landed,
+                 width, height):
+    """One debris fragment: a bright dot, cooling hot -> ember ->
+    dark with ``cool_frac``. Landed fragments still hot paint a
+    small squashed glow on the floor beneath them (nested discs
+    blended toward the floor tone sampled beside the ember), so
+    the light lives on the floor the characters stand on. Skipped
+    outside the frame or fully cooled."""
+    if cool_frac >= 1.0:
+        return
+    x, y, _, vis = camera.project(pos, width, height)
+    if not vis:
+        return
+    hot = tuple(
+        int(round(_SPARK_HOT[ch] * (1.0 - cool_frac)
+                  + _SPARK_EMBER[ch] * cool_frac))
+        for ch in range(3))
+    dark = (60, 40, 30)
+    fade = cool_frac * cool_frac
+    colour = tuple(
+        int(round(hot[ch] * (1.0 - fade) + dark[ch] * fade))
+        for ch in range(3))
+    r = 4 if width >= 1280 else 3
+    if landed and cool_frac < 0.6:
+        try:
+            floor = img.getpixel((
+                max(0, min(width - 1, int(x) + 14)),
+                max(0, min(height - 1, int(y) + 2))))
+        except Exception:
+            floor = (60, 55, 50)
+        for ring, frac in ((12, 0.25), (8, 0.45), (5, 0.70)):
+            glow = tuple(
+                int(round(colour[ch] * frac + floor[ch] * (1.0 - frac)))
+                for ch in range(3))
+            draw.ellipse([x - ring, y - ring * 0.45,
+                          x + ring, y + ring * 0.45], fill=glow)
+    draw.ellipse([x - r, y - r, x + r, y + r], fill=colour)
+    if cool_frac < 0.4:
+        draw.ellipse([x - 1, y - 1, x + 1, y + 1],
+                     fill=(255, 250, 235))
+
+
+# Flame flicker (round 14, deferred from round 13): fire and
+# flame elements are ANIMATED, like sparks -- excluded from the
+# static background and drawn per frame by _draw_flames, so the
+# flame shape, brightness and floor glow pulse instead of
+# sitting frozen. No background re-render: the per-frame draw
+# follows the sparks precedent exactly.
+_FLICKER_KINDS = frozenset(("fire", "flame"))
+
+
+def flame_flicker(frame: int, seed: int) -> float:
+    """Flicker value in [0, 1] for ``frame`` (24 fps).
+
+    Three incommensurate sines (7.3/11.1/13.7 Hz) with seeded
+    phases: the sum never repeats on a short cycle, so the
+    flame reads as turbulent rather than pulsing on a beat.
+    Deterministic: same (frame, seed) -> same value.
+    """
+    t = float(frame) / 24.0
+    rng = random.Random(seed)
+    phases = [rng.uniform(0.0, 2.0 * math.pi) for _ in range(3)]
+    v = (0.5 * math.sin(2.0 * math.pi * 7.3 * t + phases[0])
+         + 0.3 * math.sin(2.0 * math.pi * 11.1 * t + phases[1])
+         + 0.2 * math.sin(2.0 * math.pi * 13.7 * t + phases[2]))
+    return 0.5 + 0.5 * max(-1.0, min(1.0, v))
+
+
+def _draw_flames(img, draw, el, camera, width, height,
+                 frame: int = 0):
+    """Draw one fire/flame element for ``frame``: a teardrop
+    flame (outer tongue + bright core) whose scale, sway and
+    halo pulse with flame_flicker, plus a warm glow pool on the
+    floor beneath it pulsing with the same value, so the light
+    plays on the floor too.
+
+    Emissive: full colour, no Lambert shading (like sparks).
+    The projection matches _draw_blob exactly (centre + scale),
+    so the animated flame sits where the baked blob sat.
+    """
+    x, y, scale, vis = camera.project(el["center"], width, height)
+    if not vis or scale <= 0:
+        return
+    rx = el["size"][0] / 2 * scale
+    ry = el["size"][1] / 2 * scale
+    if rx < 3.0 or ry < 3.0:
+        return
+    colour = tuple(el["color"])
+    f = flame_flicker(frame, _stable_seed(str(el.get("id", ""))))
+    pulse = 0.86 + 0.28 * f
+    sway = (f - 0.5) * 0.7 * rx
+    cx, cy, cz = (float(v) for v in el["center"])
+    # Floor glow pool first (under everything): a soft warm
+    # ellipse at the flame's ground point, alpha pulsing with
+    # the same flicker value.
+    gx, gy, gscale, gvis = camera.project((cx, 0.0, cz),
+                                          width, height)
+    if gvis and gscale > 0:
+        grx = 1.3 * gscale
+        gry = grx * 0.28
+        pad = 12
+        layer = Image.new(
+            "RGBA",
+            (int(grx * 2 + pad * 2), int(gry * 2 + pad * 2)),
+            (0, 0, 0, 0))
+        ImageDraw.Draw(layer).ellipse(
+            [pad, pad, pad + 2 * grx, pad + 2 * gry],
+            fill=(255, 150, 60, int(20 + 26 * f)))
+        layer = layer.filter(ImageFilter.GaussianBlur(6))
+        img.paste(layer, (int(gx - grx - pad), int(gy - gry - pad)),
+                  layer)
+    # Halo behind the flame body.
+    hrx, hry = 2.2 * rx, 2.2 * ry
+    pad = 10
+    halo = Image.new(
+        "RGBA",
+        (int(hrx * 2 + pad * 2), int(hry * 2 + pad * 2)),
+        (0, 0, 0, 0))
+    ImageDraw.Draw(halo).ellipse(
+        [pad, pad, pad + 2 * hrx, pad + 2 * hry],
+        fill=colour + (int(16 + 22 * f),))
+    halo = halo.filter(ImageFilter.GaussianBlur(8))
+    img.paste(halo, (int(x - hrx - pad), int(y - hry - pad)), halo)
+    # Outer flame: base ellipse + tongue. The tongue tip rises
+    # above the nominal blob top and leans with the sway.
+    orx, ory = rx * pulse, ry * pulse
+    draw.ellipse([x - orx, y - 0.5 * ory,
+                  x + orx, y + 0.7 * ory], fill=colour)
+    draw.polygon([(x - 0.55 * orx, y + 0.15 * ory),
+                  (x + sway, y - 1.25 * ory),
+                  (x + 0.55 * orx, y + 0.15 * ory)], fill=colour)
+    # Inner core: smaller, brighter, sitting low in the flame.
+    core = _blend(colour, (255, 255, 220), 0.55)
+    crx, cry = orx * 0.55, ory * 0.55
+    cyy = y + 0.25 * ory
+    draw.ellipse([x - crx, cyy - 0.5 * cry,
+                  x + crx, cyy + 0.7 * cry], fill=core)
+    draw.polygon([(x - 0.5 * crx, cyy + 0.1 * cry),
+                  (x + sway * 0.6, cyy - 0.9 * cry),
+                  (x + 0.5 * crx, cyy + 0.1 * cry)], fill=core)
 
 
 def _draw_sparks(img, draw, el, camera, rig, width, height,
@@ -2940,24 +4451,41 @@ def _draw_sparks(img, draw, el, camera, rig, width, height,
     """Draw a sparks element: short bright streaks, unshaded.
 
     Sparks are emissive (they ARE light), so they draw at full
-    colour with no Lambert shading. Each spark is a 2-frame
+    colour with no Lambert shading. Each ambient spark is a 2-frame
     motion streak from its position back along its velocity,
     cooling from hot white-yellow to ember orange with age.
-    Streaks whose endpoints both fall outside the frame are
-    skipped by the projection visibility check."""
+    When the element's ``extra`` carries ``burst_age_frames`` (set
+    by the renderer near a strike moment), a contact burst of
+    faster sparks flies from the element centre on top of the
+    ambient field, its streaks shrinking as it cools. Streaks
+    whose endpoints both fall outside the frame are skipped by the
+    projection visibility check."""
     line_w = 2 if width >= 1280 else 1
     for pos, age_frac, vel in spark_positions(el, spark_frame):
-        tail = (pos[0] - vel[0] * 2.0, pos[1] - vel[1] * 2.0,
-                pos[2] - vel[2] * 2.0)
-        x0, y0, _, vis0 = camera.project(tail, width, height)
-        x1, y1, _, vis1 = camera.project(pos, width, height)
-        if not (vis0 or vis1):
-            continue
-        colour = tuple(
-            int(round(_SPARK_HOT[ch] * (1.0 - age_frac)
-                      + _SPARK_EMBER[ch] * age_frac))
-            for ch in range(3))
-        draw.line([(x0, y0), (x1, y1)], fill=colour, width=line_w)
+        _draw_streak(draw, camera, pos, vel, 2.0, age_frac,
+                     width, height, line_w)
+    extra = el.get("extra", {}) or {}
+    burst_age = extra.get("burst_age_frames")
+    if burst_age is not None:
+        strike_index = int(extra.get("burst_strike_index", 0))
+        for pos, age_frac, vel in burst_positions(
+                el, int(burst_age), strike_index):
+            # Fast sparks draw long streaks; the streak shrinks as
+            # the burst cools, so the burst fades instead of
+            # vanishing mid-flight at the lifetime cut.
+            _draw_streak(draw, camera, pos, vel,
+                         3.5 - 2.5 * age_frac, age_frac,
+                         width, height, line_w)
+    # Round 11: debris outlives the burst (44 frames vs 12), so it
+    # has its own age window. Without the extra keys there is no
+    # debris and static renders are unchanged.
+    debris_age = extra.get("debris_age_frames")
+    if debris_age is not None:
+        strike_index = int(extra.get("debris_strike_index", 0))
+        for pos, cool_frac, landed in debris_positions(
+                el, int(debris_age), strike_index):
+            _draw_debris(img, draw, camera, pos, cool_frac, landed,
+                         width, height)
 
 
 # ---------------------------------------------------------------------------
@@ -3285,6 +4813,34 @@ def validate_fg_composition(pkg: dict, camera, size=(1920, 1080),
             "ok": not errors}
 
 
+def _world_x_at_pixel(camera, target_px: float, y: float, z: float,
+                      width: int, height: int) -> float | None:
+    """World x whose projection lands on ``target_px`` at (y, z).
+
+    Binary search: projection along a world-x line is monotonic
+    in x for a forward-looking camera. Returns None when the
+    target pixel is unreachable at this plane (outside the
+    bracket or behind the camera) — callers fall back to the
+    symmetric frustum limit instead of inventing a position.
+    """
+    def _px(x):
+        px, _, _, vis = camera.project((x, y, z), width, height)
+        return px if vis else float("nan")
+
+    lo, hi = -30.0, 30.0
+    px_lo, px_hi = _px(lo), _px(hi)
+    if (px_lo != px_lo or px_hi != px_hi
+            or px_lo > target_px or px_hi < target_px):
+        return None
+    for _ in range(28):
+        mid = (lo + hi) / 2.0
+        if _px(mid) < target_px:
+            lo = mid
+        else:
+            hi = mid
+    return (lo + hi) / 2.0
+
+
 def _visible_half_width(camera, z: float, y: float,
                         width: int, height: int) -> float:
     """Half-width of the camera frustum (world x) at depth ``z``.
@@ -3310,7 +4866,8 @@ def _visible_half_width(camera, z: float, y: float,
 
 
 def fit_foreground_to_frustum(pkg: dict, camera, size=(1920, 1080),
-                              edge: float = 0.92) -> dict:
+                              edge: float = 0.92,
+                              visible_rect=None) -> dict:
     """Pull foreground elements inside the camera frustum (W2).
 
     Foreground occluders are staged in world coordinates, but the
@@ -3322,20 +4879,50 @@ def fit_foreground_to_frustum(pkg: dict, camera, size=(1920, 1080),
     lamp pole + head, a column + pediment) move together and
     attachments hold. Elements already in-frame and all non-FG
     elements are untouched. Returns a NEW package dict; the input
-    is never mutated. Callers pass the WIDEST shot camera
-    (establishing, eye-level) as the reference so staging is
-    stable across every shot of the location. Every adjustment is
+    is never mutated. Callers pass the camera the FG layer will
+    RENDER with (the shot camera): fitting against any other
+    camera leaves the occluders off-frame at the render camera
+    whenever the two frustums differ at the FG plane -- the W2
+    defect class (an earlier revision fitted against the
+    establishing camera, and every non-establishing shot then
+    rendered its foreground off-frame, because the standard
+    viewpoint radius is much closer than the establishing
+    radius). Fitting per shot is safe across hard cuts: each
+    shot has its own fixed camera, and the occluder stays at the
+    frame edge of its own shot. Every adjustment is
     recorded in the returned package's ``provenance["fg_fit"]``
     (moved ids + from/to x + the reference camera) — never silent.
+
+    ``visible_rect`` (round 6): the frozen crop rect in
+    full-frame pixels. The frame the viewer sees is the crop
+    window, not the full frame: fitting against the full frame
+    left a fitted column at the full-frame edge, and the crop
+    zoom then carried it to the middle of the visible frame
+    (Loop 01 shot 17 — a blurred column splitting the two
+    subjects). With a rect, FG x clamps to the world interval
+    whose projection falls inside the rect (same ``edge`` inset
+    on each side), so occluders sit at the VISIBLE frame's
+    edges. None keeps the exact legacy full-frame behaviour.
     """
     width, height = int(size[0]), int(size[1])
     cache: dict[tuple[float, float], float] = {}
+    rect = None
+    if visible_rect is not None:
+        rect = tuple(float(v) for v in visible_rect)
 
     def _half_width(y, z):
         key = (round(float(y), 2), round(float(z), 2))
         if key not in cache:
             cache[key] = _visible_half_width(camera, z, y, width, height)
         return cache[key]
+
+    def _x_interval(y, z):
+        """World-x interval projecting inside the visible rect."""
+        x_lo = _world_x_at_pixel(camera, rect[0], y, z, width, height)
+        x_hi = _world_x_at_pixel(camera, rect[2], y, z, width, height)
+        if x_lo is None or x_hi is None or x_hi <= x_lo:
+            return None
+        return (x_lo, x_hi)
 
     new_elements = []
     moved = []
@@ -3344,6 +4931,25 @@ def fit_foreground_to_frustum(pkg: dict, camera, size=(1920, 1080),
             new_elements.append(el)
             continue
         cx, cy, cz = (float(v) for v in el["center"])
+        if rect is not None:
+            interval = _x_interval(cy, cz)
+            if interval is not None:
+                x_lo, x_hi = interval
+                inset = (1.0 - edge) * (x_hi - x_lo) / 2.0
+                lo, hi = x_lo + inset, x_hi - inset
+                if lo <= cx <= hi:
+                    new_elements.append(el)
+                    continue
+                new_x = min(max(cx, lo), hi)
+                moved.append({"id": el["id"],
+                              "from_x": round(cx, 3),
+                              "to_x": round(new_x, 3),
+                              "y": round(cy, 3), "z": round(cz, 3)})
+                moved_el = dict(el)
+                moved_el["center"] = (new_x, cy, cz)
+                new_elements.append(moved_el)
+                continue
+            # Unreachable rect at this plane: legacy fallback.
         limit = _half_width(cy, cz) * edge
         if limit <= 0 or abs(cx) <= limit:
             new_elements.append(el)
@@ -3364,6 +4970,206 @@ def fit_foreground_to_frustum(pkg: dict, camera, size=(1920, 1080),
         "moved": moved,
         "moved_count": len(moved),
         "edge": edge,
+        "visible_rect": list(rect) if rect is not None else None,
+        "reference_camera": {
+            "position": [round(float(v), 3)
+                         for v in camera.position],
+            "target": [round(float(v), 3) for v in camera.target],
+            "fov_deg": float(camera.fov_deg),
+        },
+        "size": [width, height],
+    }
+    out["provenance"] = provenance
+    return out
+
+
+def clear_foreground_from_subjects(pkg: dict, camera,
+                                    size=(1920, 1080),
+                                    subject_boxes=None, *,
+                                    margin_px: float = 20.0,
+                                    max_steps: int = 24,
+                                    step_m: float = 0.25,
+                                    visible_rect=None,
+                                    max_visible_fraction: float = 0.25,
+                                    gap_min_px: float = 80.0) -> dict:
+    """Push FG occluders off the subjects' standing boxes (round 3).
+
+    ``fit_foreground_to_frustum`` clamps FG x against a SYMMETRIC
+    frustum: under an azimuth camera (OTS, 28 deg) the visible
+    window at the FG plane is rotated, so a fitted rock projects
+    center-frame and covers the cast -- the Loop 01 cave shots
+    showed two giant blurred rocks and no characters, while every
+    record (standing boxes, camera target) said the cast was
+    in-frame. This pass projects each FG element's screen bbox
+    with the SAME camera and shifts conflicting elements outward
+    along world x until they clear every subject standing box
+    (expanded by ``margin_px``), no element sits in the
+    inter-subject gap corridor, and no single element covers
+    more than ``max_visible_fraction`` of the visible window. Elements whose world x-intervals
+    overlap at similar depth move as one group (a lamp pole +
+    head, a railing + its posts, a tree + its canopy), so
+    assemblies never detach. Shifting stops at the first clear
+    state, or after ``max_steps`` -- an element that cannot clear
+    within the budget stays at its best-effort position with the
+    outcome recorded, never silently left covering the subject
+    and never looped forever. The shift can also carry an element
+    fully off-frame (recorded as ``off_frame``): foreground is
+    decoration, and an invisible occluder beats one that hides
+    the story.
+    Returns a NEW package; the input is never mutated. Without
+    subject boxes only the area rule applies.
+
+    ``visible_rect`` (round 6): the frozen crop rect in
+    full-frame pixels. Conflicts and the 40% area rule are
+    measured against the VISIBLE window, not the full frame:
+    a crop zoom multiplies an occluder's share of the seen
+    frame, so a column at 14% of the full frame became ~28%
+    of the visible frame and split the subjects. None keeps
+    the exact legacy full-frame behaviour.
+    """
+    width, height = int(size[0]), int(size[1])
+    if visible_rect is not None:
+        vx0, vy0, vx1, vy1 = (float(v) for v in visible_rect)
+    else:
+        vx0, vy0, vx1, vy1 = 0.0, 0.0, float(width), float(height)
+    frame_area = (vx1 - vx0) * (vy1 - vy0)
+    boxes = [(float(b[0]) - margin_px, float(b[1]) - margin_px,
+              float(b[2]) + margin_px, float(b[3]) + margin_px)
+             for b in (subject_boxes or [])]
+    # Inter-subject gap corridor (round 6): clearance used to
+    # park occluders in the gap BETWEEN subjects — clear of
+    # every standing box yet splitting the group and blocking
+    # the eyeline (Loop 01 shot 17: a blurred column between
+    # Linh and Ong Ba). Adjacent subject pairs with a wide
+    # enough gap contribute a no-FG box over the gap's upper
+    # half (the eyeline band; floor-level foreground in the
+    # gap stays allowed).
+    gap_boxes = []
+    if len(boxes) >= 2:
+        ordered = sorted(boxes, key=lambda b: b[0])
+        for left, right in zip(ordered, ordered[1:]):
+            gap = right[0] - left[2]
+            if gap <= gap_min_px:
+                continue
+            top = min(left[1], right[1])
+            bottom = max(left[3], right[3])
+            gap_boxes.append((left[2], top, right[0],
+                              top + 0.5 * (bottom - top)))
+    boxes = boxes + gap_boxes
+
+    def _conflicts(bbox):
+        if bbox is None:
+            return False
+        x0, y0, x1, y1 = bbox
+        ix0, iy0 = max(x0, vx0), max(y0, vy0)
+        ix1, iy1 = min(x1, vx1), min(y1, vy1)
+        if ix1 <= ix0 or iy1 <= iy0:
+            return False
+        if ((ix1 - ix0) * (iy1 - iy0) / frame_area
+                > max_visible_fraction):
+            return True
+        for (sx0, sy0, sx1, sy1) in boxes:
+            if ix0 < sx1 and ix1 > sx0 and iy0 < sy1 and iy1 > sy0:
+                return True
+        return False
+
+    elements = list(pkg.get("elements", []))
+    fg_idx = [i for i, el in enumerate(elements)
+              if el.get("layer") == "FG"]
+    if not fg_idx:
+        return dict(pkg)
+    # Groups: overlapping world x-intervals at similar depth.
+    parent = {i: i for i in fg_idx}
+
+    def _find(a):
+        while parent[a] != a:
+            parent[a] = parent[parent[a]]
+            a = parent[a]
+        return a
+
+    def _union(a, b):
+        ra, rb = _find(a), _find(b)
+        if ra != rb:
+            parent[ra] = rb
+
+    def _xspan(el):
+        cx = float(el["center"][0])
+        hw = float(el["size"][0]) / 2.0
+        return (cx - hw - 0.1, cx + hw + 0.1)
+
+    for a_pos, a in enumerate(fg_idx):
+        for b in fg_idx[a_pos + 1:]:
+            ax0, ax1 = _xspan(elements[a])
+            bx0, bx1 = _xspan(elements[b])
+            dz = abs(float(elements[a]["center"][2])
+                     - float(elements[b]["center"][2]))
+            if ax0 < bx1 and bx0 < ax1 and dz < 1.0:
+                _union(a, b)
+    groups: dict[int, list[int]] = {}
+    for i in fg_idx:
+        groups.setdefault(_find(i), []).append(i)
+
+    new_elements = list(elements)
+    moved: list[dict] = []
+    for members in groups.values():
+        # Direction: away from the frame center, from the group's
+        # projected bbox center; fall back to the world center.
+        bboxes = [_projected_bbox(elements[i], camera, width, height)
+                  for i in members]
+        vis = [b for b in bboxes if b is not None]
+        if not vis or not any(_conflicts(b) for b in vis):
+            continue
+        gx0 = min(b[0] for b in vis)
+        gx1 = max(b[2] for b in vis)
+        centre = (gx0 + gx1) / 2.0
+        visible_cx = (vx0 + vx1) / 2.0
+        if abs(centre - visible_cx) > 1.0:
+            direction = 1.0 if centre > visible_cx else -1.0
+        else:
+            wx = sum(float(elements[i]["center"][0])
+                     for i in members) / len(members)
+            direction = 1.0 if wx >= 0 else -1.0
+        # Shift the whole group in steps until every member is
+        # clear or fully off-frame.
+        shifted = {i: dict(elements[i]) for i in members}
+        steps = 0
+        while steps < max_steps:
+            for i in members:
+                el = shifted[i]
+                cx, cy, cz = (float(v) for v in el["center"])
+                el["center"] = (cx + direction * step_m, cy, cz)
+            steps += 1
+            now = [_projected_bbox(shifted[i], camera, width, height)
+                   for i in members]
+            if not any(_conflicts(b) for b in now if b is not None):
+                break
+        for i in members:
+            old_x = float(elements[i]["center"][0])
+            new_x = float(shifted[i]["center"][0])
+            if new_x == old_x:
+                continue
+            bbox = _projected_bbox(shifted[i], camera, width, height)
+            off_frame = bbox is None or (
+                max(bbox[0], vx0) >= min(bbox[2], vx1)
+                or max(bbox[1], vy0) >= min(bbox[3], vy1))
+            new_elements[i] = shifted[i]
+            moved.append({"id": elements[i]["id"],
+                          "from_x": round(old_x, 3),
+                          "to_x": round(new_x, 3),
+                          "steps": steps,
+                          "off_frame": bool(off_frame)})
+    out = dict(pkg)
+    out["elements"] = new_elements
+    provenance = dict(pkg.get("provenance") or {})
+    provenance["fg_clearance"] = {
+        "moved": moved,
+        "moved_count": len(moved),
+        "subject_boxes": len(boxes) - len(gap_boxes),
+        "gap_boxes": len(gap_boxes),
+        "max_visible_fraction": max_visible_fraction,
+        "margin_px": margin_px,
+        "visible_rect": ([vx0, vy0, vx1, vy1]
+                         if visible_rect is not None else None),
         "reference_camera": {
             "position": [round(float(v), 3)
                          for v in camera.position],
@@ -3518,11 +5324,37 @@ def _paint_ground(img, camera, width, height, horizon, ground_kind,
     return painted
 
 
+# Atmospheric perspective (RicksClips loop round 1): distant
+# elements tint toward the horizon sky colour. Absolute camera-depth
+# anchors: nothing within 10 units hazes (interiors stay crisp),
+# the full 0.40 mix applies at 30 units and beyond. The tint is
+# applied to the element colour before dispatch, so flat fills and
+# procedural textures (both derived from el["color"]) haze together.
+_HAZE_NEAR = 10.0
+_HAZE_FAR = 30.0
+_HAZE_MAX = 0.40
+
+
+def _haze_factor(depth: float) -> float:
+    if depth <= _HAZE_NEAR:
+        return 0.0
+    if depth >= _HAZE_FAR:
+        return _HAZE_MAX
+    return _HAZE_MAX * (depth - _HAZE_NEAR) / (_HAZE_FAR - _HAZE_NEAR)
+
+
+def _haze_color(color, sky_bottom, factor):
+    return tuple(int(round(c * (1.0 - factor) + s * factor))
+                 for c, s in zip(color[:3], sky_bottom[:3]))
+
+
 def render_environment(pkg: dict, camera, size=(1920, 1080),
                        draw_layers=("BG", "MG", "FG"), transparent=False,
                        textures=True, exclude_ids=None,
                        energy_glow=None, spark_frame: int = 0,
-                       scoped_state=None, rain_frame: int = 0
+                       scoped_state=None, rain_frame: int = 0,
+                       fg_blur_radius: float = 0.0,
+                       visible_rect=None
                        ) -> Image.Image:
     """Render an EnvironmentPackage to a PIL image.
 
@@ -3549,6 +5381,13 @@ def render_environment(pkg: dict, camera, size=(1920, 1080),
     foreground-occlusion layer). Shadows always cover every layer
     in the opaque pass, so foreground occluders' contact shadows
     stay under the characters, as in the Scene25D path.
+
+    ``fg_blur_radius`` (RicksClips loop round 1) softens the
+    transparent (foreground-occlusion) pass with a Gaussian blur
+    of that radius in pixels: near-camera content reads out of
+    focus, the reference's depth cue. Default 0.0 (crisp, previous
+    behaviour). Only the transparent pass blurs; the opaque pass
+    never does.
 
     When ``textures=True`` and the ground kind has a painter, the
     ground plane is painted in texture bands tinted with the
@@ -3612,17 +5451,66 @@ def render_environment(pkg: dict, camera, size=(1920, 1080),
                 continue
             _draw_element(img, draw, el, camera, rig, width, height,
                           textures, spark_frame)
+        if fg_blur_radius > 0:
+            img = img.filter(ImageFilter.GaussianBlur(fg_blur_radius))
         return img
     img = Image.new("RGB", (width, height), sky_bottom)
     draw = ImageDraw.Draw(img)
+    # Round 15: the dusk pink mid-band (dossier "pink-orange-
+    # purple"). Outdoor archetypes only -- enclosed backdrops
+    # keep the two-stop gradient (same gate as the sun disc).
+    sky_mid = (tuple(light["sky_mid"])
+               if light.get("sky_mid") is not None
+               and pkg.get("archetype") not in _ENCLOSED_ARCHETYPES
+               else None)
     for y in range(height):
         t = y / max(1, height - 1)
-        draw.line([(0, y), (width, y)],
-                  fill=tuple(int(round(sky_top[i] * (1 - t)
-                                       + sky_bottom[i] * t))
-                             for i in range(3)))
+        if sky_mid is not None and t < 0.55:
+            u = t / 0.55
+            fill = tuple(int(round(sky_top[i] * (1 - u)
+                                   + sky_mid[i] * u))
+                         for i in range(3))
+        elif sky_mid is not None:
+            u = (t - 0.55) / 0.45
+            fill = tuple(int(round(sky_mid[i] * (1 - u)
+                                   + sky_bottom[i] * u))
+                         for i in range(3))
+        else:
+            fill = tuple(int(round(sky_top[i] * (1 - t)
+                                   + sky_bottom[i] * t))
+                         for i in range(3))
+        draw.line([(0, y), (width, y)], fill=fill)
     horizon = _horizon_y(camera, width, height)
+    # Round 14: the sun/moon disc, outdoor archetypes only, right
+    # after the sky gradient -- clouds and hills pass in front of
+    # it, and the ground loop below clips anything under the
+    # horizon. Seeded by the package's element ids, so one
+    # location keeps one sun across its shots and renders.
+    if pkg.get("archetype") not in _ENCLOSED_ARCHETYPES:
+        _sun_seed = hashlib.md5(
+            ",".join(sorted(str(e.get("id", ""))
+                            for e in pkg.get("elements", []))).encode()
+        ).hexdigest()[:8]
+        _sun = sun_disc_spec(
+            light, pkg.get("elements", []), camera, width, height,
+            horizon, f"{pkg.get('archetype')}:{_sun_seed}",
+            visible_rect=visible_rect)
+        if _sun is not None:
+            _draw_sun_disc(img, _sun)
+            draw = ImageDraw.Draw(img)
     ground_dark = tuple(int(c * 0.72) for c in ground_color)
+    # Round 8 (R2-V4): the ground gradient is lit by the ambient +
+    # key rig (no point lights -- their glow is painted per band
+    # by _paint_ground_band_glow), so floors carry the time of day
+    # instead of repeating the fixed spec colour at every hour.
+    # The up-facing normal at the origin is the representative
+    # ground sample; the gradient's dark end shades the same way.
+    # _paint_ground and the grid below inherit the lit colour.
+    _key_rig = rig_for(light)
+    ground_color = shade_with_points(
+        ground_color, _key_rig, (0.0, 0.0, 0.0), (0.0, 1.0, 0.0))
+    ground_dark = shade_with_points(
+        ground_dark, _key_rig, (0.0, 0.0, 0.0), (0.0, 1.0, 0.0))
     for y in range(int(horizon), height):
         t = (y - horizon) / max(1, height - horizon)
         draw.line([(0, y), (width, y)],
@@ -3641,7 +5529,8 @@ def render_environment(pkg: dict, camera, size=(1920, 1080),
             rig=rig)
     if not ground_painted and pkg.get("ground", {}).get("kind") in (
             "cobblestone", "asphalt", "packed_earth", "pale_stone",
-            "sand", "neutral", "dark_stone", "wood_floor"):
+            "sand", "neutral", "dark_stone", "wood_floor",
+            "cave_rock"):
         grid_color = tuple(int(c * 0.82) for c in ground_color)
         for gx in range(-15, 16, 3):
             pts = []
@@ -3667,9 +5556,18 @@ def render_environment(pkg: dict, camera, size=(1920, 1080),
     # clipped to below the horizon. Shadow darkness falls with
     # layer distance (atmospheric perspective): BG 0.5, MG 0.8,
     # FG 1.0 — distant shadows are softer, never black blobs.
+    # Round 14: cast quads live on their OWN layer. In round 13
+    # they shared the contact layer's blur-4 pass at 0.30 x 0.5
+    # (BG) alpha, and the thin foreshortened quads blurred to
+    # nothing on delivered frames (R13-D1: diff maps empty). A
+    # directional shadow keeps a harder edge than a contact
+    # pool: blur 2, and the layer factor floored at 0.75 so a
+    # distant cast shadow still reads as a coherent darkening.
     _LAYER_SHADOW = {"BG": 0.5, "MG": 0.8, "FG": 1.0}
     shadow_layer = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    cast_layer = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     sdraw = ImageDraw.Draw(shadow_layer)
+    cdraw = ImageDraw.Draw(cast_layer)
     for el in elements:
         if el.get("geometry") != "box":
             continue
@@ -3698,11 +5596,33 @@ def render_environment(pkg: dict, camera, size=(1920, 1080),
         sdraw.ellipse([px - spec["rx_px"], py - spec["ry_px"],
                        px + spec["rx_px"], py + spec["ry_px"]],
                       fill=(0, 0, 0, alpha))
+        # Round 13: tall outdoor elements also cast a tapered
+        # shadow quad along the light's ground direction (trees,
+        # poles, houses at a low sun). Indoors the sun is not
+        # the light, so enclosed archetypes keep contact-only
+        # shadows; short elements keep them too.
+        if (pkg.get("archetype") not in _ENCLOSED_ARCHETYPES
+                and el["size"][1] > 1.5):
+            cast = cast_shadow_spec(
+                foot, el["size"][1],
+                max(el["size"][0], el["size"][2]) * 0.4,
+                rig.key, camera, (width, height))
+            if cast is not None:
+                cdraw.polygon(
+                    cast["polygon_px"],
+                    fill=(0, 0, 0, int(
+                        255 * cast["alpha"]
+                        * max(0.75, _LAYER_SHADOW.get(
+                            el.get("layer"), 0.8)))))
     shadow_layer = shadow_layer.filter(ImageFilter.GaussianBlur(4))
+    cast_layer = cast_layer.filter(ImageFilter.GaussianBlur(2))
     if horizon > 0:
         ImageDraw.Draw(shadow_layer).rectangle(
             [0, 0, width, int(horizon)], fill=(0, 0, 0, 0))
-    img = Image.alpha_composite(img.convert("RGBA"), shadow_layer).convert("RGB")
+        ImageDraw.Draw(cast_layer).rectangle(
+            [0, 0, width, int(horizon)], fill=(0, 0, 0, 0))
+    img = Image.alpha_composite(img.convert("RGBA"), shadow_layer)
+    img = Image.alpha_composite(img, cast_layer).convert("RGB")
     draw = ImageDraw.Draw(img)
     # Elements far-to-near by camera depth of centre, restricted to
     # the requested layers (default: all three).
@@ -3711,6 +5631,13 @@ def render_environment(pkg: dict, camera, size=(1920, 1080),
     for el in sorted(elements, key=_depth, reverse=True):
         if el.get("layer") not in draw_layers:
             continue
+        factor = _haze_factor(_depth(el))
+        if factor > 0:
+            # Haze the colour before dispatch: fills and textures
+            # both derive from el["color"], so they haze together.
+            # The package element is never mutated.
+            el = dict(el, color=_haze_color(el["color"], sky_bottom,
+                                            factor))
         _draw_element(img, draw, el, camera, rig, width, height,
                       textures, spark_frame)
     if scoped_state is not None and _scoped_rain(scoped_state):

@@ -72,8 +72,14 @@ FACE_MARKING_STYLES = ("none", "brow_patch", "cheek_stripes", "muzzle",
 
 # Hair styles (v8): "short" | "long" | "tuft" | "side_part" (hair
 # parted on one side -- a slanted hairline, a signature trait for
-# historical-figure-style test instances).
-HAIR_STYLES = ("short", "long", "tuft", "side_part")
+# historical-figure-style test instances). "tied" (round-3 system 3):
+# hair tied high -- cap plus a bun knot above the head.
+HAIR_STYLES = ("short", "long", "tuft", "side_part", "tied")
+
+# Beard styles (round-3 system 3): "none" | "full" (a chin beard
+# following the bottom of the head circle). A beard is a separate
+# trait from a moustache; both can coexist.
+BEARD_STYLES = ("none", "full")
 
 # Canonical standing foot split (v7, animation audit 2026-11-11): the
 # feet stand +/-STAND_SPLIT_FRAC*H around the root in EVERY standing
@@ -217,7 +223,10 @@ class Stickman:
                  hat="bowler", moustache=True, moustache_style=None,
                  name="lustig",
                  template="male", body_variant="standard",
-                 hair_style=None, glasses=False, cane=False,
+                 hair_style=None, hair_color=None,
+                 beard_style="none", beard_color=None,
+                 hat_color=None, scarf_color=None, apron_color=None,
+                 glasses=False, cane=False,
                  costume="none", gait=None, gait_profile=None,
                  eye_count=2, ears="none", tail="none", horns="none",
                  face_markings="none"):
@@ -248,6 +257,19 @@ class Stickman:
                 f"(expected one of {sorted(MOUSTACHE_STYLES)})")
         self.moustache_style = moustache_style
         self.moustache = moustache_style != "none"
+        # Worn traits (round-3 system 3): colours are hex strings or
+        # None (None = the art's ink default -- never an invented
+        # colour). beard_style is validated loudly like moustache.
+        if beard_style not in BEARD_STYLES:
+            raise ValueError(
+                f"unknown beard_style: {beard_style!r} "
+                f"(expected one of {sorted(BEARD_STYLES)})")
+        self.hair_color = hair_color
+        self.beard_style = beard_style
+        self.beard_color = beard_color
+        self.hat_color = hat_color
+        self.scarf_color = scarf_color
+        self.apron_color = apron_color
         # eye_count (Test F, 2026-11-12): a general face trait, 1 or 2.
         # A single central eye is a script-declared distinctive
         # feature (e.g. a one-eyed giant); the face drawing honours

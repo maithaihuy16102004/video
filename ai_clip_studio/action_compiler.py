@@ -80,6 +80,7 @@ import math
 import re
 
 from .expression_library import interpret as interpret_expression
+from .prop_system import geometry_footprint
 from .semantic_contracts import (
     ActionAuthority,
     ActionOrigin,
@@ -106,6 +107,7 @@ __all__ = [
     "resolve_semantic_actions",
     "compile_actions",
     "compile_shot_expressions",
+    "compile_shot_character_expressions",
     "resolve_first_person",
     "resolve_sentence_roles",
 ]
@@ -126,6 +128,8 @@ ACTION_TYPES = (
     "HAMMER_STRIKE",
     "REACH", "POINT", "RAISE_HAND", "WAVE", "NOD", "SHRUG",
     "COVER_FACE", "LOOK_AT", "HEAD_TILT", "BREATHE", "REACT",
+    "SHIELD",
+    "CRACK", "ACTIVATE", "EMIT",
     "EXPRESSION_HOLD", "BROW_RAISE", "BLINK",
 )
 
@@ -174,6 +178,10 @@ PRIMITIVE_MAP = {
     "NOD": ("nod", 0.6, "POSE_HELD"),
     "SHRUG": ("shrug", 0.8, "POSE_HELD"),
     "COVER_FACE": ("cover_face", 1.0, "POSE_HELD"),
+    "SHIELD": ("shield", 1.0, "POSE_HELD"),
+    "CRACK": ("present_prop", 1.0, "OBJECT_STATE_CHANGED"),
+    "ACTIVATE": ("present_prop", 1.0, "OBJECT_STATE_CHANGED"),
+    "EMIT": ("present_prop", 1.0, "OBJECT_STATE_CHANGED"),
     "LOOK_AT": ("look_at_point", 0.8, "GAZE_HELD"),
     "HEAD_TILT": ("head_tilt", 0.8, "POSE_HELD"),
     "BREATHE": ("breathe", 1.5, "POSE_HELD"),
@@ -208,6 +216,10 @@ SEMANTIC_TO_COMPILER_VERB = {
     "CROUCH": "CROUCH",
     "RECEIVE_PROP": "RECEIVE_PROP",
     "HAMMER_STRIKE": "HAMMER_STRIKE",
+    "SHIELD": "SHIELD",
+    "CRACK": "CRACK",
+    "ACTIVATE": "ACTIVATE",
+    "EMIT": "EMIT",
     "WALK": "WALK",
     "RUN": "RUN",
     "STOP": "STOP",
@@ -254,6 +266,16 @@ FORBIDDEN_SEMANTIC_COMPILATIONS = {
                                "KNEEL_PICK"}),
     "PLACE_ON_SURFACE": frozenset({"PUT_AWAY", "TAKE_OUT", "PICK_UP",
                                    "KNEEL_PICK"}),
+    # Shielding is a guard pose, never a pickup, pocketing, or drop:
+    # compiling it as one would stage a prop transfer the script
+    # never directed.
+    "SHIELD": frozenset({"BEND_PICK", "KNEEL_PICK", "PICK_UP",
+                         "TAKE_OUT", "PUT_AWAY", "RELEASE"}),
+    # A crack is a prop state change, never a pickup, pocketing, or
+    # drop: compiling it as one would stage a prop transfer the
+    # script never directed.
+    "CRACK": frozenset({"BEND_PICK", "KNEEL_PICK", "PICK_UP",
+                        "TAKE_OUT", "PUT_AWAY", "RELEASE"}),
 }
 
 # Shortest an event may be compressed to fit a shot span. Below this
@@ -348,7 +370,22 @@ def _hand_mentioned(text: str) -> str | None:
 
 
 def _receive_hand_from_text(text: str) -> str:
-    """Receiver hand ("l" | "r") named in action text, else "l"."""
+    """Receiver hand ("l" | "r" | "both") named in action text.
+
+    A sentence that classifies as RECEIVE_PROP and names both hands
+    ("nhận bằng hai tay") yields "both"; otherwise the first
+    single-hand mention wins, else the engine default "l". The
+    per-sentence classification keeps a giver-side "hai tay" from
+    setting the receiver hand.
+    """
+    for _segment in re.split(r"[.!?;\n]", text or ""):
+        _normed = _normalize(_segment)
+        if not _normed:
+            continue
+        _atype, _cat, _notes, _match = _classify(
+            _normed, {"locomotion": None, "seated": False})
+        if _atype == "RECEIVE_PROP" and _semantic_hand(_normed) == "BOTH":
+            return "both"
     return _hand_mentioned(text) or "l"
 
 # Collective markers: "<marker> + <group noun>" names a background
@@ -419,6 +456,25 @@ _POCKET_PHRASES = ("túi áo", "túi quần", "túi ngực", "pocket")
 # A rule may carry a guard: a callable(sentence_norm, context) that
 # must also pass (e.g. SIT_AT_DESK needs a desk/chair word).
 _CLASSIFICATION_RULES: list[tuple[str, tuple[str, ...]]] = [
+    # Light-payoff vocabulary (round 2, system 5): a prop cracks,
+    # activates, or emits light. FIRST in the list: "mở máy" (turn
+    # on a machine) must win over the generic OPEN rule below, and
+    # "sáng lên" must not be swallowed by any earlier rule. Only
+    # multi-word / directional phrases match -- bare "vỡ" would fire
+    # on "vỡ òa" (burst into tears), bare "bật" on "bật khóc", and
+    # bare "sáng" on "sáng mai" (tomorrow morning).
+    ("CRACK", ("nứt ra", "nứt toác", "nứt vỡ", "rạn nứt",
+               "vỡ ra", "vỡ vụn", "vỡ làm đôi", "vỡ thành",
+               "xuất hiện vết nứt", "crack", "cracks",
+               "cracking")),
+    ("ACTIVATE", ("kích hoạt", "khởi động", "bật máy",
+                  "bật công tắc", "mở máy", "vận hành",
+                  "activate", "turn on", "switch on",
+                  "power on")),
+    ("EMIT", ("phát sáng", "tỏa sáng", "sáng lên", "sáng rực",
+              "rực sáng", "lóe sáng", "bừng sáng",
+              "phát ra ánh sáng", "tỏa ra ánh sáng",
+              "emit light", "glow", "glows", "glowing")),
     ("SIGN", ("ký tên", "kí tên", "ký vào", "sign", "signing")),
     ("WRITE", ("bắt đầu viết", "viết", "ngòi bút tiếp xúc",
                "cổ tay chuyển động", "write", "writing")),    ("SIT_AT_DESK", ("ngồi trước bàn", "ngồi ở bàn", "ngồi vào bàn",
@@ -481,6 +537,18 @@ _CLASSIFICATION_RULES: list[tuple[str, tuple[str, ...]]] = [
     ("BLINK", ("chớp mắt", "nháy mắt", "blink", "blinking")),
     ("EXPRESSION_HOLD", ("giữ biểu cảm", "giữ vẻ", "giữ nét mặt",
                          "hold the expression")),
+    # Shield: both arms interposed as a guard. Checked BEFORE
+    # RAISE_HAND ("giơ tay") and COVER_FACE ("che mặt"): shield
+    # phrasing contains both ("giơ hai tay che chắn"). Only
+    # multi-word shield phrases match -- bare "chắn" would fire
+    # on "chắc chắn" (certainly), and bare "che" is not a pose.
+    ("SHIELD", ("che chắn", "giơ tay che", "giơ hai tay che",
+                "đưa tay che", "đưa hai tay che", "lấy thân che",
+                "dùng thân che", "lấy mình che", "đứng chắn",
+                "chắn trước mặt", "chắn phía trước", "làm lá chắn",
+                "giơ khiên", "dựng khiên", "giơ khiên chắn",
+                "shield", "raise shield", "hold up a shield",
+                "hold up shield")),
     ("REACT", ("giật mình", "vai co lại", "cúi người theo phản xạ",
                "theo phản xạ", "rùng mình", "startle", "flinch",
                "recoil")),
@@ -565,10 +633,19 @@ _TAKE_OBJECTS = tuple(sorted(
     {noun for kind, nouns in PROP_KIND_NOUNS.items()
      if kind not in ("chair", "desk") for noun in nouns
      if len(noun) > 1}
-    | {"búa", "hammer", "đinh ba", "trident", "mũ sắt", "helmet"}))
+    | {"búa", "hammer", "đinh ba", "trident", "mũ sắt", "helmet",
+       "lõi", "core"}))
 _TAKE_EXCLUSIONS = (
     "lấy làm", "lấy vợ", "lấy chồng", "lấy cớ", "lấy lòng",
     "lấy lệ", "lấy danh",
+)
+
+
+# Abstract senses of "nâng" that are never lifts: upgrade, raise
+# (a standard), support, cherish, elevate. The bare-"nâng" fallback
+# vetoes any sentence containing one of these phrases.
+_LIFT_EXCLUSIONS = (
+    "nâng cấp", "nâng cao", "nâng đỡ", "nâng niu", "nâng tầm",
 )
 
 
@@ -781,7 +858,10 @@ _RECIPIENT_MARKERS = ("cho", "tặng", "đến", "tới", "to", "for")
 
 # Action types whose event carries a character target (the
 # target-eligible set compile_actions has always used -- unchanged).
-_TARGET_ELIGIBLE = ("LOOK_AT", "TURN", "HAND_OVER", "POINT", "REACH")
+_TARGET_ELIGIBLE = ("LOOK_AT", "TURN", "HAND_OVER", "POINT",
+                    "REACH", "SHIELD")  # SHIELD: the protected
+# figure ("che chắn cho Bé Nam") is the event target, so the
+# planner/renderer stages them in the shot.
 
 
 def _find_mentions(normed, char_map, extras):
@@ -1160,12 +1240,19 @@ _DISPLAY_VERBS = ("hiển thị", "hiện thị", "cho thấy", "trình bày",
 _DISCONTINUOUS_PATTERNS: list[tuple[str, str, str]] = [
     ("cầm", "lên", "PICK_UP"),
     ("nhấc", "lên", "PICK_UP"),
+    ("nâng", "lên", "PICK_UP"),
     ("đặt", "xuống", "RELEASE"),
     ("để", "xuống", "RELEASE"),
     ("đặt", "lên bàn", "RELEASE"),
     ("để", "lên bàn", "RELEASE"),
     ("đặt", "lên kệ", "RELEASE"),
     ("để", "lên kệ", "RELEASE"),
+    ("đặt", "lên bệ", "RELEASE"),
+    ("để", "lên bệ", "RELEASE"),
+    ("đặt", "lên tủ", "RELEASE"),
+    ("để", "lên tủ", "RELEASE"),
+    ("đặt", "lên đe", "RELEASE"),
+    ("để", "lên đe", "RELEASE"),
     ("mở", "thư", "OPEN"),
     ("mở", "sách", "OPEN"),
     ("giơ", "lên", "RAISE_HAND"),
@@ -1358,6 +1445,19 @@ def _classify(normed: str, context: dict):
                         detail="bare 'lấy' + graspable-object noun "
                                "-> PICK_UP")
             return "PICK_UP", None, notes, info
+    # Bare-"nâng" fallback: "nâng" + a graspable-object noun, with no
+    # earlier rule match, is a lift ("nâng lõi đá bằng hai tay").
+    # The object noun is required and the abstract senses are
+    # excluded -- bare "nâng" alone never matches, and "nâng cấp" /
+    # "nâng cao" stay UNCLEAR.
+    if (_has_phrase(normed, "nâng")
+            and not _has_any(normed, _LIFT_EXCLUSIONS)):
+        obj = _matching_phrase(normed, _TAKE_OBJECTS)
+        if obj is not None:
+            info.update(mechanism="lift_fallback", phrase=f"nâng + {obj}",
+                        detail="bare 'nâng' + graspable-object noun "
+                               "-> PICK_UP")
+            return "PICK_UP", None, notes, info
     for category, phrases in _NON_CHARACTER_RULES:
         phrase = _matching_phrase(normed, phrases)
         if phrase is not None:
@@ -1371,46 +1471,64 @@ def _classify(normed: str, context: dict):
 def _contact_points(action_type: str, hand: str, prop_id, target_id,
                     paper_id, target_hand: str | None = None
                     ) -> list[dict]:
-    """Measurable contact requirements for an action type."""
+    """Measurable contact requirements for an action type.
+
+    ``hand`` "both" yields one point per hand: a two-hand grip is
+    only satisfied when EACH hand meets the prop (the flank offset
+    keeps each hand inside the 15 px prop tolerance).
+    """
     pts: list[dict] = []
+    joints = ("hand_l", "hand_r") if hand == "both" \
+        else ("hand_" + hand,)
     if action_type in ("WRITE", "SIGN"):
-        pts.append({"joint": "hand_" + hand, "target_kind": "prop",
-                    "target_id": prop_id, "tolerance_px": 8.0})
-        pts.append({"joint": "hand_" + hand,
-                    "target_kind": "prop_surface",
-                    "target_id": paper_id, "tolerance_px": 12.0})
+        for joint in joints:
+            pts.append({"joint": joint, "target_kind": "prop",
+                        "target_id": prop_id, "tolerance_px": 8.0})
+            pts.append({"joint": joint,
+                        "target_kind": "prop_surface",
+                        "target_id": paper_id, "tolerance_px": 12.0})
     elif action_type in ("PICK_UP", "TAKE_OUT", "HOLD", "HOLD_PEN",
                          "BEND_PICK", "KNEEL_PICK", "OPEN", "CLOSE"):
         if prop_id:
-            pts.append({"joint": "hand_" + hand, "target_kind": "prop",
-                        "target_id": prop_id, "tolerance_px": 15.0})
+            for joint in joints:
+                pts.append({"joint": joint, "target_kind": "prop",
+                            "target_id": prop_id,
+                            "tolerance_px": 15.0})
     elif action_type == "HAND_OVER":
-        point = {"joint": "hand_" + hand,
-                 "target_kind": "character_hand",
-                 "target_id": target_id, "tolerance_px": 20.0}
-        if target_hand in ("l", "r"):
-            # The receiving hand the script names ("tay phải" /
-            # "tay trái"); contact_report measures that hand only
-            # when present, else the nearer hand (legacy behaviour).
-            point["target_hand"] = target_hand
-        pts.append(point)
+        for joint in joints:
+            point = {"joint": joint,
+                     "target_kind": "character_hand",
+                     "target_id": target_id, "tolerance_px": 20.0}
+            if target_hand in ("l", "r", "both"):
+                # The receiving hand(s) the script names ("tay
+                # phải" / "tay trái" / "hai tay"); contact_report
+                # measures that hand only when present ("both"
+                # measures the pair's midpoint), else the nearer
+                # hand (legacy behaviour).
+                point["target_hand"] = target_hand
+            pts.append(point)
         if prop_id:
-            pts.append({"joint": "hand_" + hand, "target_kind": "prop",
-                        "target_id": prop_id, "tolerance_px": 15.0})
+            for joint in joints:
+                pts.append({"joint": joint, "target_kind": "prop",
+                            "target_id": prop_id,
+                            "tolerance_px": 15.0})
     elif action_type == "RECEIVE_PROP":
         # The receiver's hand meets the prop; when the giver
         # resolved, the hands must meet (same tolerance as the
         # giver-side HAND_OVER contact, same named-hand rule).
         if target_id:
-            point = {"joint": "hand_" + hand,
-                     "target_kind": "character_hand",
-                     "target_id": target_id, "tolerance_px": 20.0}
-            if target_hand in ("l", "r"):
-                point["target_hand"] = target_hand
-            pts.append(point)
+            for joint in joints:
+                point = {"joint": joint,
+                         "target_kind": "character_hand",
+                         "target_id": target_id, "tolerance_px": 20.0}
+                if target_hand in ("l", "r", "both"):
+                    point["target_hand"] = target_hand
+                pts.append(point)
         if prop_id:
-            pts.append({"joint": "hand_" + hand, "target_kind": "prop",
-                        "target_id": prop_id, "tolerance_px": 15.0})
+            for joint in joints:
+                pts.append({"joint": joint, "target_kind": "prop",
+                            "target_id": prop_id,
+                            "tolerance_px": 15.0})
     elif action_type == "CROUCH":
         # Feet stay planted through the crouch.
         pts.append({"joint": "foot_l", "target_kind": "ground",
@@ -1920,6 +2038,90 @@ def compile_shot_expressions(package: dict) -> dict:
     return out
 
 
+def compile_shot_character_expressions(package: dict,
+                                       char_map: dict) -> dict:
+    """{shot_id: {scene_number, entries: {identity_id: {...}}}} for
+    every V1 shot carrying a NAMED-character EXPRESSION field.
+
+    Named forms are the colon form (``"Cronus: suspicious"``) and
+    the comma form (``"Cronus suspicious, Rhea worried"``), parsed
+    by expression_library.parse_character_expressions against the
+    package's character index. Scene-level named expressions govern
+    every shot of the scene; shot-level entries override them per
+    character (the adapter's "shot wins" rule). Bare expressions
+    ("Deadpan") are NOT here: the line/speaker path owns them, and
+    no target is ever guessed. Remainders that interpret to None
+    drop that character only (never a guessed face). Each entry
+    carries the resolved expression name, the raw field text and
+    the source line for the event's provenance.
+    """
+    from .expression_library import (
+        interpret_detailed, parse_character_expressions)
+    out: dict[str, dict] = {}
+
+    def _resolve(text, line_no):
+        parsed = parse_character_expressions(text, char_map, _normalize)
+        if not parsed:
+            return {}
+        resolved = {}
+        for ident, remainder in parsed.items():
+            detail = interpret_detailed(remainder)
+            if detail["expression"] is None:
+                continue
+            resolved[ident] = {
+                "expression": detail["expression"],
+                "raw": text,
+                "line": line_no,
+            }
+        return resolved
+
+    for scene in package.get("scenes") or []:
+        v1 = (scene or {}).get("v1_scene") or {}
+        number = v1.get("number") or scene.get("number")
+        shots = v1.get("shots") or []
+        shot_ids = [str(s.get("id") or s.get("shot_id"))
+                    for s in shots]
+        shot_ids = [s for s in shot_ids if s]
+        # Scene-level named expressions govern the whole scene.
+        scene_entries: dict[str, dict] = {}
+        for entry in v1.get("expressions") or []:
+            if isinstance(entry, str):
+                entry = {"character": None, "expression": entry,
+                         "line": None}
+            if not isinstance(entry, dict):
+                continue
+            char_name = entry.get("character")
+            expr_text = str(entry.get("expression") or "")
+            line_no = entry.get("line")
+            if char_name:
+                ident = char_map.get(_normalize(str(char_name)))
+                if ident is None:
+                    continue
+                detail = interpret_detailed(expr_text)
+                if detail["expression"] is None:
+                    continue
+                scene_entries[ident] = {
+                    "expression": detail["expression"],
+                    "raw": expr_text,
+                    "line": line_no,
+                }
+            else:
+                scene_entries.update(_resolve(expr_text, line_no))
+        for shot in shots:
+            shot_id = str(shot.get("id") or shot.get("shot_id") or "")
+            if not shot_id:
+                continue
+            entries = dict(scene_entries)
+            raw = shot.get("expression") or ""
+            if raw:
+                entries.update(
+                    _resolve(str(raw), shot.get("line")))
+            if entries:
+                out[shot_id] = {"scene_number": number,
+                                "entries": entries}
+    return out
+
+
 def _gait_profile_index(package: dict) -> dict[str, object]:
     """Identity id -> gait_profile value from character data.
 
@@ -1944,6 +2146,17 @@ def _gait_profile_index(package: dict) -> dict[str, object]:
 # Action type -> LocomotionState name (cinematic_contracts) for the
 # locomotion_state event param. MARCH is a walk (its gait profile
 # carries the march cadence/posture); STOP/IDLE/WAIT are holds.
+# Prop verbs whose primitives support a two-hand grip ("both"):
+# PICK_UP/TAKE_OUT/HOLD (pick_up), BEND_PICK/KNEEL_PICK
+# (bend_pick/kneel_pick), RECEIVE_PROP (receive_prop + the
+# hand_over/give_to pair fn), PUT_AWAY/RELEASE (put_away), CARRY
+# (carry_bag). WRITE/SIGN/HOLD_PEN are deliberately absent: pen
+# verbs are inherently single-hand.
+_BOTH_HAND_EVENT_TYPES = frozenset({
+    "PICK_UP", "TAKE_OUT", "HOLD", "BEND_PICK", "KNEEL_PICK",
+    "RECEIVE_PROP", "PUT_AWAY", "RELEASE", "CARRY"})
+
+
 _LOCOMOTION_STATES = {
     "WALK": "WALK",
     "RUN": "RUN",
@@ -2029,6 +2242,149 @@ def _semantic_destination_location(normed: str, sem_type=None):
     return None
 
 
+# Placement destinations that name a support surface. Altar is
+# checked before pedestal: "lên bệ thờ" contains "lên bệ". Only
+# directional/locative phrasing names a support -- bare nouns
+# never do ("bàn" alone is not a placement, and bare "đe"
+# collides with "đe dọa", threaten).
+_DESTINATION_SUPPORT_PHRASES = (
+    ("altar", ("lên bệ thờ", "trên bệ thờ", "xuống bệ thờ",
+               "lên bàn thờ", "trên bàn thờ", "xuống bàn thờ",
+               "onto the altar", "on the altar")),
+    ("pedestal", ("lên bệ", "trên bệ", "xuống bệ",
+                  "onto the pedestal", "on the pedestal",
+                  "on a pedestal")),
+    ("table", ("lên bàn", "trên bàn", "xuống bàn",
+               "onto the table", "on the table",
+               "onto the desk", "on the desk")),
+    ("shelf", ("lên kệ", "trên kệ", "xuống kệ",
+               "onto the shelf", "on the shelf")),
+    ("anvil", ("lên đe", "trên đe", "xuống đe",
+               "onto the anvil", "on the anvil")),
+    ("cabinet", ("lên tủ", "trên tủ", "xuống tủ",
+                 "onto the cabinet", "on the cabinet")),
+)
+
+_PLACEMENT_SEMANTIC_TYPES = frozenset(
+    {"PUT_AWAY", "RELEASE_PROP", "PLACE_ON_SURFACE"})
+
+
+def destination_support_name(normed: str, sem_type) -> str | None:
+    """Named support surface for a placement sentence, or None.
+
+    Only placement semantic types name a support: "nhìn lên bệ"
+    (look up at the pedestal) and "lấy bút trên bàn" (take the
+    pen from the table) are not placements and return None. The
+    name is the renderer's lookup key into the shot's support
+    anchors -- never a placement the environment does not have.
+    """
+    if sem_type not in _PLACEMENT_SEMANTIC_TYPES:
+        return None
+    for name, phrases in _DESTINATION_SUPPORT_PHRASES:
+        if _has_any(normed, phrases):
+            return name
+    return None
+
+
+# Take sources that name a support surface: the prop's HOME rest
+# (where it sits before the take). Same altar-before-pedestal
+# order and directional-phrasing discipline as the destination
+# table; "từ" (from) forms join the "trên" (on) forms.
+_SOURCE_SUPPORT_PHRASES = (
+    ("altar", ("từ trên bệ thờ", "từ bệ thờ", "trên bệ thờ",
+               "từ trên bàn thờ", "từ bàn thờ", "trên bàn thờ",
+               "from the altar", "off the altar")),
+    ("pedestal", ("từ trên bệ", "từ bệ", "trên bệ",
+                  "from the pedestal", "off the pedestal")),
+    ("table", ("từ trên bàn", "từ bàn", "trên bàn", "mặt bàn",
+               "trên mặt bàn",
+               "from the table", "off the table",
+               "from the desk", "off the desk")),
+    ("shelf", ("từ trên kệ", "từ kệ", "trên kệ",
+               "from the shelf", "off the shelf")),
+    ("anvil", ("từ trên đe", "từ đe", "trên đe",
+               "from the anvil", "off the anvil")),
+    ("cabinet", ("từ trên tủ", "từ tủ", "trên tủ",
+                 "from the cabinet", "off the cabinet")),
+)
+
+_TAKE_SEMANTIC_TYPES = frozenset(
+    {"PICK_FROM_SURFACE", "BEND_PICK", "TAKE"})
+
+
+# Resting sentences that name a support surface: the prop's HOME
+# rest (where it sits while not held). Unlike the take table above,
+# the resting verb itself is the evidence, so this fires for ANY
+# semantic type: "Viên đá nằm trên đe, phát sáng" (EMIT) rests the
+# stone on the anvil even though EMIT is neither a take nor a
+# placement (round-7 insert discipline: the R6 insert showed the
+# stone held against a leg because no support was named). Bare
+# "trên X" stays gated (a look or a walk past a table is not a
+# rest); only the resting verbs below name the home. Altar before
+# pedestal: "nằm trên bệ" is a substring of "nằm trên bệ thờ".
+_REST_SUPPORT_PHRASES = (
+    ("altar", ("nằm trên bệ thờ", "đặt trên bệ thờ",
+               "để trên bệ thờ", "nằm trên bàn thờ",
+               "đặt trên bàn thờ", "để trên bàn thờ",
+               "lies on the altar", "lying on the altar",
+               "rests on the altar", "resting on the altar",
+               "sits on the altar", "sitting on the altar",
+               "placed on the altar")),
+    ("pedestal", ("nằm trên bệ", "đặt trên bệ", "để trên bệ",
+                  "lies on the pedestal", "lying on the pedestal",
+                  "rests on the pedestal", "resting on the pedestal",
+                  "sits on the pedestal", "sitting on the pedestal",
+                  "placed on the pedestal")),
+    ("table", ("nằm trên bàn", "đặt trên bàn", "để trên bàn",
+               "nằm trên mặt bàn", "đặt trên mặt bàn",
+               "để trên mặt bàn",
+               "lies on the table", "lying on the table",
+               "rests on the table", "resting on the table",
+               "sits on the table", "sitting on the table",
+               "placed on the table",
+               "lies on the desk", "lying on the desk",
+               "rests on the desk", "resting on the desk",
+               "sits on the desk", "sitting on the desk",
+               "placed on the desk")),
+    ("shelf", ("nằm trên kệ", "đặt trên kệ", "để trên kệ",
+               "lies on the shelf", "lying on the shelf",
+               "rests on the shelf", "resting on the shelf",
+               "sits on the shelf", "sitting on the shelf",
+               "placed on the shelf")),
+    ("anvil", ("nằm trên đe", "đặt trên đe", "để trên đe",
+               "lies on the anvil", "lying on the anvil",
+               "rests on the anvil", "resting on the anvil",
+               "sits on the anvil", "sitting on the anvil",
+               "placed on the anvil")),
+    ("cabinet", ("nằm trên tủ", "đặt trên tủ", "để trên tủ",
+                 "lies on the cabinet", "lying on the cabinet",
+                 "rests on the cabinet", "resting on the cabinet",
+                 "sits on the cabinet", "sitting on the cabinet",
+                 "placed on the cabinet")),
+)
+
+
+def source_support_name(normed: str, sem_type) -> str | None:
+    """Named support surface a take lifts the prop FROM, or None.
+
+    Only take semantic types name a source support: pocket takes
+    (TAKE_FROM_POCKET) and ground takes (PICK_FROM_GROUND) never
+    do. The name tells the renderer where the prop rests while
+    it is not held -- its home on the support. A resting sentence
+    (\"nằm/đặt/để trên X\") names the same home for ANY semantic
+    type: the resting verb is the evidence, not the action class.
+    """
+    for name, phrases in _REST_SUPPORT_PHRASES:
+        if _has_any(normed, phrases):
+            return name
+    if sem_type not in _TAKE_SEMANTIC_TYPES:
+        return None
+    for name, phrases in _SOURCE_SUPPORT_PHRASES:
+        if _has_any(normed, phrases):
+            return name
+    return None
+
+
 def _semantic_hand(normed: str) -> str:
     """Interaction hand from explicit mention; NONE when unmentioned
     (the record states story meaning, not the engine's default
@@ -2095,6 +2451,10 @@ _SEMANTIC_BODY_PARTS = {
     "LOOK_AT": "head",
     "RELEASE_PROP": "hand",
     "PLACE_ON_SURFACE": "hand",
+    "SHIELD": "arms",
+    "CRACK": "arms",
+    "ACTIVATE": "arms",
+    "EMIT": "arms",
 }
 
 
@@ -2141,7 +2501,8 @@ def _disambiguate_semantic(action_type, normed, match):
             return ("PICK_FROM_GROUND", "pick_from_ground", 1.0)
         if src == "pocket":
             return ("TAKE_FROM_POCKET", "take_from_pocket", 1.0)
-        conf = 0.85 if mechanism == "take_fallback" else 1.0
+        conf = 0.85 if mechanism in ("take_fallback",
+                                     "lift_fallback") else 1.0
         return ("TAKE", "take", conf)
     if action_type == "PUT_AWAY":
         return ("PUT_AWAY", "put_away", 1.0)
@@ -2210,6 +2571,14 @@ def _disambiguate_semantic(action_type, normed, match):
         return ("BREATHE", "breathe", 1.0)
     if action_type == "REACT":
         return ("REACT", "react", 1.0)
+    if action_type == "SHIELD":
+        return ("SHIELD", "shield", 1.0)
+    if action_type == "CRACK":
+        return ("CRACK", "crack", 1.0)
+    if action_type == "ACTIVATE":
+        return ("ACTIVATE", "activate", 1.0)
+    if action_type == "EMIT":
+        return ("EMIT", "emit", 1.0)
     if action_type == "REACH":
         if _has_phrase(normed, "với lấy"):
             return ("TAKE", "reach_take", 0.85)
@@ -2283,6 +2652,11 @@ def resolve_semantic_action(sentence, *, actor_id, source_scene_id,
         return None
     sem_type, rule, confidence = dis
     hand = _semantic_hand(normed)
+    if sem_type == "SHIELD":
+        # The shield pose is definitionally two-armed: both
+        # forearms interpose even when the sentence does not say
+        # "hai tay". The record states the pose, not the mention.
+        hand = "BOTH"
     source = _semantic_source_location(normed)
     if sem_type in ("BEND_PICK", "PICK_FROM_GROUND") and source is None:
         # Verb sense: nhặt / cúi-lấy takes from a low place.
@@ -2308,7 +2682,9 @@ def resolve_semantic_action(sentence, *, actor_id, source_scene_id,
     elif action_type == "SIT_AT_DESK":
         spatial = "at_desk"
     intent = None
-    if _has_any(normed, ("suy nghĩ", "suy tư", "trầm tư", "suy ngẫm")):
+    if sem_type == "SHIELD":
+        intent = "protect"
+    elif _has_any(normed, ("suy nghĩ", "suy tư", "trầm tư", "suy ngẫm")):
         intent = "thinking"
     elif _has_any(normed, ("tránh", "né tránh")):
         intent = "avoid"
@@ -2351,6 +2727,8 @@ def _inference_reason(match_info: dict, action_type) -> str:
         return f"classification rule {action_type}: phrase {phrase!r}"
     if mechanism == "take_fallback":
         return f"bare-'lấy' fallback {phrase!r} -> {action_type}"
+    if mechanism == "lift_fallback":
+        return f"bare-'nâng' fallback {phrase!r} -> {action_type}"
     if mechanism == "discontinuous":
         return f"discontinuous verb pattern {phrase!r} -> {action_type}"
     if mechanism == "sway":
@@ -2385,7 +2763,17 @@ def compile_actions(scene_package: dict, timeline: dict | None = None,
     char_map, extras = _character_index(package)
     gait_profiles = _gait_profile_index(package)
     _props, prop_terms = _prop_index(package)
+    # Round-6 grip readability: a two-hand grip flanks the prop's
+    # drawn size, so the compiler resolves each prop id to its
+    # drawable kind (the adapter's explicit kind; "generic" when
+    # absent) and stamps the flank width on both-hand events.
+    _prop_kinds = {str(pr.get("id") or pr.get("name")): str(
+        pr.get("kind") or "generic").strip().lower()
+        for pr in _props if isinstance(pr, dict)
+        and (pr.get("id") or pr.get("name"))}
     shot_expressions = compile_shot_expressions(package)
+    char_expressions = compile_shot_character_expressions(package,
+                                                          char_map)
     spans, time_source = _shot_spans(package, timeline)
     script_hash = _script_hash(package)
     # Directives whose span came from the caller's explicit spans
@@ -2416,6 +2804,70 @@ def compile_actions(scene_package: dict, timeline: dict | None = None,
     events: list[dict] = []
     unsupported: list[dict] = []
     semantic_records: list = []
+
+    def _emit_expression_events(shot_id, number, start, end, entries):
+        # Shot-span EXPRESSION_HOLD overlays, one per character the
+        # V1 EXPRESSION field names. Emitted AFTER the shot's body
+        # events so a sentence-level expression window (earlier in
+        # the renderer's keyframe list) wins within its span.
+        # Face-only: no span time consumed, no dependencies, no
+        # semantic record -- the EXPRESSION field is a shot
+        # attribute, not an action sentence.
+        _prim, _dflt, _state = PRIMITIVE_MAP["EXPRESSION_HOLD"]
+        for actor_id, entry in entries.items():
+            action_id = f"{shot_id}_EXPR_{actor_id}"
+            events.append({
+                "action_id": action_id,
+                "actor_id": actor_id,
+                "action_type": "EXPRESSION_HOLD",
+                "target_id": None,
+                "prop_id": None,
+                "start_time": round(float(start), 3),
+                "end_time": round(float(end), 3),
+                "required_pose": {
+                    "primitive": _prim,
+                    "params": {"hand": "r",
+                               "expression": entry["expression"]},
+                    "completion": _completion_text("EXPRESSION_HOLD"),
+                },
+                "contact_points": _contact_points(
+                    "EXPRESSION_HOLD", "r", None, None, None),
+                "animation_dependencies": [],
+                "completion_state": {
+                    "state": _state,
+                    "details": _completion_details({
+                        "prop_id": None,
+                        "action_type": "EXPRESSION_HOLD",
+                        "paper_id": None}),
+                },
+                "shot_id": shot_id,
+                "scene_number": number,
+                "directive_text": entry["raw"],
+                "expression": entry["expression"],
+                "time_source": time_source,
+                "source_script_hash": script_hash,
+                "source_scene_id": _scene_id(number),
+                "source_shot_id": shot_id,
+                "source_directive_id": action_id,
+                "action_origin":
+                    ActionOrigin.EXPLICIT_SCRIPT_ACTION.value,
+                "inference_reason": _inference_reason(
+                    {"mechanism": "shot_expression",
+                     "detail": (f"V1 EXPRESSION field "
+                                f"{entry['raw']!r} names {actor_id}")},
+                    "EXPRESSION_HOLD"),
+                "authorization_status":
+                    AuthorizationStatus.AUTHORIZED.value,
+                "semantic_action_type": None,
+                "destination_support": None,
+                "source_support": None,
+                "span_source": ("supplied" if shot_id in supplied_ids
+                                else "estimated"),
+                "notes": ["shot-span expression hold from the V1 "
+                          "EXPRESSION field"],
+                "overflow": False,
+                "source_line": entry["line"],
+            })
     # Cross-shot compiler state (per scene): seated actors + last
     # locomotion type, for sit/stand pairing and gait notes.
     scene_state: dict[int, dict] = {}
@@ -2439,7 +2891,7 @@ def compile_actions(scene_package: dict, timeline: dict | None = None,
         # mention in the shot's sentences ("tay phải" / "tay trái"),
         # else the engine default "l".
         receive_hand = _receive_hand_from_text(
-            " ".join(item["sentence"] for item in items))
+            "\n".join(item["sentence"] for item in items))
 
         # First pass: classify + resolve, collecting durations.
         planned: list[dict] = []
@@ -2581,6 +3033,10 @@ def compile_actions(scene_package: dict, timeline: dict | None = None,
                     classification=(action_type, match))
             if semantic is not None:
                 semantic_records.append(semantic)
+            support_name = destination_support_name(
+                normed, semantic.action_type if semantic else None)
+            home_name = source_support_name(
+                normed, semantic.action_type if semantic else None)
             planned.append({
                 "action_id": action_id, "actor_id": actor_id,
                 "action_type": action_type, "target_id": target_id,
@@ -2590,6 +3046,8 @@ def compile_actions(scene_package: dict, timeline: dict | None = None,
                 "paired_handover_id": paired_handover_id,
                 "sentence": sentence, "line": item["line"],
                 "notes": notes,
+                "destination_support": support_name,
+                "source_support": home_name,
                 "duration": ACTION_DURATIONS[action_type],
                 "pocket": _pocket_mentioned(normed),
                 "action_origin": origin,
@@ -2624,7 +3082,21 @@ def compile_actions(scene_package: dict, timeline: dict | None = None,
             primitive, _default, completion_kind = PRIMITIVE_MAP[
                 plan["action_type"]]
             hand = "r"
-            if plan["action_type"] in ("OPEN_WALLET", "CLOSE_WALLET"):
+            if plan["action_type"] in ("OPEN_WALLET", "CLOSE_WALLET",
+                                       "SHIELD"):
+                # SHIELD guards with both arms (the semantic
+                # record's interaction_hand is BOTH); the event
+                # params must agree so the trackers stage HELD_BOTH.
+                hand = "both"
+            elif (plan["action_type"] in _BOTH_HAND_EVENT_TYPES
+                    and _semantic_hand(_normalize(plan["sentence"]))
+                    == "BOTH"):
+                # "nâng lõi đá bằng hai tay": the event carries the
+                # story's both-hands grip so the state machine
+                # (HELD_BOTH, midpoint), the primitives (both hands
+                # converge) and the audits (both hands checked) all
+                # honor it. Before this, every such event staged at
+                # one hand while the semantic record said BOTH.
                 hand = "both"
             elif plan["action_type"] == "RECEIVE_PROP":
                 # The receiving hand: the receive sentence's own hand
@@ -2637,6 +3109,17 @@ def compile_actions(scene_package: dict, timeline: dict | None = None,
                 hand = mentioned if mentioned is not None \
                     else receive_hand
             params: dict = {"hand": hand}
+            if hand == "both" and primitive in (
+                    "pick_up", "bend_pick", "kneel_pick",
+                    "present_prop") and plan.get("prop_id"):
+                _fw, _fh = geometry_footprint(
+                    _prop_kinds.get(str(plan["prop_id"]), "generic"))
+                # Hands grip the prop's drawn edges: half the
+                # footprint width plus a 6 px margin. The contact
+                # audit's gap norm (limit 2.0 hand-sizes) admits
+                # edge grips; the old fixed +-12 px flank hid both
+                # hands inside the prop's silhouette.
+                params["flank_px"] = round(_fw / 2.0 + 6.0, 1)
             if plan["action_type"] == "SIT_AT_DESK":
                 params["furniture"] = "desk"
             if plan["action_type"] in ("TAKE_OUT", "PUT_AWAY"):
@@ -2653,6 +3136,10 @@ def compile_actions(scene_package: dict, timeline: dict | None = None,
             if plan["action_type"] in _LOCOMOTION_STATES:
                 params["locomotion_state"] = _LOCOMOTION_STATES[
                     plan["action_type"]]
+                if _is_retreat(plan["sentence"]):
+                    # The walk direction flips at render time: a
+                    # retreat steps AWAY from the other character.
+                    params["retreat"] = True
             if plan["action_type"] == "HAND_OVER":
                 params["receive_hand"] = receive_hand
             if plan["actor_id"] in gait_profiles:
@@ -2707,7 +3194,7 @@ def compile_actions(scene_package: dict, timeline: dict | None = None,
                     "completion": _completion_text(plan["action_type"]),
                 },
                 "contact_points": _contact_points(
-                    plan["action_type"], hand if hand != "both" else "r",
+                    plan["action_type"], hand,
                     plan["prop_id"], plan["target_id"], plan["paper_id"],
                     target_hand=(receive_hand
                                  if plan["action_type"] == "HAND_OVER"
@@ -2727,6 +3214,8 @@ def compile_actions(scene_package: dict, timeline: dict | None = None,
                 "inference_reason": plan["inference_reason"],
                 "authorization_status": plan["authorization_status"],
                 "semantic_action_type": plan["semantic_action_type"],
+                "destination_support": plan["destination_support"],
+                "source_support": plan["source_support"],
                 "span_source": ("supplied" if shot_id in supplied_ids
                                 else "estimated"),
                 "notes": plan["notes"],
@@ -2758,6 +3247,22 @@ def compile_actions(scene_package: dict, timeline: dict | None = None,
             if plan["prop_id"]:
                 last_prop_event[plan["prop_id"]] = plan["action_id"]
             last_by_type[plan["action_type"]] = plan["action_id"]
+
+        _expr_map = char_expressions.get(shot_id)
+        if _expr_map:
+            _emit_expression_events(shot_id, number, shot_start,
+                                    shot_end, _expr_map["entries"])
+
+    # Shots with named expressions but no action sentences never
+    # entered the loop above; their expression holds still emit
+    # (expressions must not depend on action sentences existing).
+    for shot_id, _expr_map in char_expressions.items():
+        if shot_id in shot_order:
+            continue
+        _span = spans.get(shot_id) or (0.0, 0.0)
+        _emit_expression_events(shot_id, _expr_map["scene_number"],
+                                _span[0], _span[1],
+                                _expr_map["entries"])
 
     if semantic_sink is not None:
         semantic_sink.extend(semantic_records)
@@ -2818,6 +3323,26 @@ def _pen_prop(prop_terms: dict, package: dict):
             for prop in package.get("props") or []
             if str(prop.get("kind") or "").lower() == "pen"]
     return pens[0] if len(pens) == 1 else None
+
+
+def _is_retreat(sentence: str) -> bool:
+    """True when a locomotion sentence steps BACK / away.
+
+    "Ông Ba lùi lại một bước" (steps back in astonishment) must not
+    render as a step TOWARD the other character: the renderer's walk
+    direction defaults toward the other character, and without this
+    marker every retreat walks into the scene it recoils from (R6-D1
+    residue: the watcher walked into the hammer's arc). Whole-word
+    tokens only: bare "lùi" is a distinctive verb, and the English
+    forms are matched as padded phrases.
+    """
+    tokens = set(_tokens(sentence))
+    if tokens & {"lùi", "lui", "retreat", "recoil"}:
+        return True
+    normed = " " + _normalize(sentence) + " "
+    return any(p in normed for p in (
+        " step back ", " steps back ", " stepping back ",
+        " back away ", " backing away "))
 
 
 def _react_kind(sentence: str) -> str:

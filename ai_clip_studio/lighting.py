@@ -31,8 +31,9 @@ four things, all of them measurable:
    ``radius`` is 5% of the peak. ``shade_with_points`` /
    ``add_point_light_tint`` / ``point_light_gain`` apply the
    colored falloff to faces and to already-lit colours. With no
-   point lights every helper reproduces the previous behaviour
-   exactly.
+   point lights and a white key, ``shade_with_points`` reproduces
+   the grayscale ``shade_color`` exactly; a colored key (the
+   palette's sun colour) tints faces per channel (round 8).
 5. **Prop material catalog (Test F / B2).** ``MATERIAL_CATALOG``
    is the DATA the semantic prop system consumes: base colour,
    cartoon outline, and emissive parameters per material, with
@@ -62,7 +63,7 @@ from __future__ import annotations
 
 import math
 
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFilter
 
 from .renderer25d.lighting import (
     DirectionalLight,
@@ -102,11 +103,28 @@ SHADOW_ALPHA_MIN = 0.10        # lifted object, lightest allowed
 SHADOW_OFFSET_RATIO_MAX = 1.2
 
 _TIME_OF_DAY_ALIASES = {
-    "day": "day", "daytime": "day", "morning": "day",
-    "afternoon": "day", "noon": "day", "midday": "day",
+    "day": "day", "daytime": "day",
+    # Round 7: morning / midday / afternoon are DISTINCT
+    # palettes (the old collapse to one "day" palette made
+    # every daytime location render identically -- tester R6:
+    # "no time-of-day palettes"). Vietnamese spellings included.
+    "morning": "morning", "sáng": "morning", "sang": "morning",
+    "buổi_sáng": "morning", "buoi_sang": "morning",
+    "sáng_sớm": "morning", "sang_som": "morning",
+    "midday": "midday", "noon": "midday",
+    "trưa": "midday", "trua": "midday",
+    "buổi_trưa": "midday", "buoi_trua": "midday",
+    "afternoon": "afternoon", "chiều": "afternoon",
+    "chieu": "afternoon", "buổi_chiều": "afternoon",
+    "buoi_chieu": "afternoon",
     "dusk": "dusk", "dawn": "dusk", "sunset": "dusk",
     "sunrise": "dusk", "evening": "dusk", "golden_hour": "dusk",
+    "tối": "dusk", "toi": "dusk", "buổi_tối": "dusk",
+    "buoi_toi": "dusk", "chiều_tối": "dusk", "chieu_toi": "dusk",
+    "hoàng_hôn": "dusk", "hoang_hon": "dusk",
     "night": "night", "midnight": "night",
+    "đêm": "night", "dem": "night", "ban_đêm": "night",
+    "ban_dem": "night", "nửa_đêm": "night", "nua_dem": "night",
     "interior": "interior", "indoor": "interior", "inside": "interior",
 }
 
@@ -134,9 +152,77 @@ TIME_OF_DAY_PALETTES = {
         "ambient": 0.52, "key_intensity": 0.8,
         "light_direction": (0.25, -1.0, -0.25), "shadow_strength": 0.45,
     },
+    # Round 7: distinct daytime palettes. Morning: soft low
+    # eastern sun, cooler sky. Midday: bright overhead sun, the
+    # strongest key. Afternoon: warm low western sun, golden
+    # horizon. The three read differently in the sky, the sun
+    # colour, and the shadow direction.
+    ("morning", "warm"): {
+        "sky_top": (141, 178, 216), "sky_bottom": (222, 232, 240),
+        "ground": (118, 110, 96), "sun_color": (255, 240, 205),
+        "ambient": 0.50, "key_intensity": 0.9,
+        "light_direction": (0.6, -0.7, -0.3), "shadow_strength": 0.45,
+    },
+    ("morning", "cold"): {
+        "sky_top": (135, 158, 185), "sky_bottom": (205, 215, 225),
+        "ground": (110, 108, 100), "sun_color": (235, 238, 240),
+        "ambient": 0.55, "key_intensity": 0.7,
+        "light_direction": (0.55, -0.7, -0.3), "shadow_strength": 0.35,
+    },
+    ("morning", "neutral"): {
+        "sky_top": (138, 168, 200), "sky_bottom": (214, 224, 232),
+        "ground": (114, 109, 98), "sun_color": (248, 242, 222),
+        "ambient": 0.52, "key_intensity": 0.8,
+        "light_direction": (0.58, -0.7, -0.3), "shadow_strength": 0.4,
+    },
+    ("midday", "warm"): {
+        "sky_top": (108, 162, 220), "sky_bottom": (198, 224, 244),
+        "ground": (126, 114, 96), "sun_color": (255, 253, 246),
+        "ambient": 0.42, "key_intensity": 1.1,
+        "light_direction": (0.1, -1.0, -0.1), "shadow_strength": 0.6,
+    },
+    ("midday", "cold"): {
+        "sky_top": (120, 148, 178), "sky_bottom": (192, 206, 218),
+        "ground": (116, 112, 102), "sun_color": (240, 244, 248),
+        "ambient": 0.48, "key_intensity": 0.85,
+        "light_direction": (0.1, -1.0, -0.1), "shadow_strength": 0.45,
+    },
+    ("midday", "neutral"): {
+        "sky_top": (114, 155, 199), "sky_bottom": (195, 215, 231),
+        "ground": (121, 113, 99), "sun_color": (248, 248, 243),
+        "ambient": 0.45, "key_intensity": 1.0,
+        "light_direction": (0.1, -1.0, -0.1), "shadow_strength": 0.52,
+    },
+    ("afternoon", "warm"): {
+        "sky_top": (128, 162, 203), "sky_bottom": (240, 214, 170),
+        "ground": (120, 108, 90), "sun_color": (255, 214, 150),
+        "ambient": 0.44, "key_intensity": 1.0,
+        "light_direction": (-0.6, -0.7, -0.3), "shadow_strength": 0.55,
+    },
+    ("afternoon", "cold"): {
+        "sky_top": (124, 148, 176), "sky_bottom": (210, 208, 198),
+        "ground": (110, 106, 96), "sun_color": (238, 232, 218),
+        "ambient": 0.5, "key_intensity": 0.75,
+        "light_direction": (-0.55, -0.7, -0.3), "shadow_strength": 0.42,
+    },
+    ("afternoon", "neutral"): {
+        "sky_top": (126, 155, 190), "sky_bottom": (224, 215, 195),
+        "ground": (115, 107, 93), "sun_color": (248, 222, 178),
+        "ambient": 0.47, "key_intensity": 0.88,
+        "light_direction": (-0.58, -0.7, -0.3), "shadow_strength": 0.48,
+    },
+    # Round 12: dusk skies strengthened toward the reference's
+    # pink-orange sunset (tester R2-V4: still no at-a-glance read).
+    # The gradient, the room-window glass (blend of these two)
+    # and the distant haze targets all follow these values.
     ("dusk", "warm"): {
-        "sky_top": (86, 92, 140), "sky_bottom": (232, 164, 110),
-        "ground": (92, 82, 74), "sun_color": (255, 190, 120),
+        "sky_top": (74, 78, 138), "sky_bottom": (240, 152, 92),
+        # Round 15: the pink mid-band (dossier "pink-orange-
+        # purple sunset"). The gradient interpolates top->mid
+        # over the upper 55%, mid->bottom below; enclosed
+        # archetypes ignore it (no visible sky).
+        "sky_mid": (235, 128, 138),
+        "ground": (92, 82, 74), "sun_color": (255, 178, 105),
         "ambient": 0.35, "key_intensity": 0.85,
         "light_direction": (0.7, -0.45, -0.2), "shadow_strength": 0.5,
     },
@@ -147,8 +233,9 @@ TIME_OF_DAY_PALETTES = {
         "light_direction": (0.6, -0.5, -0.2), "shadow_strength": 0.4,
     },
     ("dusk", "neutral"): {
-        "sky_top": (80, 90, 132), "sky_bottom": (198, 168, 138),
-        "ground": (88, 82, 76), "sun_color": (240, 205, 160),
+        "sky_top": (80, 90, 132), "sky_bottom": (214, 158, 118),
+        "sky_mid": (226, 140, 140),
+        "ground": (88, 82, 76), "sun_color": (240, 196, 148),
         "ambient": 0.36, "key_intensity": 0.7,
         "light_direction": (0.65, -0.48, -0.2), "shadow_strength": 0.45,
     },
@@ -192,7 +279,8 @@ TIME_OF_DAY_PALETTES = {
 
 
 def normalize_time_of_day(value) -> str:
-    """Any time-of-day spelling -> day | dusk | night | interior.
+    """Any time-of-day spelling -> day | morning | midday |
+    afternoon | dusk | night | interior.
 
     Unknown/empty values degrade to "day" (the pipeline's default);
     never raises."""
@@ -657,13 +745,26 @@ def paint_energy_glow(img: Image.Image, record) -> None:
             "paint_energy_glow needs a pixel-space energy_glow "
             "record; a world-space record belongs to "
             "energy_glow_to_point_light (3D path)")
+    overlay = _energy_glow_overlay(img.size, glow)
+    if overlay is None:
+        return
+    composited = Image.alpha_composite(
+        img.convert("RGBA"), overlay).convert(img.mode)
+    img.paste(composited, (0, 0))
+
+
+def _energy_glow_overlay(size, glow):
+    """The 48-ring radial halo layer for a validated record, or
+    None when the radius paints nothing. Shared by the plain and
+    the exclusion-masked painters so both render the same halo.
+    """
     radius = float(glow["radius"])
     if radius <= 0:
-        return
+        return None
     cx, cy = (float(v) for v in glow["source_position"])
     color = tuple(int(c) for c in glow["color"])
     peak = 0.55 * float(glow["intensity"])
-    overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    overlay = Image.new("RGBA", size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
     rings = 48
     for i in range(rings, 0, -1):
@@ -674,9 +775,93 @@ def paint_energy_glow(img: Image.Image, record) -> None:
         r = radius * i / rings
         draw.ellipse([cx - r, cy - r, cx + r, cy + r],
                      fill=color + (alpha,))
+    return overlay
+
+
+def paint_light_pool(img: Image.Image, record,
+                   ground_y: float) -> None:
+    """Paint a ground pool of light under a glow source, in place.
+
+    Round 10 (R10-6): a radial halo alone reads as a flat 2D
+    sticker -- light reads as 3D when it lands on a surface. The
+    pool is the same deterministic ring gradient as the halo,
+    squashed into a floor-plane ellipse (vertical squash 0.38)
+    centred on the ground line directly below the source, wider
+    than the halo (1.6x radius) and dimmer (0.6x peak): bounced
+    light, not a second source. Painted at the glow stage (before
+    the characters), so the cast stands IN the lit floor. A
+    record with radius 0 paints nothing; world-space records
+    raise, like :func:`paint_energy_glow`.
+    """
+    glow = validate_energy_glow(record)
+    if glow["position_space"] != "pixels":
+        raise ValueError(
+            "paint_light_pool needs a pixel-space energy_glow "
+            "record")
+    radius = float(glow["radius"])
+    if radius <= 0:
+        return
+    cx = float(glow["source_position"][0])
+    cy = float(ground_y)
+    color = tuple(int(c) for c in glow["color"])
+    peak = 0.55 * float(glow["intensity"]) * 0.6
+    overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
+    rings = 48
+    for i in range(rings, 0, -1):
+        frac = 1.0 - (i / rings) ** 2
+        alpha = int(round(255 * peak * frac))
+        if alpha <= 0:
+            continue
+        rx = radius * 1.6 * i / rings
+        ry = rx * 0.38
+        draw.ellipse([cx - rx, cy - ry, cx + rx, cy + ry],
+                     fill=color + (alpha,))
     composited = Image.alpha_composite(
         img.convert("RGBA"), overlay).convert(img.mode)
     img.paste(composited, (0, 0))
+
+
+def paint_energy_glow_excluding(img: Image.Image, record,
+                                boxes, feather_px: float = 24.0,
+                                holes=()) -> None:
+    """A halo that does not wash the excluded boxes (round 6,
+    R2-F1): the deferred insert path repaints halos onto
+    flattened, cropped frames, where painter's order cannot
+    protect the cast — the halo bleached the leg the stone
+    rested against. ``boxes`` are (x0, y0, x1, y1) pixel rects
+    in the frame's own coordinates (the characters' posed limbs
+    mapped through the frozen crop); the halo is masked out
+    inside them with a feathered edge, so the light spills
+    onto the environment around the cast instead of over it.
+    ``holes`` are (cx, cy, r) pixel discs that stay lit even
+    inside a box (round 7): the glowing prop itself, which
+    sits between the limbs, must read. An empty box list
+    paints exactly like :func:`paint_energy_glow`."""
+    glow = validate_energy_glow(record)
+    if glow["position_space"] != "pixels":
+        raise ValueError(
+            "paint_energy_glow_excluding needs a pixel-space "
+            "energy_glow record")
+    overlay = _energy_glow_overlay(img.size, glow)
+    if overlay is None:
+        return
+    base = img.convert("RGBA")
+    composited = Image.alpha_composite(base, overlay)
+    if not boxes and not holes:
+        img.paste(composited.convert(img.mode), (0, 0))
+        return
+    mask = Image.new("L", img.size, 255)
+    draw = ImageDraw.Draw(mask)
+    for (x0, y0, x1, y1) in boxes:
+        draw.rectangle([x0, y0, x1, y1], fill=0)
+    for (cx, cy, r) in holes:
+        draw.ellipse([cx - r, cy - r, cx + r, cy + r], fill=255)
+    if feather_px > 0:
+        mask = mask.filter(
+            ImageFilter.GaussianBlur(radius=float(feather_px)))
+    img.paste(Image.composite(composited, base, mask).convert(
+        img.mode), (0, 0))
 
 
 def point_light_spec_to_light(spec: dict) -> PointLight:
@@ -742,24 +927,147 @@ def point_light_gain(rig, point, normal):
     return tuple(gain)
 
 
-def shade_with_points(base_rgb, rig, point, normal):
-    """Lambert shade with colored point-light contributions.
+def tod_surface_response(light_spec: dict,
+                       base_rgb: tuple[int, int, int],
+                       sky_rgb: tuple[int, int, int] | None = None,
+                       blend_sky: bool = True
+                       ) -> tuple[int, int, int]:
+    """Time-of-day response for a surface base colour (sky
+    override, facade, roof, ground).
 
-    Ambient + directional key shade the base colour as a neutral
-    (grayscale) factor — exactly ``shade_color`` — and each point
-    light ADDS its own tinted contribution: ``irradiance * base *
-    (light_color / 255)`` per channel. A warm forge light
-    therefore warms nearby faces and a blue energy pulse cools
-    them. When the rig has NO point lights the result is exactly
-    ``shade_color(base, rig.irradiance(point, normal))`` — the
-    pre-existing behaviour is preserved bit-for-bit for every
-    package without lights."""
-    if not getattr(rig, "points", None):
-        return shade_color(base_rgb, rig.irradiance(point, normal))
-    key_irr = rig.key.irradiance(point, normal) if rig.key else 0.0
-    f = min(1.0, max(0.0, float(rig.ambient) + float(key_irr)))
-    out = [float(c) * f for c in base_rgb]
-    for p in rig.points:
+    Round 9 (R2-V4 residual): archetype interiors (cave, forge)
+    replaced the tod sky palette with FIXED override colours, so
+    the interior backdrop was pixel-identical at every hour and
+    only the weak key tint moved the walls (+0.22 R/B midday ->
+    afternoon). Round 10 (R10-2): the sky response alone never
+    reached delivered interior frames -- the sky is barely
+    visible indoors, and the render-time key tint leaves
+    inward-facing walls at flat ambient. The same response now
+    bakes into the facade, roof and ground base colours, so the
+    time of day reads on walls and floors in every archetype.
+    The override keeps the interior's identity (a cave stays
+    dark), but it must still answer the time of day: neutral
+    daylight through the openings at midday, golden light in
+    the afternoon, a dimmer backdrop at dusk so the fire and
+    torch dominate.
+
+    Two factors, both from the tod palette:
+
+    * tint: ``0.20 + 0.80 * sun_color[ch]/255`` per channel -- a
+      white noon sun is near-neutral, an amber afternoon sun
+      warms the surface, a dusk sun warms it more. Round 11
+      strengthened this from ``0.5 + 0.5 * s``; round 13 from
+      ``0.30 + 0.70 * s``: the wall gaps STALLED between rounds
+      11 and 12 (the round-12 tod work touched sky, glass and
+      lamps, never this curve), and the reference palettes
+      still shout where ours whisper;
+    * brightness: the palette's light level
+      ``ambient + 0.5 * key_intensity`` against the midday/warm
+      reference (0.97), clamped to [0.50, 1.10] -- dusk dims to
+      ~0.80, night to ~0.50 so a deep-blue night actually reads
+      dark (the old 0.55 floor held it back), day tods stay near
+      1.0. The clamp keeps a cave dark at every hour (its
+      day-luminance-floor exemption stands).
+
+    Round 13 adds a third term, the SKY BLEND: the tinted colour
+    blends toward ``sky_bottom`` when the sky is coloured or
+    dark (driver = saturation + darkness, zero for pale daylight
+    skies), up to 30%. Ambient skylight tints every surface in
+    reality; without it a dusk wall is dark brown where the
+    reference is pink-orange, and a warm night stays amber where
+    the sky is deep blue. The blend is skipped when the spec
+    carries no sky (the white-sun identity property stands).
+
+    Round 14: ``sky_rgb`` overrides the blend target. The facade
+    bake runs AFTER interior overrides replace the spec's sky
+    with a dark backdrop, and blending toward that backdrop
+    warmed every interior at every hour (midday forge +0.129
+    R/B, which kept the cave-forge gap flat in R13). Callers
+    that bake surfaces pass the OUTSIDE sky here; the default
+    (the spec's own sky) is kept for the sky-override
+    computation itself, which runs before the mutation lands.
+
+    Round 14 (suite fix): ``blend_sky=False`` skips the blend
+    entirely. Enclosed archetypes (forge, cave, interior) have
+    no visible sky: their surfaces cannot receive skylight, and
+    blending them toward the outside sky made the forge ground
+    BRIGHTER at dusk than at midday (the dusk-pink blend
+    outweighed the dimming tint), breaking the R10 "dims at
+    dusk" pin. Enclosed surfaces answer the time of day through
+    the tint + brightness terms only; their warmth comes from
+    the point lights (forge mouth, torch) at render time.
+    """
+    sun = tuple(light_spec.get("sun_color", (255, 255, 255)))
+    level = float(light_spec.get("ambient", 0.5)) \
+        + 0.5 * float(light_spec.get("key_intensity", 1.0))
+    brightness = min(1.10, max(0.50, level / 0.97))
+    tinted = tuple(
+        float(base_rgb[ch]) * brightness
+        * (0.20 + 0.80 * (float(sun[ch]) / 255.0))
+        for ch in range(3))
+    sky = sky_rgb if sky_rgb is not None else light_spec.get("sky_bottom")
+    if blend_sky and sky is not None:
+        sky = tuple(float(c) for c in sky)
+        mx, mn = max(sky), min(sky)
+        sat = (mx - mn) / max(1.0, mx)
+        lum = sum(sky) / 3.0
+        driver = min(1.0, max(0.0, (0.35 - lum / 255.0) + sat))
+        w = min(0.30, 0.6 * driver)
+        tinted = tuple(tinted[ch] * (1.0 - w) + sky[ch] * w
+                       for ch in range(3))
+    return tuple(
+        min(255, max(0, int(round(tinted[ch])))) for ch in range(3))
+
+
+# Round-9 name for the sky-override call site; the response is
+# the same function.
+interior_sky_response = tod_surface_response
+
+
+def key_factor_for(rig, point, normal):
+    """Per-channel ambient+key factor (each 0..1) for ``rig`` at
+    ``point``/``normal``: ``ambient + key_irr * key_color[ch]/255``.
+
+    The key light's colour tints faces: a white key reproduces
+    the scalar ``ambient + key_irr`` on every channel, an amber
+    afternoon key suppresses blue, a cold moon suppresses red.
+    Flat faces apply this factor in ``shade_with_points``;
+    textured faces fold it into the paste gain (the texture
+    paste takes a scalar brightness plus a per-channel gain).
+    One definition, so flat and textured faces of one element
+    can never disagree about the sun."""
+    key = getattr(rig, "key", None)
+    key_irr = key.irradiance(point, normal) if key is not None else 0.0
+    if key is not None:
+        key_color = tuple(getattr(key, "color", (255, 255, 255)))
+    else:
+        key_color = (255, 255, 255)
+    ambient = float(getattr(rig, "ambient", 0.0))
+    return tuple(
+        min(1.0, max(0.0, ambient + key_irr
+                     * (float(key_color[ch]) / 255.0)))
+        for ch in range(3))
+
+
+def shade_with_points(base_rgb, rig, point, normal):
+    """Lambert shade with a COLORED key light plus colored point
+    lights.
+
+    Round 8 (R2-V4): the key light used to shade as a neutral
+    (grayscale) factor, so the palette's ``sun_color`` never
+    reached a shaded face -- a white noon sun and an amber
+    afternoon sun produced identical wall hues, and interiors
+    (whose skies are overridden) showed no time-of-day hue at
+    all. Now the key tints per channel, exactly like a point
+    light: ``factor[ch] = ambient + key_irr * key_color[ch]/255``
+    (clamped to 1.0 per channel), and each point light ADDS its
+    own tinted contribution on top. A white key reproduces
+    ``shade_color`` exactly; an amber key warms sunlit faces
+    and a cold moon cools them. The renderer25d legacy path
+    (``shade``) stays grayscale -- see the design doc."""
+    factor = key_factor_for(rig, point, normal)
+    out = [float(base_rgb[ch]) * factor[ch] for ch in range(3)]
+    for p in getattr(rig, "points", None) or ():
         irr = p.irradiance(point, normal)
         if irr <= 0.0:
             continue
@@ -1077,6 +1385,61 @@ def shadow_ellipse_spec(ground_pos, height_above_ground: float,
     return {"center_px": (px, py), "rx_px": rx, "ry_px": ry,
             "alpha": alpha, "capped": capped,
             "offset_world": sh["offset_world"]}
+
+
+# Round 13 (R13-3): cast shadows. The contact ellipse above is
+# capped to the footprint by design (W1) -- it can never show a
+# long dusk shadow. The cast shadow is a separate ground-plane
+# shape: a tapered quad from the feet along the light's ground
+# direction, length = height * spread (the same spread the
+# contact shadow uses for its offset), capped at 2.2 heights.
+# High sun (length < 0.25 heights) returns None: the contact
+# shadow already covers it.
+CAST_SHADOW_ALPHA = 0.30
+CAST_SHADOW_LENGTH_MAX = 2.2
+CAST_SHADOW_LENGTH_MIN_FRAC = 0.25
+
+
+def cast_shadow_spec(ground_pos, height: float, half_width: float,
+                     light: DirectionalLight, camera, frame_size
+                     ) -> dict | None:
+    """Screen-space cast-shadow quad for a standing object.
+
+    ``ground_pos`` is the object's (x, 0, z) ground position,
+    ``height`` its world height, ``half_width`` its ground
+    half-width in world units. Returns ``None`` for high sun, a
+    straight-down light, or unprojectable corners. Otherwise a
+    dict with ``polygon_px`` (4 screen points, near pair first),
+    ``alpha`` and ``length_world``.
+    """
+    gx, gz = light.ground_direction()
+    if gx == 0.0 and gz == 0.0:
+        return None
+    elev = max(0.15, light.elevation_factor())
+    spread = (1.0 - elev) / elev
+    height = float(height)
+    length = min(height * spread, CAST_SHADOW_LENGTH_MAX * height)
+    if length < CAST_SHADOW_LENGTH_MIN_FRAC * height:
+        return None
+    px_, pz = -gz, gx  # ground-plane perpendicular
+    x0, z0 = float(ground_pos[0]), float(ground_pos[2])
+    hw = float(half_width)
+    corners = [
+        (x0 - px_ * hw, 0.0, z0 - pz * hw),
+        (x0 + px_ * hw, 0.0, z0 + pz * hw),
+        (x0 + gx * length + px_ * hw * 0.6, 0.0,
+         z0 + gz * length + pz * hw * 0.6),
+        (x0 + gx * length - px_ * hw * 0.6, 0.0,
+         z0 + gz * length - pz * hw * 0.6),
+    ]
+    pts = []
+    for corner in corners:
+        sx, sy, _, vis = camera.project(corner, *frame_size)
+        if not vis:
+            return None
+        pts.append((sx, sy))
+    return {"polygon_px": pts, "alpha": CAST_SHADOW_ALPHA,
+            "length_world": length}
 
 
 def measure_mean_luminance(img: Image.Image) -> float:

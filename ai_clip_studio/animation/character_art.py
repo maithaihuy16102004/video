@@ -26,17 +26,19 @@ full table in ``reference_measurements.json``):
   ovals 0.20r wide x 0.47r tall sitting ON the head centre line,
   mouth 0.25r wide at 0.36r below the centre, 3 long fingers fanning
   from the wrist, flat feet 0.12*H wide x 0.05*H tall pointing
-  outward, ground = thin sketch strokes + a grass tuft (no blob
-  shadow). The reference face has NO brows -- v4 draws brows only
-  when the expression actually moves them, so the neutral face
-  matches the reference exactly.
+  outward, ground = the renderer's soft flat shadow + a grass
+  tuft on grass ground (no ink sketch strokes: round 8, R2-H4).
+  The v4 reference face had NO brows; the RicksClips loop
+  round 1 (2026-11-14, Mai: full scope incl. character) supersedes
+  that: brows are always drawn, short and thick, following the
+  RicksClips reference where brows carry most of the expression.
 
 Reference (NOT copied as an asset -- style standard only):
 ``~/workspace/user/media_library/image/image.png`` -- a round-headed
 stickman: big round head with a thick even outline, two simple solid
 oval eyes, a small mouth, a slim solid torso, limbs drawn as clean
 lines of uniform thickness with rounded joints, minimal hands with
-clear fingers (never a white dot), flat structured feet on a sketched
+clear fingers (never a white dot), flat structured feet on the
 ground line with a soft shadow.
 
 v4 rules (``STYLE_LOCK`` -- every character goes through it):
@@ -54,11 +56,12 @@ v4 rules (``STYLE_LOCK`` -- every character goes through it):
     opposite of v3). Costume only when it preserves the silhouette
     (``costume="dress"`` extends the torso into an A-line, it is never
     a glued block). No blush, no sweat drops, no nose, no pasted
-    symbols -- the face is eyes + brows + mouth in the same line, and
-    the neutral face has no brows at all.
+    symbols -- the face is eyes + brows + mouth in the same line;
+    brows are always drawn (flat in neutral), short and thick.
   * Hands: 3 LONG finger strokes fanning from the wrist, in ink.
     Feet: flat structured ellipses pointing OUTWARD, sitting exactly
-    on the ground line with sketch strokes + a grass tuft.
+    on the ground line; grounding is the renderer's soft shadow,
+    plus a grass tuft on grass ground.
   * Expressions: 8 states as numeric parameter vectors
     (``EXPRESSIONS``) with LARGER deltas than v3 so they still read
     at small size; transitions interpolate every parameter with
@@ -157,6 +160,11 @@ STYLE_LOCK = {
 
 VIEWS = ("front", "three_quarter", "profile", "back")
 
+# Ground kinds that bear grass (env "ground" dict). A grass
+# tuft draws only on these; every other ground gets the sketch
+# strokes alone (round 7 -- no tufts on cave rock or floors).
+_GRASS_GROUND_KINDS = frozenset({"packed_earth", "forest_floor"})
+
 # ---------------------------------------------------------------------------
 # Expressions -- 8 states, one numeric language, smooth interpolation.
 #
@@ -177,30 +185,30 @@ EXPRESSION_PARAMS = (
 EXPRESSIONS = {
     # v4: deltas are LARGER than v3 on purpose -- v3's expressions
     # were too subtle to tell apart at small size (Mai's verdict).
-    # Neutral stays exactly the reference face: two eyes + a line
-    # mouth, no brows (brows are only drawn when an expression moves
-    # them, see _draw_face).
+    # RicksClips loop round 1: neutral keeps flat (zero-delta) brows,
+    # but brows are DRAWN in every state -- the old browless neutral
+    # is superseded (see _draw_face).
     "neutral":   dict(eye_h=1.00, eye_w=1.00, eye_dx=0.00,
                       brow_in=0.00, brow_out=0.00, brow_asym=0.00,
                       mouth_curve=0.00, mouth_open=0.00,
                       mouth_w=1.00, mouth_dx=0.00),
     "happy":     dict(eye_h=0.45, eye_w=1.00, eye_dx=0.00,
-                      brow_in=-0.12, brow_out=-0.10, brow_asym=0.00,
+                      brow_in=-0.08, brow_out=-0.02, brow_asym=0.00,
                       mouth_curve=1.00, mouth_open=0.15,
                       mouth_w=1.40, mouth_dx=0.00),
     "sad":       dict(eye_h=1.05, eye_w=0.95, eye_dx=0.00,
-                      brow_in=-0.20, brow_out=0.08, brow_asym=0.00,
+                      brow_in=-0.10, brow_out=0.08, brow_asym=0.00,
                       mouth_curve=-1.00, mouth_open=0.00,
                       mouth_w=0.90, mouth_dx=0.00),
     # v5 (audit 2026-11-11): the old surprised eyes (1.60 x 1.30) were
     # so large they read uneven against the small round mouth; softened
     # to 1.45 x 1.15 with a wider mouth so both eyes stay symmetric.
     "surprised": dict(eye_h=1.45, eye_w=1.15, eye_dx=0.00,
-                      brow_in=-0.26, brow_out=-0.22, brow_asym=0.00,
+                      brow_in=-0.10, brow_out=-0.04, brow_asym=0.00,
                       mouth_curve=0.00, mouth_open=0.85,
                       mouth_w=1.00, mouth_dx=0.00),
     "worried":   dict(eye_h=1.15, eye_w=1.00, eye_dx=0.00,
-                      brow_in=-0.18, brow_out=0.06, brow_asym=0.00,
+                      brow_in=-0.08, brow_out=0.06, brow_asym=0.00,
                       mouth_curve=-0.55, mouth_open=0.15,
                       mouth_w=0.80, mouth_dx=0.00),
     "angry":     dict(eye_h=0.75, eye_w=1.00, eye_dx=0.00,
@@ -298,7 +306,9 @@ CHARACTER_INSTANCES = {
 _STICKMAN_KWARGS = (
     "height", "suit", "skin", "hat", "moustache", "moustache_style",
     "name", "template",
-    "body_variant", "hair_style", "glasses", "cane", "costume", "gait",
+    "body_variant", "hair_style", "hair_color", "beard_style",
+    "beard_color", "hat_color", "scarf_color", "apron_color",
+    "glasses", "cane", "costume", "gait",
     "eye_count", "ears", "tail", "horns", "face_markings",
 )
 
@@ -589,6 +599,32 @@ def draw_grip_fingers(draw, hand, direction, char, ink):
 # of a two-eyed face.
 SINGLE_EYE_W_SCALE = 1.45
 SINGLE_EYE_H_SCALE = 1.05
+# Closed-eye gaze boost (round 10, R10-3): a closed happy eye is
+# a thin arc carrying little visual mass, so the same gaze
+# translation that reads on an oval eye reads static on an arc
+# (tester R9: Linh's arcs visually frozen across 60 frames while
+# oval eyes wandered). The arc translates by ARC_GAZE_BOOST x the
+# gaze -- the lid follows the eyeball underneath -- restoring
+# visible wander without changing the closed-eye look. Oval eyes
+# keep the unboosted gaze.
+ARC_GAZE_BOOST = 1.5
+# Arc shear (round 13, R11-D1 narrowed to the arcs): translation
+# alone cannot make a SYMMETRIC arc read -- a shifted symmetric
+# curve looks identical to the unshifted one, which is why the
+# tester found no hold signature on Linh's #14 arcs by two
+# methods while the ovals demonstrated dwell. The arc is now
+# drawn as a polyline whose APEX shears with the gaze relative
+# to its ends (the lid bulge follows the eyeball underneath):
+# looking right leans the arc right, so the SHAPE changes, not
+# just the position. Ends keep the 1.5x translation; the apex
+# moves ARC_GAZE_BOOST + ARC_SHEAR times the gaze.
+# Round 14: 0.8 -> 1.0. The gaze value is already flat holds
+# + snaps (gaze_wander sample-and-hold); the arc shape series
+# still drifted because head sway modulates the projected arc
+# by ~1-2 px. The stronger shear lifts the gaze signal above
+# that floor. Arc-only: the gaze system and head motion are
+# untouched, and the R13 pins (differential > 5 px) still hold.
+ARC_SHEAR = 1.0
 # Single-eye vertical placement: the script trait is one eye "in the
 # middle of the FOREHEAD", so the single eye sits 0.25r above the
 # head centre line -- where the two-eye geometry would put it, its
@@ -662,28 +698,52 @@ def _draw_face(draw, char, hx, hy, view, face_dx, params, ink, pal,
         eye_specs = ((ex_near, 1.0, 1.0, ex_near < hx),
                      (ex_far, far_scale, far_scale, ex_far < hx))
         eye_scale = 1.0
-    brow_w = max(3.0, 0.007 * H)
-    # v4: the reference face has NO brows. Brows are only drawn when the
-    # expression actually moves them, so the neutral face matches the
-    # reference exactly (two eyes + a small mouth, nothing else).
-    show_brows = (abs(params["brow_in"]) + abs(params["brow_out"])
-                  + abs(params["brow_asym"])) > 0.05
+    # RicksClips loop round 1 (2026-11-14): brows are ALWAYS drawn,
+    # short and THICK -- the reference's primary expression carrier.
+    # Neutral brows sit flat; expressions move them. The F4 clamp
+    # below still keeps every brow end on the forehead.
+    brow_w = max(4.0, 0.014 * H)
     for ex, w_scale, h_scale, is_left in eye_specs:
         ew = STYLE_LOCK["eye_half_w_frac_of_r"] * r * params["eye_w"] * w_scale
         eh = STYLE_LOCK["eye_half_h_frac_of_r"] * r * params["eye_h"] * h_scale
         ex = ex + f * params["eye_dx"] * r * face_dx + gaze[0] * r
         if params["eye_h"] <= 0.6:
-            # Closed happy eyes: upper-half arcs, same ink.
-            draw.arc([ex - ew, eye_y - eh, ex + ew, eye_y + eh],
-                     180, 360, fill=ink, width=max(3, int(0.008 * H)))
+            # Closed happy eyes: upper-half arcs, same ink. The
+            # arc translates by ARC_GAZE_BOOST x the gaze (the lid
+            # follows the eyeball); brows stay on the unboosted
+            # eye line. Round 13: the arc is a sheared polyline,
+            # not a symmetric draw.arc -- the apex shifts with
+            # the gaze relative to the ends, so the shape itself
+            # leans toward the look direction. At gaze 0 the
+            # polyline is the same symmetric arc.
+            _ax = ex + gaze[0] * r * (ARC_GAZE_BOOST - 1.0)
+            _ay = eye_y + gaze[1] * r * (ARC_GAZE_BOOST - 1.0)
+            _pts = []
+            for _k in range(26):
+                _th = math.pi + math.pi * _k / 25.0
+                _c, _s = math.cos(_th), math.sin(_th)
+                _apex_w = 1.0 - abs(_c)  # 0 at ends, 1 at apex
+                _pts.append((
+                    _ax + ew * _c
+                    + gaze[0] * r * ARC_SHEAR * _apex_w,
+                    _ay + eh * _s
+                    + gaze[1] * r * ARC_SHEAR * _apex_w))
+            draw.line(_pts, fill=ink,
+                      width=max(3, int(0.008 * H)), joint="curve")
         else:
             draw.ellipse([ex - ew, eye_y - eh, ex + ew, eye_y + eh],
                          fill=ink)
-        # Brow: short line above the eye; inner end carries the mood,
-        # brow_asym raises exactly one brow (thinking / doubtful).
-        # Skipped entirely when the expression leaves the brows flat
-        # (neutral) -- the reference face has no brows.
-        brow_y = eye_y - 0.52 * r
+        # Brow: short thick line above the eye; inner end carries the
+        # mood, brow_asym raises exactly one brow (thinking /
+        # doubtful). Always drawn, including flat neutral brows.
+        # Round-4 "hon": the baseline sits 0.46r above the eye,
+        # not 0.52r. With the F4 hairline clamp at -0.55r the old
+        # baseline left only 0.044r of upward travel, so EVERY
+        # raised brow (happy/surprised/sad/worried) pinned both
+        # ends to the clamp line and drew perfectly flat. The new
+        # baseline + the rescaled table deltas keep both ends
+        # inside the band, so slants survive.
+        brow_y = eye_y - 0.46 * r
         sgn = 1.0 if ex >= hx else -1.0
         inner_dy = params["brow_in"] + (params["brow_asym"] if is_left else 0.0)
         inner = (ex - sgn * 0.11 * r, brow_y + inner_dy * r)
@@ -691,15 +751,28 @@ def _draw_face(draw, char, hx, hy, view, face_dx, params, ink, pal,
         # F4: keep each brow end ON the forehead -- below the hairline
         # (-0.55r, the hair-cap chord is at -0.72r) and above this
         # eye's top (-0.03r clearance). Surprised brows used to sit
-        # at -0.74..-0.78r, a stray line on the hair cap. The clamp
-        # is per end, so slants survive (angry still slants hard);
-        # only the out-of-band part is pulled back.
+        # at -0.74..-0.78r, a stray line on the hair cap. Round 7:
+        # the clamp shifts the brow as a RIGID segment first -- an
+        # upward gaze lifts both ends together, and the old
+        # per-end clamp pinned both to the hairline, flattening
+        # raised brows to 0.0 deg (tester R6: child brow 0.0 deg
+        # in #3/#7/#12). The per-end clamp remains as a final
+        # guard for segments taller than the band (angry).
         _brow_lo = hy - 0.55 * r
         _brow_hi = eye_y - eh - 0.03 * r
+        _seg_lo = min(inner[1], outer[1])
+        _seg_hi = max(inner[1], outer[1])
+        if _seg_lo < _brow_lo and _seg_hi <= _brow_hi:
+            _shift = _brow_lo - _seg_lo
+            inner = (inner[0], inner[1] + _shift)
+            outer = (outer[0], outer[1] + _shift)
+        elif _seg_hi > _brow_hi and _seg_lo >= _brow_lo:
+            _shift = _seg_hi - _brow_hi
+            inner = (inner[0], inner[1] - _shift)
+            outer = (outer[0], outer[1] - _shift)
         inner = (inner[0], min(max(inner[1], _brow_lo), _brow_hi))
         outer = (outer[0], min(max(outer[1], _brow_lo), _brow_hi))
-        if show_brows:
-            draw.line([inner, outer], fill=ink, width=int(brow_w))
+        draw.line([inner, outer], fill=ink, width=int(brow_w))
     # Mouth: line <-> arc <-> open "O" morphs continuously with the
     # expression parameters (open height lerps from a line to an oval).
     mw = STYLE_LOCK["mouth_len_frac_of_r"] * r * params["mouth_w"]
@@ -742,9 +815,12 @@ def _draw_face(draw, char, hx, hy, view, face_dx, params, ink, pal,
     if _style is None:
         _style = "full" if getattr(char, "moustache", False) else "none"
     if _style == "toothbrush":
-        _mw = 0.07 * r
-        draw.rectangle([mx - _mw, my - 0.30 * r,
-                        mx + _mw, my - 0.08 * r], fill=ink)
+        # RicksClips loop round 1: wider than tall, sitting ON the
+        # mouth line -- the old tall narrow bar read as a nose in
+        # close-up (QA D10). Small dark block directly above the lip.
+        _mw = 0.11 * r
+        draw.rectangle([mx - _mw, my - 0.16 * r,
+                        mx + _mw, my - 0.02 * r], fill=ink)
     elif _style == "handlebar":
         _bw = int(brow_w)
         draw.line([(mx - 0.40 * r, my - 0.15 * r),
@@ -757,8 +833,8 @@ def _draw_face(draw, char, hx, hy, view, face_dx, params, ink, pal,
                    (mx + 0.48 * r, my - 0.32 * r)],
                   fill=ink, width=_bw)
     elif _style == "full":
-        draw.rounded_rectangle([mx - 0.35 * r, my - 0.30 * r,
-                                mx + 0.35 * r, my - 0.08 * r],
+        draw.rounded_rectangle([mx - 0.35 * r, my - 0.28 * r,
+                                mx + 0.35 * r, my - 0.02 * r],
                                radius=int(0.06 * r), fill=ink)
     return mx, my
 
@@ -820,6 +896,10 @@ def _draw_hair(draw, char, hx, hy, view, ink, part="cap"):
     """
     r = char.head_r
     style = getattr(char, "hair_style", None) or "short"
+    # Hair colour (round-3 system 3): the script-named colour, or the
+    # ink default when the script names none. The colour is data, so
+    # grey hair reads grey and black hair reads black.
+    hair_c = _hex(getattr(char, "hair_color", None) or ink)
     if part == "back":
         if style == "long" and view != "back":
             # Long hair: two locks falling from the sides of the head to
@@ -831,42 +911,117 @@ def _draw_hair(draw, char, hx, hy, view, ink, part="cap"):
             lw = 0.26 * r
             for sgn in (+1, -1):
                 _thick(draw, (hx + sgn * 0.80 * r, hy - 0.55 * r),
-                       (hx + sgn * 0.95 * r, hy + 1.6 * r), lw, ink)
+                       (hx + sgn * 0.95 * r, hy + 1.6 * r), lw, hair_c)
         return
     if view == "back":
         if style == "long":
             draw.ellipse([hx - r * 1.02, hy - r * 1.0,
                           hx + r * 1.02, hy + r * 1.6], fill=ink)
         else:
-            draw.pieslice([hx - r, hy - r, hx + r, hy + r * 0.75],
-                          180, 360, fill=ink)
+            # RicksClips loop round 1: curved nape hairline following
+            # the head circle -- the old flat pieslice chord read as
+            # a solid dark disc in over-the-shoulder shots (QA D13).
+            # Deeper chord + downward bow: hair dips at the nape.
+            _hair_cap(draw, hx, hy, r, hair_c, chord=0.30, bow=-0.12)
+            if style == "tied":
+                # The bun reads from behind too -- same knot as the
+                # front view, in the hair colour.
+                _br = 0.26 * r
+                _by = hy - r * 1.08
+                draw.ellipse([hx - _br, _by - _br, hx + _br, _by + _br],
+                             fill=hair_c, outline=ink,
+                             width=max(2, int(0.02 * float(char.H))))
         return
     if style == "short":
         # v5: thin hairline cap (see _hair_cap) -- chord 0.72, bowed
         # hairline -- the v4 chord 0.55 buried the top of the head in
         # black while the reference head is plain white.
-        _hair_cap(draw, hx, hy, r, ink)
+        _hair_cap(draw, hx, hy, r, hair_c)
     elif style == "side_part":
         # v8: hair parted on one side -- the hairline slants down
         # toward the facing side, with a short swept fringe on that
         # side. The part reads from the silhouette alone (no colour,
         # no face): the dark cap is deeper on the part side.
         f = 1.0 if float(char.pose.get("facing", 1)) >= 0 else -1.0
-        _hair_cap(draw, hx, hy, r, ink, slant=0.25 * f)
+        _hair_cap(draw, hx, hy, r, hair_c, slant=0.25 * f)
         # Swept fringe (v8): a diagonal sweep from the part down the
         # facing side of the forehead, ending above the eye -- the side
         # part reads as HAIR, not just a slanted cap edge, and the head
         # silhouette differs from a plain short cap.
         _thick(draw, (hx + f * 0.30 * r, hy - 0.85 * r),
-               (hx + f * 0.90 * r, hy - 0.32 * r), 0.12 * r, ink)
+               (hx + f * 0.90 * r, hy - 0.32 * r), 0.12 * r, hair_c)
     elif style == "long":
-        _hair_cap(draw, hx, hy, r, ink)
+        _hair_cap(draw, hx, hy, r, hair_c)
+    elif style == "tied":
+        # Hair tied high: the thin cap plus a bun knot above the
+        # head -- the knot is the trait that reads at a glance. The
+        # bun sits on the head circle's top, outlined in ink so a
+        # light hair colour still reads against the background.
+        _hair_cap(draw, hx, hy, r, hair_c)
+        _br = 0.26 * r
+        _by = hy - r * 1.08
+        draw.ellipse([hx - _br, _by - _br, hx + _br, _by + _br],
+                     fill=hair_c, outline=ink,
+                     width=max(2, int(0.02 * float(char.H))))
     elif style == "tuft":
-        _hair_cap(draw, hx, hy, r, ink)
+        _hair_cap(draw, hx, hy, r, hair_c)
         for dx0, dx1 in ((-0.10, -0.22), (0.0, 0.0), (0.10, 0.22)):
             draw.line([(hx + dx0 * r, hy - r * 0.92),
                        (hx + dx1 * r, hy - r * 1.22)],
-                      fill=ink, width=max(3, int(0.006 * float(char.H))))
+                      fill=hair_c, width=max(3, int(0.006 * float(char.H))))
+
+
+def _draw_beard(draw, char, hx, hy, r, view, ink, out_w):
+    """Chin beard (round-3 system 3, reshaped round 5): a filled
+    shape following the head circle's bottom arc, top edge a chord
+    below the mouth (mouth at +0.36r, beard chord at +0.50r).
+    Round-5 reshape: the old chord bowed DOWN 0.12r at the centre
+    with a heavy ink outline around the whole polygon -- at medium
+    distance that bowed dark line read as a wide GRIN, not a beard
+    (tester R3-H1/R4). The top edge is now nearly straight (bow
+    0.02r) with a THIN ink line only along the top edge; the bottom
+    arc needs no outline (the head outline already bounds it). A
+    straight thin boundary reads as a beard edge; the smile read
+    needed the curve. Profile shifts the shape toward the facing
+    side (the jaw sits at the front-bottom of the head). Back view:
+    no beard -- the nape hair covers the back of the head.
+    """
+    if getattr(char, "beard_style", "none") != "full":
+        return
+    if view == "back":
+        return
+    f = 1.0
+    try:
+        f = 1.0 if float(char.pose.get("facing", 1)) >= 0 else -1.0
+    except (AttributeError, TypeError, ValueError):
+        pass
+    cx = hx + (f * 0.22 * r if view == "profile" else 0.0)
+    beard_c = _hex(getattr(char, "beard_color", None) or ink)
+    chord, bow = 0.50, 0.02
+    a_lo = math.degrees(math.asin(chord))
+    a_hi = 180 - a_lo
+    pts = []
+    a = a_lo
+    while a <= a_hi:
+        rad = math.radians(a)
+        pts.append((cx + r * math.cos(rad), hy + r * math.sin(rad)))
+        a += 3.0
+    rad = math.radians(a_hi)
+    pts.append((cx + r * math.cos(rad), hy + r * math.sin(rad)))
+    half_w = r * math.cos(math.asin(chord))
+    n = 16
+    for i in range(1, n + 1):
+        x = half_w * (2.0 * i / n - 1.0)
+        y = (hy + chord * r + bow * r * (1.0 - (x / half_w) ** 2))
+        pts.append((cx + x, y))
+    draw.polygon(pts, fill=beard_c)
+    # Thin ink line along the TOP edge only (the last n+1 points of
+    # pts, in reverse chord order): the bottom arc already has the
+    # head outline. A heavy full outline + bowed chord read as a
+    # grin at medium distance (R3-H1).
+    _top = pts[len(pts) - n - 1:]
+    draw.line(_top, fill=ink, width=max(1, int(out_w * 0.35)),
+              joint="curve")
 
 
 def resolve_view(char, default="profile"):
@@ -1109,7 +1264,7 @@ def _draw_face_markings(draw, char, hx, hy, r, face_dx, f, ink):
 
 def draw_character_v4(draw, char, expression="neutral", view="profile",
                       palette=None, expression_blend=None,
-                      gaze=None, hand_grips=None):
+                      gaze=None, hand_grips=None, ground_kind=None):
     """Draw a PREMIUM_STICKMAN v4 character from ``char.joints()``.
 
     draw: PIL ImageDraw (ideally ``ImageDraw.Draw(img, "RGBA")``).
@@ -1125,6 +1280,14 @@ def draw_character_v4(draw, char, expression="neutral", view="profile",
     hand_grips: optional {"l": grip, "r": grip} with grip "open" |
       "grip" | "point" (see _finger_geometry). None = both "open",
       the previous drawing exactly.
+    ground_kind: the environment's ground kind (env "ground" dict).
+      Grass tufts draw only on grass-bearing ground
+      (packed_earth / forest_floor); stone, wood, sand, cave
+      rock, asphalt and mud floors get no ground marks at all
+      (round 8: the ink sketch strokes were removed, R2-H4 --
+      grounding is the renderer's soft shadow). None = the
+      previous drawing exactly (tuft drawn), so standalone
+      callers keep the reference look.
     Returns the joint map from ``char.joints()`` (the rig's own map --
     the 3/4 view compresses the DRAWN x positions but does not rewrite
     the joint map, so bone-length checks still pass on it).
@@ -1195,22 +1358,32 @@ def draw_character_v4(draw, char, expression="neutral", view="profile",
      fw_scale) = _separate_close_hands(limbs["hand_l"], limbs["hand_r"],
                                        limbs["elbow_l"], f, H)
 
-    # --- ground: sketch strokes + grass tuft ONLY (reference style).
-    # The reference has no blob shadow -- just thin horizontal strokes
-    # under the feet and a small tuft of grass at the left foot.
-    feet_x = (limbs["foot_l"][0] + limbs["foot_r"][0]) / 2.0
-    for dx0, dx1, dy in ((0.30, 0.28, 8), (0.22, 0.24, 13),
-                         (0.15, 0.12, 18)):
-        draw.line([(feet_x - dx0 * H, ground_y + dy),
-                   (feet_x + dx1 * H, ground_y + dy)],
-                  fill=ink, width=2)
-    # Grass tuft at the left foot: 3 short strokes fanning up-left.
-    tuft_x = feet_x - 0.16 * H
-    tuft_y = ground_y + 2
-    for dx, dy in ((-0.012, -0.030), (-0.002, -0.036), (0.008, -0.028)):
-        draw.line([(tuft_x, tuft_y),
-                   (tuft_x + dx * H, tuft_y + dy * H)],
-                  fill=ink, width=2)
+    # --- ground: grass tuft ONLY (reference style, round 8).
+    # The reference grounds characters with a soft flat shadow
+    # under the feet (dossier) -- the renderer paints that shadow
+    # (W1 contact shadow) before this call, so the art draws NO
+    # ground marks of its own. The three hard ink sketch strokes
+    # that used to sit here read as scratches on every floor
+    # (tester R2-H4, all locations) and duplicated the shadow;
+    # round 8 removes them. The grass tuft stays, gated to
+    # grass-bearing ground (round 7).
+    _fw = STYLE_LOCK["foot_w_frac"] * H * ws
+    _foot_lx = min(limbs["foot_l"][0], limbs["foot_r"][0]) - _fw / 2
+    _foot_rx = max(limbs["foot_l"][0], limbs["foot_r"][0]) + _fw / 2
+    # Grass tuft left of the left foot -- only on grass-bearing
+    # ground (round 7: tufts on cave rock / forge stone read as
+    # stray "v" scratches). Five blades of varied height and
+    # lean, fanning from one root, so the tuft reads as grass
+    # instead of the 3-blade "v" the tester flagged in R6.
+    if ground_kind is None or ground_kind in _GRASS_GROUND_KINDS:
+        tuft_x = _foot_lx - 0.045 * H
+        tuft_y = ground_y + 2
+        for dx, dy in ((-0.030, -0.052), (-0.016, -0.068),
+                       (0.0, -0.056), (0.014, -0.066),
+                       (0.028, -0.046)):
+            draw.line([(tuft_x, tuft_y),
+                       (tuft_x + dx * H, tuft_y + dy * H)],
+                      fill=ink, width=2)
     # Species tail: BEHIND the body, so it is drawn before the legs and
     # torso ("none" draws nothing).
     _draw_tail(draw, char, hip_d, f, ink, view, H)
@@ -1318,6 +1491,32 @@ def draw_character_v4(draw, char, expression="neutral", view="profile",
                  _cy + py * _bl / 2 - uy * _bt / 2),
             ], fill=ink)
 
+    # --- apron (round 5): a front panel in the script-named apron
+    # colour, from the upper chest to mid-thigh, slightly inset from
+    # the torso edges so the jacket shows at the sides. Front views
+    # only (a back view has no apron front). No apron colour ->
+    # nothing drawn. A waist line at hip level keeps the panel
+    # reading as an apron rather than a vest.
+    _apron = getattr(char, "apron_color", None)
+    if _apron and view != "back":
+        _ac = _hex(_apron)
+        _ax, _ay = -ux, -uy  # down the torso
+        _top = (shoulder_d[0] + (hip_d[0] - shoulder_d[0]) * 0.18,
+                shoulder_d[1] + (hip_d[1] - shoulder_d[1]) * 0.18)
+        _bot = (hip_d[0] + _ax * 0.16 * H, hip_d[1] + _ay * 0.16 * H)
+        _w_top = (w_top + (w_bot - w_top) * 0.18) * 0.80
+        _w_bot = w_bot * 0.92
+        draw.polygon([
+            (_top[0] + px * _w_top, _top[1] + py * _w_top),
+            (_top[0] - px * _w_top, _top[1] - py * _w_top),
+            (_bot[0] - px * _w_bot, _bot[1] - py * _w_bot),
+            (_bot[0] + px * _w_bot, _bot[1] + py * _w_bot),
+        ], fill=_ac, outline=ink, width=max(1, int(out_w * 0.35)))
+        draw.line([
+            (hip_d[0] + px * _w_bot, hip_d[1] + py * _w_bot),
+            (hip_d[0] - px * _w_bot, hip_d[1] - py * _w_bot),
+        ], fill=ink, width=max(1, int(out_w * 0.35)))
+
     # --- arms: same uniform line as the legs, minimal 3-finger hands ---
     for side, col in (("l", ink_far), ("r", ink)):
         _thick(draw, shoulder_d, limbs[f"elbow_{side}"], limb_w, col)
@@ -1338,6 +1537,41 @@ def draw_character_v4(draw, char, expression="neutral", view="profile",
                    char, ink, flen_scale=finger_scale,
                    fan_scale=fan_scale, fw_scale=fw_scale, grip=_grip)
 
+    # --- scarf (round-3 system 3): a band at the neck, in the
+    # script-named scarf colour, drawn after the torso and before the
+    # head so the chin overlaps its top edge. The band runs
+    # perpendicular to the torso axis, centred below the head
+    # centre along the head->shoulder axis, so it wraps the neck
+    # and tilts with a torso lean. No scarf colour -> nothing drawn.
+    _scarf = getattr(char, "scarf_color", None)
+    if _scarf:
+        # Round 10 (R9-D3): the old axis-aligned bar at 1.08r
+        # left a hairline gap under the chin, stayed horizontal
+        # when the head leaned, and stuck out 0.62r on each side
+        # of a ~0.3r neck -- a hovering plank in closeups. The
+        # band now centres at 0.98r (the head circle overlaps its
+        # top edge: no gap), spans 0.40r each way (near the neck,
+        # not past the chin), and rotates perpendicular to the
+        # head->shoulder axis (it follows a lean).
+        _sc = _hex(_scarf)
+        _dx, _dy = shoulder_d[0] - head_d[0], shoulder_d[1] - head_d[1]
+        _dl = math.hypot(_dx, _dy) or 1.0
+        _ux, _uy = _dx / _dl, _dy / _dl
+        _nx = head_d[0] + _ux * 0.98 * r
+        _ny = head_d[1] + _uy * 0.98 * r
+        _px, _py = -_uy, _ux
+        _hw, _hh = 0.40 * r, 0.10 * r
+        draw.polygon([
+            (_nx - _px * _hw - _ux * _hh,
+             _ny - _py * _hw - _uy * _hh),
+            (_nx + _px * _hw - _ux * _hh,
+             _ny + _py * _hw - _uy * _hh),
+            (_nx + _px * _hw + _ux * _hh,
+             _ny + _py * _hw + _uy * _hh),
+            (_nx - _px * _hw + _ux * _hh,
+             _ny - _py * _hw + _uy * _hh),
+        ], fill=_sc, outline=ink)
+
     # --- head ------------------------------------------------------------
     hx, hy = head_d
     if getattr(char, "hair_style", None) == "long" and view != "back":
@@ -1347,15 +1581,26 @@ def draw_character_v4(draw, char, expression="neutral", view="profile",
     _draw_ears(draw, char, hx, hy, r, f, view, ink)
     _draw_hair(draw, char, hx, hy, view, ink, part="cap")
     _draw_horns(draw, char, hx, hy, r, view, ink, f)
-    # Bowler hat (Lustig): brim line + dome, same ink, same language.
+    # Hat: brim line + dome, same language. The dome/brim use the
+    # script-named hat colour when one exists (round-3 system 3) --
+    # an orange hat reads orange -- with an ink outline so a light
+    # colour still reads against the sky. No colour -> ink, exactly
+    # the previous drawing.
     _hat = getattr(char, "hat", None)
     if _hat and _hat != "none":
+        _hat_c = _hex(getattr(char, "hat_color", None) or ink)
         draw.line([(hx - r * 1.15, hy - r * 0.95),
                    (hx + r * 1.15, hy - r * 0.95)],
-                  fill=ink, width=max(3, int(out_w * 0.8)))
+                  fill=_hat_c, width=max(3, int(out_w * 0.8)))
+        # The pieslice diameter sits at the box CENTRE, so the
+        # box bottom must be hy-0.15r for the dome's flat edge to
+        # land on the brim line (hy-0.95r). The old box bottom
+        # (hy-0.85r) put the diameter at hy-1.30r — a 0.35r gap
+        # with the dome floating above the brim.
         draw.pieslice([hx - r * 0.62, hy - r * 1.75,
-                       hx + r * 0.62, hy - r * 0.85],
-                      180, 360, fill=ink)
+                       hx + r * 0.62, hy - r * 0.15],
+                      180, 360, fill=_hat_c, outline=ink,
+                      width=max(2, int(out_w * 0.6)))
     # Glasses (elderly): two thin circles + bridge, same ink.
     if getattr(char, "glasses", False) and view != "back":
         face_dx = {"front": 0.0, "three_quarter": 0.5,
@@ -1375,6 +1620,7 @@ def draw_character_v4(draw, char, expression="neutral", view="profile",
                  max(-0.15, min(0.15, float(_gaze[1]))))
         _draw_face(draw, char, hx, hy, view, face_dx, params, ink, pal,
                    gaze=_gaze)
+        _draw_beard(draw, char, hx, hy, r, view, ink, out_w)
     return J
 
 

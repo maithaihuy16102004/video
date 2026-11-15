@@ -350,6 +350,44 @@ SYNTHESIS_MAP: dict[str, dict[str, Any]] = {
                   "afade=t=in:st=0:d=0.05,"
                   "afade=t=out:st={fade_st}:d={fade_d},volume=0.35[out]",
     },
+    "stone_crack": {
+        "duration_default": 0.6, "category": "foley",
+        "base_gain_db": -12.0,
+        "method": "synthesised: stone-crack approximation "
+                  "(gated bandpassed noise bursts at 11 Hz + a "
+                  "sharp 50 ms transient, ffmpeg lavfi) — not a "
+                  "recorded crack",
+        "inputs": ["anoisesrc=color=white:duration={dur}",
+                   "anoisesrc=color=white:duration={dur}"],
+        "filter": "[0:a]bandpass=f=2800:width_type=h:width=2000,"
+                  "tremolo=f=11:d=0.85,"
+                  "afade=t=out:st={fade_st}:d={fade_d},volume=0.9[n];"
+                  "[1:a]bandpass=f=4000:width_type=h:width=3000,"
+                  "afade=t=out:st=0:d=0.05,volume=0.6[t];"
+                  "[n][t]amix=inputs=2:normalize=0[out]",
+    },
+    "crackle_bed": {
+        "duration_default": 10.0, "category": "ambience",
+        "base_gain_db": -22.0,
+        "method": "synthesised: fire-crackle bed (bandpassed "
+                  "noise gated at 7 Hz, ffmpeg lavfi) — not a "
+                  "recorded fire",
+        "inputs": ["anoisesrc=color=pink:duration={dur}"],
+        "filter": "[0:a]bandpass=f=3000:width_type=h:width=2500,"
+                  "tremolo=f=7:d=0.7,volume=0.14[out]",
+    },
+    "drip_bed": {
+        "duration_default": 10.0, "category": "ambience",
+        "base_gain_db": -24.0,
+        "method": "synthesised: water-drip bed (sparse sine pings "
+                  "at two incommensurate rates, 0.9/0.67 Hz, "
+                  "ffmpeg lavfi) — not recorded drips",
+        "inputs": ["sine=frequency=1400:duration={dur}",
+                   "sine=frequency=1050:duration={dur}"],
+        "filter": "[0:a]tremolo=f=0.9:d=0.9,volume=0.10[a];"
+                  "[1:a]tremolo=f=0.67:d=0.9,volume=0.08[b];"
+                  "[a][b]amix=inputs=2:normalize=0[out]",
+    },
     "impact": {
         "duration_default": 0.35, "category": "foley",
         "base_gain_db": -10.0,
@@ -494,7 +532,8 @@ ENGINE_EVENT_SYNTH: dict[str, str] = {
 #: point in time. An SFX cue mapping to one of these renders as a
 #: bed from its trigger time to the end of its scene.
 BED_KINDS = frozenset(
-    {"rain_bed", "crowd_bed", "street_bed", "wind_bed", "room_tone"})
+    {"rain_bed", "crowd_bed", "street_bed", "wind_bed", "room_tone",
+     "crackle_bed", "drip_bed"})
 
 #: Kinds an AMBIENCE cue part may fill a scene span with: the bed
 #: kinds, plus span-capable textures (collective footsteps, distant
@@ -543,6 +582,15 @@ _CUE_KEYWORDS: tuple[tuple[str, str | None, tuple[str, ...]], ...] = (
      ("door knock", "knock", "knocking", "go cua")),
     ("door_open", "door_rotation",
      ("door open", "door opening", "mo cua", "cua mo")),
+    ("crackle_bed", None,
+     ("fire crackle", "fire crackling", "crackling fire",
+      "crackling flames", "lua chay", "lua no")),
+    ("stone_crack", None,
+     ("stone crack", "cracking", "crack", "crackle", "crackling",
+      "nut", "ran nut")),
+    ("drip_bed", None,
+     ("water drip", "water drips", "drip", "drips", "dripping",
+      "giot nuoc", "nuoc nho")),
     ("paper_rustle", "paper_movement",
      ("paper rustle", "rustling paper", "paper", "giay")),
     ("writing_scratch", None,
@@ -560,7 +608,8 @@ _CUE_KEYWORDS: tuple[tuple[str, str | None, tuple[str, ...]], ...] = (
     ("crowd_bed", "crowd murmur", ("murmur", "murmuring")),
     ("wind_bed", None, ("wind", "gio")),
     ("room_tone", None, ("room tone", "room", "indoor", "attic")),
-    ("street_bed", None, ("street", "city", "activity", "soldiers")),
+    ("street_bed", None, ("street", "city", "activity", "soldiers",
+                          "village", "distant village")),
     ("soft_rustle", None, ("rustle", "leather")),
     ("metal_strike", "hammer_contact",
      ("metal strike", "hammer strike", "hammer", "hammers",

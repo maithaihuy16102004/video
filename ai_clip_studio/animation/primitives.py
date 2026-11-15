@@ -913,40 +913,56 @@ def give_to(giver, receiver, prop, duration, receive_hand="l"):
     """Handoff: giver's and receiver's hands converge on a midpoint and
     `prop` (dict with 'x','y') travels with them. Returns f(t)->(giver, receiver, prop).
 
-    ``receive_hand`` ("l" | "r") is the hand the receiver takes the
-    prop with -- named by the script ("tay phải" / "tay trái") via
-    the compiler's HAND_OVER receive_hand param. The default "l"
-    preserves the engine's historical behaviour. The giver always
-    offers with the right hand.
+    ``receive_hand`` ("l" | "r" | "both") is the hand the receiver
+    takes the prop with -- named by the script ("tay phải" / "tay
+    trái" / "hai tay") via the compiler's HAND_OVER receive_hand
+    param. The default "l" preserves the engine's historical
+    behaviour. "both" converges BOTH receiver hands on the meeting
+    point, flanking it by 12 scaled px per side; the prop travels
+    with their midpoint. The giver always offers with the right
+    hand.
 
     v5 (audit 2026-11-11): both hands start from their CURRENT
     positions and lerp in x AND y to the meeting point. The old code
     set the hand y to the meeting height from u=0 while lerping only
     x, so each hand teleported 100-180 px on the first frame of the
     handoff.
+
+    Release: once the transfer completes (u reaches 1), later calls
+    (the sequencer's end-pose hold) drive ONLY the giver. The
+    receiver is released to its own next window (normally
+    receive_prop's securing pull-in). Before this, the hold kept
+    re-asserting the receiver's hand at the meeting point AFTER the
+    pair window ended, overwriting the receive window every frame
+    (the receiver's hand froze mid-air for the rest of the shot).
     """
-    if receive_hand not in ("l", "r"):
-        raise ValueError(f"receive_hand must be 'l' or 'r', "
+    if receive_hand not in ("l", "r", "both"):
+        raise ValueError(f"receive_hand must be 'l', 'r' or 'both', "
                          f"got {receive_hand!r}")
-    recv_joint = "hand_" + receive_hand
-    recv_target = "hand_target_" + receive_hand
+    _recv_sides = (("l", -1.0), ("r", 1.0)) \
+        if receive_hand == "both" else ((receive_hand, 0.0),)
     _start = {}
 
     def fn(t):
         u = smoothstep(t / max(duration, 0.01))
         if "giver" not in _start:
             _start["giver"] = giver.joints()["hand_r"]
-            _start["receiver"] = receiver.joints()[recv_joint]
+            for _side, _sgn in _recv_sides:
+                _start["receiver_" + _side] = receiver.joints()[
+                    "hand_" + _side]
+                _start["last_recv_" + _side] = None
             _start["last_g"] = None
-            _start["last_recv"] = None
         elif t < 0.25:
             # stale pre-warm capture -- re-capture (see _start_moved)
             if (_start["last_g"] is not None and _start_moved(
                     giver, "hand_r", _start["last_g"])):
                 _start["giver"] = giver.joints()["hand_r"]
-            if (_start["last_recv"] is not None and _start_moved(
-                    receiver, recv_joint, _start["last_recv"])):
-                _start["receiver"] = receiver.joints()[recv_joint]
+            for _side, _sgn in _recv_sides:
+                _last = _start["last_recv_" + _side]
+                if _last is not None and _start_moved(
+                        receiver, "hand_" + _side, _last):
+                    _start["receiver_" + _side] = receiver.joints()[
+                        "hand_" + _side]
         # Pose FIRST: the meeting-point clamp reads the shoulder from
         # joints(), and the lean set here moves the shoulder by up to
         # ~14 px. Clamping before set_pose left an 8.7 px residual
@@ -958,19 +974,31 @@ def give_to(giver, receiver, prop, duration, receive_hand="l"):
         gx, gy = giver.pose["root_x"], giver.pose["root_y"]
         rx, ry = receiver.pose["root_x"], receiver.pose["root_y"]
         mid_x = (gx + rx) / 2
-        mid_y = gy - _s(giver, 180) - _s(giver, 40) * math.sin(u * math.pi)
+        # Exchange height: elbow/chest-low (gy - 100s), not neck
+        # height (the old gy - 180s put the meeting point 35 px
+        # above the shoulder, so inserts around a handover
+        # framed two faces instead of the prop). The arc bump
+        # stays: the peak now clears the chin.
+        mid_y = gy - _s(giver, 100) - _s(giver, 40) * math.sin(u * math.pi)
         # Mixed-height partners: the meeting point must be reachable
         # by BOTH hands, or the rig's independent IK clamps leave a
         # gap (see _reachable_meeting_point). No-op when reachable.
         mid_x, mid_y = _reachable_meeting_point(
             giver, receiver, (mid_x, mid_y))
+        _released = _start.get("released", False)
+        if u >= 1.0:
+            _start["released"] = True
         gsx, gsy = _start["giver"]
-        rsx, rsy = _start["receiver"]
         giver.hand_target_r = (lerp(gsx, mid_x, u), lerp(gsy, mid_y, u))
-        setattr(receiver, recv_target,
-                (lerp(rsx, mid_x, u), lerp(rsy, mid_y, u)))
+        if not _released:
+            _off = _s(receiver, 12) if receive_hand == "both" else 0.0
+            for _side, _sgn in _recv_sides:
+                rsx, rsy = _start["receiver_" + _side]
+                _tgt = (lerp(rsx, mid_x + _sgn * _off, u),
+                        lerp(rsy, mid_y, u))
+                setattr(receiver, "hand_target_" + _side, _tgt)
+                _start["last_recv_" + _side] = _tgt
         _start["last_g"] = giver.hand_target_r
-        _start["last_recv"] = getattr(receiver, recv_target)
         prop["x"], prop["y"] = mid_x, mid_y + _s(giver, 10)
         return giver, receiver, prop
     return fn
@@ -982,8 +1010,11 @@ def idle(char, duration, ground_y):
     The v4 audit caught the standing character as a frozen statue:
     0.000 px total joint displacement over 2.8 s while the other
     character walked. A living character breathes (~15/min), shifts
-    weight every ~12 s and lets the head drift. Small amplitudes --
-    this is a background life signal, not a gesture.
+    weight every ~12 s and lets the head drift. Round-4 "hon"
+    (2026-11-14): the old amplitudes (bob 3 px, sway 6 px, drift
+    0.08) measured below notice in rendered motion -- the tester
+    read idle holds as frozen. Amplitudes roughly doubled; still
+    a background life signal, not a gesture.
     """
     _base = {}
 
@@ -994,11 +1025,11 @@ def idle(char, duration, ground_y):
         breathe = math.sin(t * 2 * math.pi * 0.25)   # ~15 breaths/min
         sway = math.sin(t * 2 * math.pi * 0.08)      # ~12 s weight shift
         drift = math.sin(t * 2 * math.pi * 0.05)     # slow head drift
-        char.set_pose(root_x=bx + _s(char, 6) * sway,
+        char.set_pose(root_x=bx + _s(char, 10) * sway,
                       root_y=by,
-                      torso_lean=0.02 * sway,
-                      head_look=0.08 * drift,
-                      bob=_s(char, 3) * (0.5 + 0.5 * breathe),
+                      torso_lean=0.03 * sway,
+                      head_look=0.12 * drift,
+                      bob=_s(char, 6) * (0.5 + 0.5 * breathe),
                       arm_l=0.05 + 0.03 * breathe,
                       arm_r=-0.05 - 0.03 * breathe,
                       elbow_l=0.10, elbow_r=0.10)
@@ -1080,7 +1111,8 @@ def standing(char, root_x, ground_y, facing=1, lean=0.0):
     return char
 
 
-def bend_pick(char, target, duration, ground_y, hand="r"):
+def bend_pick(char, target, duration, ground_y, hand="r",
+              flank_px=None):
     """Bend down to pick up a prop at `target` (x, y) on the ground.
 
     v5 (audit 2026-11-11): the old bend leaned 71 deg with STRAIGHT
@@ -1095,7 +1127,8 @@ def bend_pick(char, target, duration, ground_y, hand="r"):
     actually requires, verified by the IK clamp in the tests. The head
     tracks the prop, the hand reaches it by 55% of the motion and
     HOLDS contact (hand within 15 px) through the hold phase, then
-    rises slowly carrying the prop.
+    rises slowly carrying the prop. ``hand`` "both" drives both
+    hands (flanked) through the same phases.
     Phases: anticipate (0-12%), descend (12-50%), hold (50-65%),
     rise (65-100% -- the rise gets the longest share, 35%, because
     standing back up from a deep bend is the slowest part).
@@ -1105,9 +1138,10 @@ def bend_pick(char, target, duration, ground_y, hand="r"):
 
     def fn(t):
         u = min(1.0, max(0.0, t / max(duration, 0.01)))
-        if "hand" not in _start:
-            _start["hand"] = char.joints()["hand_" + hand]
+        if "root_y" not in _start:
             _start["root_y"] = char.pose["root_y"]
+            for _side in (("l", "r") if hand == "both" else (hand,)):
+                _start["hand_" + _side] = char.joints()["hand_" + _side]
         # depth profile: 0 = standing, 1 = fully bent
         if u < 0.12:
             d = 0.12 * smoothstep(u / 0.12)
@@ -1123,7 +1157,6 @@ def bend_pick(char, target, duration, ground_y, hand="r"):
         # then lift it ~60 px as the body rises.
         reach = smoothstep(min(1.0, u / 0.50))
         rise = smoothstep(max(0.0, (u - 0.65) / 0.35))
-        sx, sy = _start["hand"]
         tx, ty = target
         # v8: the rise carries the prop to the WAIST hold (root_x +
         # 40s forward, standing root_y - 60s) -- the same hold the
@@ -1136,20 +1169,46 @@ def bend_pick(char, target, duration, ground_y, hand="r"):
         f = char.pose.get("facing", 1)
         waist = (char.pose["root_x"] + f * _s(char, 40),
                  ground_y - leg * 0.93 - _s(char, 60))
-        hx = lerp(lerp(sx, tx, reach), waist[0], rise)
-        hy = lerp(lerp(sy, ty, reach), waist[1], rise)
         char.set_pose(root_y=root_y, torso_lean=lean)
         # head tracks the prop (clamped by head_track)
         head_track(char, (tx, ty))
-        if hand == "r":
-            char.hand_target_r = (hx, hy)
-        else:
-            char.hand_target_l = (hx, hy)
+        # Round 9 (R8-D1): same self-head grasp guard as kneel_pick
+        # -- the 77 deg stoop dives the head toward the grasp point.
+        _J = char.joints()
+        _g_head = _J["head"]
+        _g_shoulder = _J["shoulder"]
+        _g_reach = 0.98 * (char.u_arm + char.l_arm)
+        _g_clear = (char.head_r
+                    + (float(flank_px) if flank_px is not None
+                       else _s(char, 24))
+                    + _s(char, 8))
+        # Round-6 grip readability: a two-hand grip flanks
+        # the PROP (flank_px = half its drawn footprint +
+        # margin, from the compiler) so the hands grip its
+        # edges instead of hiding inside its silhouette.
+        # Without a prop size the legacy +-12 scaled px
+        # flank applies.
+        _off = float(flank_px) if flank_px is not None \
+            else _s(char, 12)
+        _sides = (("l", -_off), ("r", _off)) if hand == "both" \
+            else ((hand, 0.0),)
+        for _side, _dx in _sides:
+            sx, sy = _start["hand_" + _side]
+            hx = lerp(lerp(sx, tx + _dx, reach), waist[0] + _dx, rise)
+            hy = lerp(lerp(sy, ty, reach), waist[1], rise)
+            hx, hy = _clear_own_head(
+                (hx, hy), _g_head, char.head_r, float(char.H),
+                _g_shoulder, _g_reach, clearance_px=_g_clear)
+            if _side == "r":
+                char.hand_target_r = (hx, hy)
+            else:
+                char.hand_target_l = (hx, hy)
         return char
     return fn
 
 
-def kneel_pick(char, target, duration, ground_y, hand="r"):
+def kneel_pick(char, target, duration, ground_y, hand="r",
+               flank_px=None):
     """Pick up a prop at ``target`` (x, y) on the ground by KNEELING on
     one knee -- the v6 alternative to bend_pick's 77 deg stoop, which
     reads as lying flat (the rig's arm is only 0.283*H, so a standing
@@ -1228,8 +1287,9 @@ def kneel_pick(char, target, duration, ground_y, hand="r"):
 
     def fn(t):
         u = min(1.0, max(0.0, t / max(duration, 0.01)))
-        if "hand" not in _start:
-            _start["hand"] = char.joints()["hand_" + hand]
+        if "root_y" not in _start:
+            for _side in (("l", "r") if hand == "both" else (hand,)):
+                _start["hand_" + _side] = char.joints()["hand_" + _side]
             _start["root_y"] = char.pose["root_y"]
             _start["root_x"] = char.pose["root_x"]
             _start["foot_l"] = char.joints()["foot_l"]
@@ -1277,8 +1337,10 @@ def kneel_pick(char, target, duration, ground_y, hand="r"):
         # textbook kneel cannot reach a ground prop with this rig).
         # The rise returns both feet to the walk's starting split so
         # the next walk starts without a blend slide.
-        front_side = "r" if hand == "r" else "l"
-        back_side = "l" if hand == "r" else "r"
+        # Both hands reaching: the front foot leads on the right
+        # (deterministic; either side is geometrically valid).
+        front_side = "r" if hand in ("r", "both") else "l"
+        back_side = "l" if hand in ("r", "both") else "r"
         # F1: the front foot plants at 0.72 * leg ahead of the FINAL
         # (shifted) root (v7: 0.55). The longer lunge opens the front
         # knee to ~101 deg and separates the shins to ~87 px, so the
@@ -1323,21 +1385,52 @@ def kneel_pick(char, target, duration, ground_y, hand="r"):
         # had to sprint it 66 px/frame, rubric E3/E4).
         reach = smoothstep(min(1.0, u / 0.50))
         rise = smoothstep(max(0.0, (u - 0.65) / 0.35))
-        sx, sy = _start["hand"]
         tx, ty = target
         waist = (rx + f * _s(char, 40),
                  ground_y - leg * 0.93 - _s(char, 60))
-        hx = lerp(lerp(sx, tx, reach), waist[0], rise)
-        hy = lerp(lerp(sy, ty, reach), waist[1], rise)
         char.set_pose(root_x=root_x, root_y=root_y, torso_lean=lean)
         # head tracks the prop -- CAPPED at 0.25 rad (v7): the default
         # 0.6 clamp let the head point down-forward and dropped it to
         # 35% of standing height; 0.25 keeps the head ~42% up.
         head_track(char, (tx, ty), max_angle=0.25)
-        if hand == "r":
-            char.hand_target_r = (hx, hy)
-        else:
-            char.hand_target_l = (hx, hy)
+        # Round 9 (R8-D1): at full kneel the head dives toward the
+        # grasp point and the held prop's edge pressed into the
+        # cheek (stone centre 3-12 px inside the disc). Guard each
+        # hand target out of the head disc by the prop's
+        # half-extent + margin, reach-aware (the R8-1 hammer
+        # geometry with a prop-sized clearance). The guard only
+        # acts inside the threshold, so clear paths are unchanged.
+        # Head/shoulder come from the CURRENT pose (set_pose above);
+        # neither depends on the hand targets assigned below.
+        _J = char.joints()
+        _g_head = _J["head"]
+        _g_shoulder = _J["shoulder"]
+        _g_reach = 0.98 * (char.u_arm + char.l_arm)
+        _g_clear = (char.head_r
+                    + (float(flank_px) if flank_px is not None
+                       else _s(char, 24))
+                    + _s(char, 8))
+        # Round-6 grip readability: a two-hand grip flanks
+        # the PROP (flank_px = half its drawn footprint +
+        # margin, from the compiler) so the hands grip its
+        # edges instead of hiding inside its silhouette.
+        # Without a prop size the legacy +-12 scaled px
+        # flank applies.
+        _off = float(flank_px) if flank_px is not None \
+            else _s(char, 12)
+        _sides = (("l", -_off), ("r", _off)) if hand == "both" \
+            else ((hand, 0.0),)
+        for _side, _dx in _sides:
+            sx, sy = _start["hand_" + _side]
+            hx = lerp(lerp(sx, tx + _dx, reach), waist[0] + _dx, rise)
+            hy = lerp(lerp(sy, ty, reach), waist[1], rise)
+            hx, hy = _clear_own_head(
+                (hx, hy), _g_head, char.head_r, float(char.H),
+                _g_shoulder, _g_reach, clearance_px=_g_clear)
+            if _side == "r":
+                char.hand_target_r = (hx, hy)
+            else:
+                char.hand_target_l = (hx, hy)
         return char
     return fn
 
@@ -1424,6 +1517,133 @@ def cover_face(char, duration):
         char.hand_target_r = (head_x + _s(char, 30),
                               head_y - _s(char, 40) * u)
         char.set_pose(head_look=0.15 * u, torso_lean=0.18 * u)
+        return char
+    return fn
+
+
+def shield(char, duration):
+    """Both arms interposed as a guard (shielding / blocking).
+
+    Both hands rise to a stacked guard in front of the chest,
+    palms facing the threat, with a deep readable crouch, a lean
+    back, and the head ducked. The guard rises over the first 30% and
+    HOLDS to the end of the duration -- a shield is a held pose,
+    not a gesture that relaxes. Completion pose: guard held.
+    Works for any character: all offsets scale with height.
+    """
+    _start = {}
+
+    def fn(t):
+        u = min(1.0, max(0.0, t / max(duration, 0.01)))
+        if "root" not in _start:
+            _start["root"] = (char.pose["root_x"], char.pose["root_y"])
+            _start["lean"] = char.pose.get("torso_lean", 0.0)
+            _start["look"] = char.pose.get("head_look", 0.0)
+            _start["hand_l"] = char.joints()["hand_l"]
+            _start["hand_r"] = char.joints()["hand_r"]
+            # Guard targets are fixed from the START pose: recomputing
+            # them from the current joints each frame feeds the
+            # crouch/lean back into the target and the hands drift
+            # during the hold.
+            joints = char.joints()
+            head_x, head_y = joints["head"]
+            hip_x, hip_y = joints["hip"]
+            f = char.pose.get("facing", 1)
+            chest_x = head_x + (hip_x - head_x) * 0.55
+            chest_y = head_y + (hip_y - head_y) * 0.55
+            guard_x = chest_x + f * _s(char, 110)
+            # Round-7: the old -35/+40 targets stacked the hands at
+            # FACE height (measured 547/670 against a 508 head
+            # centre), so a head-scale shield gripped between them
+            # covered the face. The guard interposes the arms in
+            # front of the CHEST: both targets drop ~120 px at
+            # production scale (body-relative via _s), keeping the
+            # 75 px stack.
+            _start["upper"] = (guard_x, chest_y + _s(char, 40))
+            _start["lower"] = (guard_x, chest_y + _s(char, 115))
+        intensity = smoothstep(min(1.0, u / 0.30))
+        for side, key in (("l", "lower"), ("r", "upper")):
+            sx, sy = _start["hand_" + side]
+            target = _start[key]
+            pos = (lerp(sx, target[0], intensity),
+                   lerp(sy, target[1], intensity))
+            _set_hand(char, side, pos, _start)
+        char.set_pose(
+            root_x=_start["root"][0],
+            # Round-6: the old 18 px crouch + 0.12 lean did not
+            # read as a guard at production scale (the OTS shot
+            # showed raised arms with no crouch/lean). The deeper
+            # crouch + lean read in the back view too.
+            # Round-7: 36 px / 0.20 still read as a wide stride in
+            # the R6 strip -- the guard needs a deeper hip drop and
+            # a stronger lean-back before it reads as a crouch at
+            # production scale. The planted feet (foot-target IK)
+            # bend the knees for the drop; no FK angles are set.
+            # Round-8 (R7-D3): 56 px still read as a weak crouch in
+            # the delivered OTS shot (head drop 105 px at 0.12H).
+            # 72 px deepens the knee bend without moving the
+            # guard targets (fixed from the start pose, so the
+            # shield stays at chest height while the body drops
+            # under it); the IK clamp absorbs any reach excess.
+            root_y=_start["root"][1] + _s(char, 72) * intensity,
+            torso_lean=_start["lean"] - 0.27 * intensity,
+            head_look=_start["look"] + 0.15 * intensity)
+        return char
+    return fn
+
+
+def present_prop(char, duration, hand="r", flank_px=None):
+    """Present a held prop forward at chest height and hold it steady.
+
+    The prop is the actor of a CRACK / ACTIVATE / EMIT event: the
+    character brings the gripping hand(s) to a steady presented hold
+    in front of the chest so the prop -- and the light payoff the
+    renderer paints on it -- reads. The hold rises over the first 40%
+    and HOLDS to the end of the duration. ``hand`` "both" flanks the
+    hold point by +-_s(12) (the two-hand contract: each hand stays
+    inside the 15 px contact tolerance); "l"/"r" present one-handed.
+    Targets are fixed from the START pose (the shield hold-drift
+    lesson: recomputing from live joints feeds the lean back into
+    the target). Completion pose: presented hold.
+    """
+    if hand not in ("l", "r", "both"):
+        raise ValueError(f"present_prop hand must be l/r/both, "
+                         f"got {hand!r}")
+    _start = {}
+
+    def fn(t):
+        u = min(1.0, max(0.0, t / max(duration, 0.01)))
+        if "root" not in _start:
+            _start["root"] = (char.pose["root_x"], char.pose["root_y"])
+            _start["lean"] = char.pose.get("torso_lean", 0.0)
+            _start["look"] = char.pose.get("head_look", 0.0)
+            _start["hand_l"] = char.joints()["hand_l"]
+            _start["hand_r"] = char.joints()["hand_r"]
+            joints = char.joints()
+            head_x, head_y = joints["head"]
+            hip_x, hip_y = joints["hip"]
+            f = char.pose.get("facing", 1)
+            chest_x = head_x + (hip_x - head_x) * 0.55
+            chest_y = head_y + (hip_y - head_y) * 0.55
+            _start["hold"] = (chest_x + f * _s(char, 130),
+                              chest_y - _s(char, 20))
+        intensity = smoothstep(min(1.0, u / 0.40))
+        # Round-6 grip readability: see bend_pick.
+        _off = float(flank_px) if flank_px is not None \
+            else _s(char, 12)
+        sides = ("l", "r") if hand == "both" else (hand,)
+        for side in sides:
+            sx, sy = _start["hand_" + side]
+            hx, hy = _start["hold"]
+            if hand == "both":
+                hx += _off if side == "r" else -_off
+            pos = (lerp(sx, hx, intensity), lerp(sy, hy, intensity))
+            _set_hand(char, side, pos, _start)
+        char.set_pose(
+            root_x=_start["root"][0],
+            root_y=_start["root"][1],
+            torso_lean=_start["lean"] + 0.06 * intensity,
+            head_look=_start["look"] + 0.10 * intensity)
         return char
     return fn
 
@@ -1541,6 +1761,76 @@ HAMMER_CYCLE_SEC = 0.9        # default duration of one strike cycle
 # moment the angle IS the strike angle, so the contact measurement
 # (hammer_head_position's default) is exact.
 HAMMER_CARRY_ANGLE_RAD = -2.09
+# Round 8 (R7-D1): the striking hand must clear the actor's OWN head
+# disc by this margin through the whole strike cycle. The raised hand
+# used to sit INSIDE the head disc (0.143H from the head centre vs
+# head_r 0.17H), so any prop drawn at the hand -- the stone grasped
+# with the hammer -- swept across the striker's face on the wind-up,
+# and the hammer handle crossed the forehead. 0.12H keeps the hand at
+# head_r + 0.12H, which clears the largest hand props (stone half-size
+# ~0.07H) past the head outline with room to spare.
+HAMMER_HEAD_CLEARANCE_FRAC = 0.12
+
+
+def _clear_own_head(pos, head, head_r, H, shoulder, reach,
+                    clearance_px=None):
+    """Push ``pos`` out of the actor's own head disc, staying inside
+    arm ``reach`` of ``shoulder``.
+
+    The hand must clear the disc (head centre ``head``, radius
+    ``head_r``) by ``clearance_px`` (centre-to-centre distance); the
+    default is head_r + HAMMER_HEAD_CLEARANCE_FRAC * H (the R7-D1
+    hammer guard). The kneel/bend grasp guard (round 9, R8-D1)
+    passes head_r + prop half-extent + a small margin, so a HELD
+    prop's edge -- not just the hand -- stays out of the disc. A
+    plain radial push from the head fails when it lengthens the
+    shoulder distance past the IK reach limit: the rig's reach
+    clamp pulls the hand back INTO the disc (measured: hand pinned
+    at the reach limit 168.3 px, 95 px from the head centre). So
+    when the radial push is unreachable, the guard takes the
+    closest point on the reach circle that clears the disc -- the
+    circle/circle boundary angle from the law of cosines, on the
+    target's side of the shoulder->head axis -- which cocks the
+    hand out to the side instead of over the face. Returns ``pos``
+    unchanged when it already clears. A point exactly at the head
+    centre is pushed straight up.
+    """
+    if clearance_px is None:
+        margin = float(head_r) + HAMMER_HEAD_CLEARANCE_FRAC * float(H)
+    else:
+        margin = float(clearance_px)
+    dx = pos[0] - head[0]
+    dy = pos[1] - head[1]
+    d = math.hypot(dx, dy)
+    if d >= margin:
+        return pos
+    if d < 1e-6:
+        pushed = (head[0], head[1] - margin)
+    else:
+        s = margin / d
+        pushed = (head[0] + dx * s, head[1] + dy * s)
+    if math.hypot(pushed[0] - shoulder[0],
+                  pushed[1] - shoulder[1]) <= reach:
+        return pushed
+    # Radial push is beyond reach: closest clearing point on the
+    # reach circle (law of cosines on shoulder/head/reach).
+    ox = head[0] - shoulder[0]
+    oy = head[1] - shoulder[1]
+    od = math.hypot(ox, oy)
+    if od < 1e-6 or reach <= 0:
+        return pushed
+    cos_t = ((reach * reach + od * od - margin * margin)
+             / (2.0 * reach * od))
+    if cos_t <= -1.0:
+        return pushed  # exclusion swallows the reach circle
+    theta = math.acos(max(-1.0, min(1.0, cos_t)))
+    base = math.atan2(oy, ox)
+    # Side of the shoulder->head axis the target sits on.
+    cross = ox * (pos[1] - shoulder[1]) - oy * (pos[0] - shoulder[0])
+    side = 1.0 if cross >= 0 else -1.0
+    ang = base + side * theta
+    return (shoulder[0] + reach * math.cos(ang),
+            shoulder[1] + reach * math.sin(ang))
 
 
 def hammer_grip_angle(cycle_u):
@@ -1785,7 +2075,8 @@ def stand_from_chair(char, duration, ground_y, chair_x=None):
     return fn
 
 
-def pick_up(char, target, duration, ground_y, hand="r", source="ground"):
+def pick_up(char, target, duration, ground_y, hand="r",
+            source="ground", flank_px=None):
     """Grasp a prop at ``target`` and lift it to the waist hold.
 
     Phases: reach (0-45%), grasp hold (45-60%), lift (60-100%).
@@ -1794,25 +2085,65 @@ def pick_up(char, target, duration, ground_y, hand="r", source="ground"):
     more. A deep ground pickup that must fold the body is bend_pick /
     kneel_pick, not this primitive. The grasp moment is
     PICK_UP_GRASP_U (shared with the prop state machine).
-    Completion pose: hand at the waist hold, prop grasped.
+    ``hand`` "both" drives BOTH hands to the target and the hold,
+    flanking the prop by 12 scaled px per side: the prop draws at
+    the hands' midpoint, between them, and each hand stays inside
+    the 15 px contact tolerance.
+
+    Round 8 (R2-A3 lift half): a low target bends the body. A
+    pick off a knee-high surface with a standing torso reads as a
+    teleport -- the hands cannot reach the surface, the grasp
+    point is pulled to chest height, and the prop sinks to the
+    waist. When ``source`` is "ground" and the target sits below
+    the shoulder, the torso leans and the root drops in proportion
+    to the target's depth (up to ~31 deg + 0.07H at 0.45H below
+    the shoulder), eased in with the reach and released with the
+    lift, so the body stoops to the surface and straightens
+    carrying the prop. Pocket/desk/surface pickups keep the
+    minimal lean. This is a stoop, not the deep bend_pick fold.
+    Completion pose: hand(s) at the waist hold, prop grasped.
     """
     _start = {}
 
     def fn(t):
         u = min(1.0, max(0.0, t / max(duration, 0.01)))
-        sx, sy = _hand_start(char, hand, _start, t)
+        if "root_y" not in _start:
+            _start["root_y"] = char.pose["root_y"]
+            _sh = char.joints()["shoulder"]
+            _depth = max(0.0, target[1] - _sh[1]) / max(float(char.H), 1.0)
+            _start["bend"] = (min(1.0, _depth / 0.45)
+                              if source == "ground" else 0.0)
+            _start["leg"] = float(char.u_leg) + float(char.l_leg)
         reach = smoothstep(min(1.0, u / PICK_UP_GRASP_U))
         lift = smoothstep(max(0.0, (u - PICK_UP_LIFT_U)
                               / (1.0 - PICK_UP_LIFT_U)))
         hold = _waist_hold(char, ground_y)
-        hx = lerp(lerp(sx, target[0], reach), hold[0], lift)
-        hy = lerp(lerp(sy, target[1], reach), hold[1], lift)
         lean_max = 0.05 if source in ("pocket", "desk", "surface") else 0.15
-        char.set_pose(torso_lean=lean_max * reach * (1.0 - 0.7 * lift))
+        bend_ease = reach * (1.0 - lift)
+        char.set_pose(
+            torso_lean=(lean_max * reach * (1.0 - 0.7 * lift)
+                        + 0.55 * _start["bend"] * bend_ease),
+            root_y=_start["root_y"]
+            + 0.16 * _start["leg"] * _start["bend"] * bend_ease)
         head_track(char, (lerp(target[0], hold[0], lift),
                           lerp(target[1], hold[1], lift)),
                    max_angle=0.35)
-        _set_hand(char, hand, (hx, hy), _start)
+        # Round-6 grip readability: a two-hand grip flanks
+        # the PROP (flank_px = half its drawn footprint +
+        # margin, from the compiler) so the hands grip its
+        # edges instead of hiding inside its silhouette.
+        # Without a prop size the legacy +-12 scaled px
+        # flank applies.
+        _off = float(flank_px) if flank_px is not None \
+            else _s(char, 12)
+        _sides = (("l", -_off), ("r", _off)) if hand == "both" \
+            else ((hand, 0.0),)
+        for _side, _dx in _sides:
+            sx, sy = _hand_start(char, _side, _start, t)
+            hx = lerp(lerp(sx, target[0] + _dx, reach),
+                      hold[0] + _dx, lift)
+            hy = lerp(lerp(sy, target[1], reach), hold[1], lift)
+            _set_hand(char, _side, (hx, hy), _start)
         return char
     return fn
 
@@ -1989,8 +2320,9 @@ def hand_over(giver, receiver, prop, duration,
               transfer_u=HAND_OVER_TRANSFER_U, receive_hand="l"):
     """Hand a prop over: both hands converge (give_to), and the prop's
     recorded holder switches from giver to receiver at ``transfer_u``
-    (shared with the prop state machine). ``receive_hand`` ("l" | "r")
-    is the receiver's taking hand (see give_to). Returns
+    (shared with the prop state machine). ``receive_hand``
+    ("l" | "r" | "both") is the receiver's taking hand(s) (see
+    give_to). Returns
     f(t) -> (giver, receiver, prop). Completion pose: prop at the
     receiver's hand, prop["holder"] == receiver name.
     """
@@ -2060,7 +2392,14 @@ def hammer_strike(char, strike_point, duration, ground_y=None, hand="r",
             _start["look"] = char.pose.get("head_look", 0.0)
         rest = _hand_start(char, hand, _start, t)
         H = float(char.H)
-        shoulder = char.joints()["shoulder"]
+        # Round 8 (R7-D1): the head disc the hand must clear all
+        # cycle. joints() reflects the previous frame's pose; the
+        # clearance margin absorbs one frame of head motion.
+        _joints = char.joints()
+        shoulder = _joints["shoulder"]
+        _head = _joints["head"]
+        _head_r = float(char.head_r)
+        _reach = 0.98 * (float(char.u_arm) + float(char.l_arm))
         raised = (shoulder[0] + f * 0.06 * H,
                   shoulder[1] - raise_frac * H)
         grip = (f * math.cos(HAMMER_GRIP_ANGLE_RAD)
@@ -2100,6 +2439,27 @@ def hammer_strike(char, strike_point, duration, ground_y=None, hand="r",
                    base[1] + rebound * (raised[1] - rest[1]))
             lean = _start["lean"] + lerp(0.18, 0.0, e)
             look = _start["look"] + lerp(0.30, 0.05, e)
+        # Round 8 (R7-D1): the hand never enters the actor's own
+        # head disc, in any phase -- the wind-up, the strike path
+        # and the recovery all route around the face. The guard is
+        # reach-aware: a push the arm cannot make would be clamped
+        # back into the disc by the rig. The hammer TIP is guarded
+        # too: it sits a handle-length from the hand at the phase
+        # grip angle, and during the raise it cocks up-back over
+        # the head even when the hand clears. Guarding the tip is
+        # the same disc test with the centre shifted by the grip
+        # vector (tip clears O iff the hand clears O - v). Two
+        # passes keep the two constraints from fighting.
+        _phase_angle = hammer_grip_angle(u)
+        _tip_vec = (f * math.cos(_phase_angle)
+                    * HAMMER_HANDLE_FRAC * H,
+                    math.sin(_phase_angle) * HAMMER_HANDLE_FRAC * H)
+        _shifted = (_head[0] - _tip_vec[0], _head[1] - _tip_vec[1])
+        for _ in range(2):
+            pos = _clear_own_head(pos, _head, _head_r, H,
+                                  shoulder, _reach)
+            pos = _clear_own_head(pos, _shifted, _head_r, H,
+                                  shoulder, _reach)
         _set_hand(char, hand, pos, _start)
         char.set_pose(torso_lean=lean, head_look=look)
         return char
@@ -2146,10 +2506,12 @@ def carry_bag(char, duration, hand="r", bag=None, sway_amp=None,
 
     The hand settles at a carry position at the character's side and
     the bag hangs below it on a pendulum sway. This primitive touches
-    ONLY one hand target and the ``bag`` dict, so it composes with a
+    ONLY hand targets and the ``bag`` dict, so it composes with a
     walk: apply the walk first, then this overlay, each frame. With
-    ``bag`` None only the hand is positioned. Completion pose: hand
-    at the carry position, bag hanging below it.
+    ``bag`` None only the hand is positioned. ``hand`` "both" puts
+    BOTH hands on the carry point (flanked) and the bag hangs from
+    their midpoint. Completion pose: hand(s) at the carry position,
+    bag hanging below.
     """
     _start = {}
     if sway_amp is None:
@@ -2160,14 +2522,23 @@ def carry_bag(char, duration, hand="r", bag=None, sway_amp=None,
         joints = char.joints()
         carry = (joints["hip"][0] + f * _s(char, 45),
                  joints["hip"][1] + _s(char, 68))
-        sx, sy = _hand_start(char, hand, _start, t)
         blend = smoothstep(min(1.0, t / 0.4))
-        pos = (lerp(sx, carry[0], blend), lerp(sy, carry[1], blend))
-        _set_hand(char, hand, pos, _start)
+        _off = _s(char, 12)
+        _sides = (("l", -_off), ("r", _off)) if hand == "both" \
+            else ((hand, 0.0),)
+        _positions = []
+        for _side, _dx in _sides:
+            sx, sy = _hand_start(char, _side, _start, t)
+            pos = (lerp(sx, carry[0] + _dx, blend),
+                   lerp(sy, carry[1], blend))
+            _set_hand(char, _side, pos, _start)
+            _positions.append(pos)
         if bag is not None:
-            bag["x"] = pos[0] + sway_amp * math.sin(
+            _mx = sum(p[0] for p in _positions) / len(_positions)
+            _my = sum(p[1] for p in _positions) / len(_positions)
+            bag["x"] = _mx + sway_amp * math.sin(
                 2.0 * math.pi * sway_freq * t)
-            bag["y"] = pos[1] + _s(char, 68)
+            bag["y"] = _my + _s(char, 68)
         return char
     return fn
 
@@ -2306,27 +2677,96 @@ def put_away(char, pocket, duration, hand="r", prop=None):
     to its hanging position. The prop follows the hand until
     PUT_AWAY_RELEASE_U, then stays at the pocket -- the release
     position EQUALS the hand position at release, so nothing
-    teleports. Completion pose: hand hanging, prop at the pocket.
+    teleports. ``hand`` "both" sends both hands (flanked) and the
+    prop follows their midpoint. Completion pose: hand(s) hanging,
+    prop at the pocket.
     """
     _start = {}
     prop = prop if prop is not None else {}
 
     def fn(t):
         u = min(1.0, max(0.0, t / max(duration, 0.01)))
-        sx, sy = _hand_start(char, hand, _start, t)
         f = char.pose.get("facing", 1)
         hang = (char.pose["root_x"] + f * _s(char, 22),
                 char.pose["root_y"] + _s(char, 28))
         reach = smoothstep(min(1.0, u / 0.5))
         back = smoothstep(max(0.0, (u - 0.6) / 0.4))
-        pos = (lerp(lerp(sx, pocket[0], reach), hang[0], back),
-               lerp(lerp(sy, pocket[1], reach), hang[1], back))
-        _set_hand(char, hand, pos, _start)
+        _off = _s(char, 12)
+        _sides = (("l", -_off), ("r", _off)) if hand == "both" \
+            else ((hand, 0.0),)
+        _positions = []
+        for _side, _dx in _sides:
+            sx, sy = _hand_start(char, _side, _start, t)
+            pos = (lerp(lerp(sx, pocket[0] + _dx, reach),
+                        hang[0] + _dx, back),
+                   lerp(lerp(sy, pocket[1], reach), hang[1], back))
+            _set_hand(char, _side, pos, _start)
+            _positions.append(pos)
+        # The prop follows the hands' midpoint (one hand: itself).
+        _mx = sum(p[0] for p in _positions) / len(_positions)
+        _my = sum(p[1] for p in _positions) / len(_positions)
         if u < PUT_AWAY_RELEASE_U:
-            prop["x"], prop["y"] = pos
+            prop["x"], prop["y"] = _mx, _my
             prop["released"] = False
         else:
             prop["x"], prop["y"] = pocket
+            prop["released"] = True
+        return char
+    return fn
+
+
+def place_on_surface(char, surface, duration, hand="r", prop=None):
+    """Set a held prop down on a surface point ``surface`` (x, y)
+    -- the support top from the shot's support anchors -- and
+    withdraw the hand. The hand reaches to just above the surface
+    (0.04H: the prop's bottom touches the surface while the hand
+    grips its middle), holds through the release instant, then
+    returns to its hanging position, with a small forward lean
+    during the reach so the set-down reads as placed, not
+    dropped. The prop follows the hand until PUT_AWAY_RELEASE_U,
+    then stays at the surface point -- the release position
+    EQUALS the hand position at release, so nothing teleports.
+    ``hand`` "both" sends both hands (flanked) and the prop
+    follows their midpoint. Completion pose: hand(s) hanging,
+    prop on the surface.
+    """
+    _start = {}
+    prop = prop if prop is not None else {}
+    _target = (float(surface[0]),
+               float(surface[1]) - _s(char, 24))
+
+    def fn(t):
+        u = min(1.0, max(0.0, t / max(duration, 0.01)))
+        f = char.pose.get("facing", 1)
+        hang = (char.pose["root_x"] + f * _s(char, 22),
+                char.pose["root_y"] + _s(char, 28))
+        reach = smoothstep(min(1.0, u / 0.45))
+        back = smoothstep(max(0.0, (u - 0.6) / 0.4))
+        _off = _s(char, 12)
+        _sides = (("l", -_off), ("r", _off)) if hand == "both" \
+            else ((hand, 0.0),)
+        _positions = []
+        for _side, _dx in _sides:
+            sx, sy = _hand_start(char, _side, _start, t)
+            pos = (lerp(lerp(sx, _target[0] + _dx, reach),
+                        hang[0] + _dx, back),
+                   lerp(lerp(sy, _target[1], reach), hang[1], back))
+            _set_hand(char, _side, pos, _start)
+            _positions.append(pos)
+        # A small forward lean while the hand is extended; the
+        # lean follows the reach envelope and releases with the
+        # withdrawal, so the body sets the prop down with the arm.
+        _lean0 = _start.setdefault(
+            "lean", char.pose.get("torso_lean", 0.0))
+        char.set_pose(torso_lean=_lean0 + 0.12 * reach * (1.0 - back))
+        # The prop follows the hands' midpoint (one hand: itself).
+        _mx = sum(p[0] for p in _positions) / len(_positions)
+        _my = sum(p[1] for p in _positions) / len(_positions)
+        if u < PUT_AWAY_RELEASE_U:
+            prop["x"], prop["y"] = _mx, _my
+            prop["released"] = False
+        else:
+            prop["x"], prop["y"] = _target
             prop["released"] = True
         return char
     return fn
@@ -2422,31 +2862,45 @@ def receive_prop(char, target, duration, hand="r"):
     phải"); the giver side is hand_over/give_to. When the hand
     already starts at the target (a hand_over just placed it there),
     the reach is a no-op and only the securing pull-in moves.
+    ``target=None`` means exactly that: the hand is already at the
+    meeting point (the product path passes None because the pair
+    animation, not the event, placed the hand).
+    ``hand`` "both" ("nhận bằng hai tay") converges BOTH hands on
+    the meeting target, flanking it by 12 scaled px per side.
     Phases: reach (0-60%), hold + pull-in (60-100%). Completion
-    pose: hand at the pulled-in hold, prop secured.
+    pose: hand(s) at the pulled-in hold, prop secured.
     """
     _start = {}
 
     def fn(t):
         u = min(1.0, max(0.0, t / max(duration, 0.01)))
-        if "hand" not in _start:
-            _start["hand"] = char.joints()["hand_" + hand]
+        if "lean" not in _start:
             _start["lean"] = char.pose.get("torso_lean", 0.0)
             f = char.pose.get("facing", 1)
             _start["waist"] = (char.pose["root_x"] + f * _s(char, 40),
                                char.pose["root_y"] - _s(char, 60))
+        _off = _s(char, 12)
+        _sides = (("l", -_off), ("r", _off)) if hand == "both" \
+            else ((hand, 0.0),)
         reach = smoothstep(min(1.0, u / 0.60))
         pull = smoothstep(max(0.0, (u - 0.60) / 0.40))
-        sx, sy = _start["hand"]
-        tx, ty = target
         wx, wy = _start["waist"]
-        hx = lerp(lerp(sx, tx, reach), lerp(tx, wx, 0.25), pull)
-        hy = lerp(lerp(sy, ty, reach), lerp(ty, wy, 0.25), pull)
         char.set_pose(torso_lean=lerp(_start["lean"], 0.10, reach))
-        if hand == "r":
-            char.hand_target_r = (hx, hy)
-        else:
-            char.hand_target_l = (hx, hy)
+        for _side, _dx in _sides:
+            _key = "hand_" + _side
+            if _key not in _start:
+                _start[_key] = char.joints()[_key]
+            sx, sy = _start[_key]
+            # target=None: the meeting point IS the start position.
+            tx, ty = target if target is not None else (sx, sy)
+            hx = lerp(lerp(sx, tx + _dx, reach),
+                      lerp(tx + _dx, wx + _dx, 0.25), pull)
+            hy = lerp(lerp(sy, ty, reach),
+                      lerp(ty, wy, 0.25), pull)
+            if _side == "r":
+                char.hand_target_r = (hx, hy)
+            else:
+                char.hand_target_l = (hx, hy)
         return char
     return fn
 
@@ -2456,6 +2910,7 @@ PRIMITIVES = {
     "look_at": look_at,
     "point_at": point_at, "wave": wave, "reach_to": reach_to,
     "give_to": give_to, "shrug": shrug, "cover_face": cover_face,
+    "shield": shield, "present_prop": present_prop,
     "nod": nod, "sit_down": sit_down, "stand_up": stand_up,
     "idle": idle, "bend_pick": bend_pick, "kneel_pick": kneel_pick,
     "sit_at_desk": sit_at_desk, "stand_from_chair": stand_from_chair,
@@ -2509,7 +2964,8 @@ def compile_actions(action_list, chars, fps=24):
             c = chars[a["char"]]
             fn = turn_to(c, a["facing"], dur)
             compiled.append((start, dur, lambda t, fn=fn: fn(t)))
-        elif ptype in ("wave", "shrug", "cover_face", "nod"):
+        elif ptype in ("wave", "shrug", "cover_face", "nod", "shield",
+                       "present_prop"):
             c = chars[a["char"]]
             kw = {k: v for k, v in a.items()
                   if k in ("freq", "amp")}

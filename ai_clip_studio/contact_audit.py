@@ -40,6 +40,17 @@ Penetration is measured against the spec the renderer drew, not
 against rendered pixels -- a pixel-level check would need the
 frame images and is not attempted here.
 
+The gap metrics measure GRIP ONLY: wrist joint -> prop anchor,
+from the telemetry draws. A 0.0 gap means the prop is anchored
+to the hand; it says NOTHING about prop-to-target contact (the
+hammer head reaching the anvil, the stone resting on a
+surface). Target positions are not in the telemetry, so this
+audit records ``target_contact: NOT_MEASURED`` on every
+interaction and never implies strike contact: the R5 hammer
+strike audited gap 0.0 while the drawn head sat 14 px from the
+anvil in the rendered frames. Prop-to-target contact is
+rendered-pixel evidence (the tester's frame measurement).
+
 Thresholds are starting values, to be calibrated on the Zeus and
 Ep1 re-renders; the audit is a non-gating report (stage 13e) so
 a threshold miss is visible evidence, never a silent pass.
@@ -50,9 +61,9 @@ import json
 import math
 from pathlib import Path
 
-from .prop_system import geometry_for_prop
+from .prop_system import geometry_for_prop, geometry_footprint
 
-AUDIT_VERSION = 1
+AUDIT_VERSION = 2  # v2: gap_measures + target_contact labels
 
 INTERACTION_TYPES = frozenset({
     "HAND_OVER", "RECEIVE_PROP", "HOLD", "CARRY", "GIVE", "TAKE",
@@ -125,15 +136,16 @@ def _point_segment_distance(pt, a, b) -> float:
 
 def _spec_shapes(kind):
     """Mapped-shape helpers for one geometry kind, in the same
-    construction the renderer uses (natural size -> (76, 50)
-    footprint, grip contact at the origin). Returns (polygons,
-    polylines, rects, bbox) in footprint-local coords with the
-    grip point at (0, 0)."""
+    construction the renderer uses (natural size -> the kind's
+    geometry_footprint, grip contact at the origin). Returns
+    (polygons, polylines, rects, bbox) in footprint-local coords
+    with the grip point at (0, 0)."""
     spec = geometry_for_prop(
         {"kind": kind, "length_px": 200.0, "size_px": 170.0})
     x0, y0, x1, y1 = spec["bbox"]
     bw, bh = max(x1 - x0, 1.0), max(y1 - y0, 1.0)
-    scale = min(FOOTPRINT_W / bw, FOOTPRINT_H / bh)
+    _fw, _fh = geometry_footprint(kind)
+    scale = min(_fw / bw, _fh / bh)
     gx, gy = spec["contact_points"]["grip"]
 
     def _map(pt):
@@ -290,7 +302,14 @@ def _audit_event(event, frames, id_to_name, prop_kinds, shapes_cache):
     span_frames = [f for f in frames if start <= f["t"] < end
                    or (f["t"] == end and start == end)]
     failures: list[str] = []
-    metrics: dict = {"frames": len(span_frames), "kind": kind}
+    # Honesty labels on EVERY path (see the module docstring): the
+    # gap is grip-only, and target contact is never measured here.
+    metrics: dict = {
+        "frames": len(span_frames), "kind": kind,
+        "gap_measures": ("grip: wrist joint -> prop anchor "
+                         "(telemetry); NOT prop-to-target contact"),
+        "target_contact": "NOT_MEASURED",
+    }
 
     if not frames:
         failures.append("no grip telemetry in this job dir")
@@ -386,56 +405,66 @@ def _audit_event(event, frames, id_to_name, prop_kinds, shapes_cache):
         holder = draw.get("holder")
         hand_side = draw.get("hand") or "r"
         hands = record["hands"].get(holder or "") or {}
-        hand = hands.get("hand_" + hand_side)
-        elbow = hands.get("elbow_" + hand_side)
         if draw.get("open_u") is not None:
             open_us.append(float(draw["open_u"]))
-        if hand is None or not held:
+        if not held:
             continue
-        gap = math.hypot(hand[0] - draw["x"], hand[1] - draw["y"])
+        # A "both" draw is gripped by TWO hands: gap, forearm angle
+        # and finger penetration are measured for EACH hand, so a
+        # two-hand hold only passes when both hands grip. Before
+        # this, "hand_both" resolved to no joint and the frame was
+        # silently skipped -- a both-hand hold was never measured.
+        # The grip-repaint fraction stays per-frame (one draw-level
+        # signal); the angle series stays per-frame too.
+        sides = ("l", "r") if hand_side == "both" else (hand_side,)
         hand_size = FINGER_LEN_FRAC * float(hands.get("H") or 0.0)
-        gaps.append(gap)
-        gap_norms.append(gap / hand_size if hand_size else None)
         if draw.get("angle") is not None:
             angles.append(float(draw["angle"]))
-        if elbow is not None:
-            forearms.append(_forearm_angle(hand, elbow))
         repaint_total += 1
         if draw.get("grip_repaint"):
             repaint_hits += 1
-        # Penetration: finger strokes vs the drawn shape.
+        # Penetration shapes for this draw (kind-level, shared by
+        # both hands): finger strokes vs the drawn shape.
         draw_kind = draw.get("kind") or kind
-        if elbow is not None and hand_size:
-            shapes = None
-            bbox = None
-            if draw_kind in GEOMETRY_KINDS:
-                if draw_kind not in shapes_cache:
-                    try:
-                        shapes_cache[draw_kind] = _spec_shapes(
-                            draw_kind)
-                    except Exception:  # noqa: BLE001 - no spec, skip
-                        shapes_cache[draw_kind] = None
-                shapes = shapes_cache[draw_kind]
-            else:
-                # Legacy kinds: footprint bbox, labelled approximate.
-                hw, hh = FOOTPRINT_W / 2, FOOTPRINT_H / 2
-                if draw_kind == "wallet" and draw.get("open_u", 0) \
-                        > 0.05:
-                    hw += FOOTPRINT_W * 0.55 * min(
-                        1.0, float(draw["open_u"]))
-                bbox = (hw, hh)
-            if shapes is not None or bbox is not None:
-                wrist_rel = (hand[0] - draw["x"],
-                             hand[1] - draw["y"])
-                tips = _finger_tips(hand, elbow, hand_size)
-                hits = 0
-                for tip in tips:
-                    tip_rel = (tip[0] - draw["x"],
-                               tip[1] - draw["y"])
-                    if _stroke_hits_shape(wrist_rel, tip_rel,
-                                          shapes, bbox):
-                        hits += 1
-                pen_scores.append(hits / 3.0)
+        shapes = None
+        bbox = None
+        if draw_kind in GEOMETRY_KINDS:
+            if draw_kind not in shapes_cache:
+                try:
+                    shapes_cache[draw_kind] = _spec_shapes(draw_kind)
+                except Exception:  # noqa: BLE001 - no spec, skip
+                    shapes_cache[draw_kind] = None
+            shapes = shapes_cache[draw_kind]
+        else:
+            # Legacy kinds: footprint bbox, labelled approximate.
+            hw, hh = FOOTPRINT_W / 2, FOOTPRINT_H / 2
+            if draw_kind == "wallet" and draw.get("open_u", 0) > 0.05:
+                hw += FOOTPRINT_W * 0.55 * min(
+                    1.0, float(draw["open_u"]))
+            bbox = (hw, hh)
+        for side in sides:
+            hand = hands.get("hand_" + side)
+            elbow = hands.get("elbow_" + side)
+            if hand is None:
+                continue
+            gap = math.hypot(hand[0] - draw["x"], hand[1] - draw["y"])
+            gaps.append(gap)
+            gap_norms.append(gap / hand_size if hand_size else None)
+            if elbow is not None:
+                forearms.append(_forearm_angle(hand, elbow))
+            if elbow is not None and hand_size:
+                if shapes is not None or bbox is not None:
+                    wrist_rel = (hand[0] - draw["x"],
+                                 hand[1] - draw["y"])
+                    tips = _finger_tips(hand, elbow, hand_size)
+                    hits = 0
+                    for tip in tips:
+                        tip_rel = (tip[0] - draw["x"],
+                                   tip[1] - draw["y"])
+                        if _stroke_hits_shape(wrist_rel, tip_rel,
+                                              shapes, bbox):
+                            hits += 1
+                    pen_scores.append(hits / 3.0)
     metrics["held_frames"] = held_frames
     metrics["transit_frames"] = transit_frames
     metrics["gap_px_mean"] = round(

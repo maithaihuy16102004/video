@@ -291,13 +291,99 @@ def interpret_params(text: str) -> dict | None:
     return dict(EXPRESSIONS[detail["expression"]])
 
 
-def blink_envelope(t: float, blink_times, blink_duration: float = 0.12) -> float:
+def parse_character_expressions(text: str, name_keys: dict,
+                                normalize) -> dict | None:
+    """Parse a named-character EXPRESSION string, or None.
+
+    Two named forms (SPEC §6.4 + the comma convention real scripts
+    use):
+
+    * colon form: ``"Cronus: suspicious"`` -- one character, the
+      parser's rule (the prefix must resolve).
+    * comma form: ``"Cronus suspicious, Rhea worried"`` -- every
+      comma segment must start with a resolvable character name
+      (longest normalized key first) followed by a non-empty
+      remainder.
+    * single-segment form: ``"Cronus satisfied"`` -- the name must
+      resolve AND the remainder must interpret to a real
+      expression (the gate that keeps bare expressions on the bare
+      path).
+
+    ``name_keys`` maps normalized names to the caller's key (an
+    identity id, a display name -- opaque here); ``normalize`` is
+    the caller's normalizer, matching its key space. Returns
+    ``{key: remainder text}`` (remainders verbatim, uninterpreted)
+    or None when the string is NOT a named form: a bare expression
+    ("Deadpan"), a segment whose name does not resolve, an empty
+    remainder, or a character named twice (contradictory -- never
+    guessed). None means "treat as a bare expression", never an
+    error: the line/speaker path owns bare forms.
+    """
+    raw = (text or "").strip()
+    if not raw or not name_keys:
+        return None
+    match = re.match(r"^(.+?)\s*:\s*(.+)$", raw)
+    if match:
+        prefix, rest = match.group(1).strip(), match.group(2).strip()
+        key = name_keys.get(normalize(prefix))
+        if key is not None and rest:
+            return {key: rest}
+        return None
+    segments = [s.strip() for s in raw.split(",")]
+    keys = sorted(name_keys, key=len, reverse=True)
+
+    def _split_segment(segment):
+        """(key, remainder) when the segment starts with a resolvable
+        character name, else None."""
+        normed = normalize(segment)
+        if not normed:
+            return None
+        for key_norm in keys:
+            if normed == key_norm:
+                return None  # name with no remainder
+            if normed.startswith(key_norm + " "):
+                remainder = normed[len(key_norm) + 1:].strip()
+                if not remainder:
+                    return None
+                return name_keys[key_norm], remainder
+        return None
+
+    if len(segments) < 2:
+        # Single segment: a named form ONLY when the name resolves
+        # AND the remainder interprets to a real expression
+        # ("Cronus satisfied", "Zeus astonished"). The
+        # interpretation gate keeps bare expressions that happen
+        # to start with a name-like word ("Grace under pressure")
+        # on the bare path: their remainders do not interpret.
+        found = _split_segment(segments[0]) if segments else None
+        if found is None:
+            return None
+        key, remainder = found
+        if interpret_detailed(remainder)["expression"] is None:
+            return None
+        return {key: remainder}
+    out: dict = {}
+    for segment in segments:
+        found = _split_segment(segment)
+        if found is None:
+            return None
+        key, remainder = found
+        if key in out:
+            return None  # same character twice: contradictory
+        out[key] = remainder
+    return out
+
+
+def blink_envelope(t: float, blink_times, blink_duration: float = 0.16) -> float:
     """Eye-height multiplier at time ``t`` (1.0 = eyes open).
 
     ``blink_times`` is an iterable of blink START times (seconds).
     Each blink dips eye_h to 0.1 at its midpoint and returns to 1.0,
     smoothstepped on both halves. Outside blinks the multiplier is
-    exactly 1.0, so stills are untouched.
+    exactly 1.0, so stills are untouched. Round 7: 0.16 s (up from
+    0.12) so the closure spans ~2 frames at 24 fps and reads as a
+    blink instead of a single-frame flicker; still inside the
+    natural 0.1-0.4 s blink range.
     """
     mult = 1.0
     for start in blink_times or []:
@@ -414,6 +500,84 @@ def gaze_for_target(head_pos, target_pos, max_shift: float = 0.12):
     return (dx / dist * shift, dy / dist * shift)
 
 
+# Micro-saccades (round 8, R4-A5): within-shot gaze was LOCKED
+# (tester: std ~1 px across a whole shot) because gaze_for_target
+# saturates at its clamp for any distant look target and the
+# head-to-head direction barely moves. Real eyes never hold
+# perfectly still: they drift and flick in small saccades around
+# the look target. gaze_wander is that drift -- a pure function
+# of (t, seed), so split-screen viewports of the same moment agree
+# and renders stay reproducible. Three sine components (slow
+# drift + mid + jitter) with seeded phases; the weights sum to
+# 1.0, so the total never exceeds ``amplitude``. The default
+# amplitude (0.12 r, round 12) reads as living eyes on delivered
+# frames: the round-8 amplitude (0.05) left every head near-static
+# on visual face strips (round 10, R10-3), and the round-10
+# amplitude (0.08) still read as subtle at full-frame distance.
+# Round 11 (0.10) wandered measurably but the dwell structure
+# never survived to pixels (tester R11-D1: head sway + speech +
+# blinks move the eye centroid ~1.3 px per frame, swamping the
+# 2-frame eased saccades). Round 12 sharpens the saccade to a
+# single frame (real saccades take 20-40 ms) so the jump exceeds
+# the head-motion noise floor and the 5-frame hold reads as
+# stillness by contrast.
+# (R10 residual R4-A5). At full look shift the composed gaze
+# can touch draw_character_v4's 0.15 clamp briefly (0.12 + 0.10),
+# its travel, and the average gaze stays on the target -- the
+# eyes wander AROUND the look direction, never away from it.
+#
+# Round 11 (R11-5): the smooth drift is sampled-and-held. Real
+# saccades FIXATE then jump; continuous drift smears at 24 fps
+# and reads as subtle at full-frame distance even when the
+# per-frame std is healthy. Each sampled position holds for a
+# 0.25 s fixation, then eases to the next over 0.08 s (a ~2
+# frame saccade), so any single frame shows a clearly shifted
+# gaze and consecutive fixations read as distinct looks. A
+# per-seed time offset desynchronises the jumps across
+# characters sharing one shot clock.
+_GAZE_WANDER_COMPONENTS = (
+    (0.55, 0.45),
+    (0.30, 1.15),
+    (0.15, 2.40),
+)
+_GAZE_DWELL_SEC = 0.25
+_GAZE_EASE_SEC = 0.04
+
+
+def _gaze_smooth(t: float, seed: int, amplitude: float):
+    """The underlying sine-blend wander at time ``t``."""
+    rng = random.Random(seed)
+    phases = [rng.uniform(0.0, 2.0 * math.pi) for _ in range(6)]
+    gx = 0.0
+    gy = 0.0
+    for i, (weight, freq) in enumerate(_GAZE_WANDER_COMPONENTS):
+        arg = 2.0 * math.pi * freq * float(t)
+        gx += weight * math.sin(arg + phases[2 * i])
+        gy += weight * math.sin(arg + phases[2 * i + 1])
+    return (amplitude * gx, amplitude * gy)
+
+
+def gaze_wander(t: float, seed: int, amplitude: float = 0.12):
+    """Seeded eye wander (gx, gy) in units of head radius at local
+    time ``t``. Deterministic: same (t, seed) -> same offset.
+    Bounded by ``amplitude`` on each axis; zero-mean over long
+    windows, so the average gaze stays on the look target.
+    Fixations hold for ``_GAZE_DWELL_SEC`` with a short eased
+    saccade between them (round 11)."""
+    t_eff = max(0.0, float(t)) + 0.037 * (int(seed) % 7)
+    step = math.floor(t_eff / _GAZE_DWELL_SEC)
+    t0 = step * _GAZE_DWELL_SEC
+    v0 = _gaze_smooth(t0, seed, amplitude)
+    phase = t_eff - t0
+    if phase < _GAZE_EASE_SEC and step > 0:
+        v_prev = _gaze_smooth(t0 - _GAZE_DWELL_SEC, seed, amplitude)
+        u = phase / _GAZE_EASE_SEC
+        s = u * u * (3.0 - 2.0 * u)
+        return (v_prev[0] + (v0[0] - v_prev[0]) * s,
+                v_prev[1] + (v0[1] - v_prev[1]) * s)
+    return v0
+
+
 # --- Transition alignment (Phase D) --------------------------------------
 # Directive: major expression changes align with a cut or a story
 # beat; only micro-animation (blink, lipsync, eye/brow, breathing,
@@ -424,7 +588,7 @@ def gaze_for_target(head_pos, target_pos, max_shift: float = 0.12):
 # expression semantics).
 
 def blink_times_for(duration: float, seed: int = 0,
-                    min_gap: float = 2.8, max_gap: float = 5.0
+                    min_gap: float = 2.2, max_gap: float = 3.5
                     ) -> list[float]:
     """Deterministic blink schedule for ``duration`` seconds.
 
@@ -432,6 +596,11 @@ def blink_times_for(duration: float, seed: int = 0,
     in [min_gap, max_gap]; the first blink lands in the first
     ``min_gap`` seconds so no shot starts with a frozen face. Feeds
     ``blink_envelope`` / ``params_at``.
+
+    Round 7: gaps tightened from [2.8, 5.0] to [2.2, 3.5] so a
+    long shot never goes ~5 s unblinked (tester R6: a 3.8 s shot
+    with no detected blink reads as staring). A blink every
+    2-4 s stays inside natural human blink rates.
     """
     if duration <= 0:
         return []
