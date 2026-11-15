@@ -429,7 +429,10 @@ class TestVegetation(unittest.TestCase):
         self.assertGreaterEqual(len(els), 3)
         self.assertEqual(validate_attachments({"elements": els}), [])
         els = _hedge("h", 1.0, -2.0, 2.2, "MG", height=1.0)
-        self.assertEqual(len(els), 2)
+        # Round 10: the hedge is a low core + 3 overlapping foliage
+        # lobes (the old tall box + thin top read as a box with a
+        # lid), so 4 elements, not the old 2.
+        self.assertEqual(len(els), 4)
         self.assertEqual(validate_attachments({"elements": els}), [])
 
     def test_trait_leaf_color_reaches_generic_trees(self):
@@ -1111,7 +1114,10 @@ class TestPlanShotCameraOptIn(unittest.TestCase):
     def test_shot_types_and_scales_unchanged(self):
         self.assertEqual(SHOT_SCALE["establishing"], 1.0)
         self.assertEqual(SHOT_SCALE["close_up"], 2.6)
-        self.assertEqual(SHOT_SCALE["object_insert"], 3.4)
+        # Hero prop grammar (round 2): inserts plan at 5.0 so
+        # the prop occupies a readable frame share; the ladder
+        # still steps down when the subject box does not fit.
+        self.assertEqual(SHOT_SCALE["object_insert"], 5.0)
 
 
 if __name__ == "__main__":

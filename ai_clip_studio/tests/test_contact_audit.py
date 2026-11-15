@@ -82,6 +82,23 @@ class TestContactAudit(unittest.TestCase):
         self.assertEqual(item["metrics"]["penetration_mean"], 1.0)
         self.assertEqual(item["metrics"]["holder_match"], 1.0)
 
+    def test_gap_is_labelled_grip_only_target_not_measured(self):
+        # Round 6: a 0.0 gap must never read as strike contact.
+        # The R5 hammer strike audited gap 0.0 while the drawn
+        # head sat 14 px from the anvil in the frames.
+        event = {"action_id": "E1", "action_type": "HAMMER_STRIKE",
+                 "actor_id": "CHAR_A", "prop_id": "PROP_WALLET",
+                 "start_time": 0.0, "end_time": 1.0}
+        telemetry = _frames(24, lambda t, i: [_draw()])
+        with tempfile.TemporaryDirectory() as tmp:
+            report = audit_prop_contact(_job(tmp, telemetry, [event]))
+        item = report["interactions"][0]
+        self.assertEqual(item["metrics"]["gap_px_mean"], 0.0)
+        self.assertIn("NOT prop-to-target contact",
+                      item["metrics"]["gap_measures"])
+        self.assertEqual(item["metrics"]["target_contact"],
+                         "NOT_MEASURED")
+
     def test_distant_prop_fails_gap(self):
         event = {"action_id": "E1", "action_type": "HOLD",
                  "actor_id": "CHAR_A", "prop_id": "PROP_WALLET",

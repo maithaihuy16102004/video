@@ -39,11 +39,12 @@ class TestSemanticPreflightRealScripts(unittest.TestCase):
             # preflight; both real scripts resolve every actor.
             for check in checks:
                 self.assertTrue(check.passed, check.detail)
-            # Zeus 62/50 (regression matrix 2026-11-12): +2 from the
-            # new "nắm chặt" HOLD and "đặt...lên bàn" PLACE_ON_SURFACE
-            # rules, -1 from the abstract-receive exclusion ("nhận
-            # một phần quyền cai quản" is not a prop receive).
-            expected = "52 events" if "hitler" in name else "62 events"
+            # Zeus 77/53: 62/50 (regression matrix 2026-11-12) +3
+            # from the "nâng" lift vocabulary (two-hand system) +12
+            # EXPRESSION_HOLD events from the EXPRESSION-field wiring
+            # (semantic actions 50 -> 53 from the lifts only; the
+            # expression holds carry no semantic record).
+            expected = "52 events" if "hitler" in name else "77 events"
             self.assertIn(expected, by_name["scene_graph"].detail)
 
     def test_resolved_conflict_passes_with_count(self):

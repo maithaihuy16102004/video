@@ -15,7 +15,8 @@ from PIL import Image
 from ai_clip_studio.action_compiler import compile_actions
 from ai_clip_studio.lighting import (
     MATERIAL_CATALOG, energy_glow_to_point_light,
-    paint_energy_glow, pixel_glow_to_world_glow)
+    paint_energy_glow, paint_energy_glow_excluding,
+    pixel_glow_to_world_glow)
 from ai_clip_studio.product_renderer import (
     _GEOMETRY_SLOT_FILLS, _render_shot, plan_shots)
 from ai_clip_studio.prop_system import (
@@ -63,6 +64,39 @@ class TestPaintEnergyGlow(unittest.TestCase):
         img = Image.new("RGB", (400, 300), (40, 40, 40))
         with self.assertRaises(ValueError):
             paint_energy_glow(img, {"intensity": 2.0})
+
+
+class TestPaintEnergyGlowExcluding(unittest.TestCase):
+    """Round 6 (R2-F1): the deferred insert path repaints halos
+    onto flattened cropped frames, so the halo must be masked
+    out around the cast instead of washing them."""
+
+    def test_empty_boxes_match_plain_painter(self):
+        plain = Image.new("RGB", (400, 300), (40, 40, 40))
+        paint_energy_glow(plain, _record())
+        masked = Image.new("RGB", (400, 300), (40, 40, 40))
+        paint_energy_glow_excluding(masked, _record(), [])
+        self.assertEqual(list(plain.getdata()),
+                         list(masked.getdata()))
+
+    def test_excluded_box_interior_untouched_spill_outside(self):
+        img = Image.new("RGB", (800, 600), (40, 40, 40))
+        record = _record(source_position=(400.0, 300.0),
+                         radius=200.0)
+        # Production-scale box (a standing box is hundreds of
+        # pixels); the feather leaves its interior clean.
+        paint_energy_glow_excluding(
+            img, record, [(300, 100, 500, 500)])
+        self.assertEqual(img.getpixel((400, 300)), (40, 40, 40))
+        # 0.75 radii out: well inside the halo, clear of the box.
+        spill = img.getpixel((400 - 150, 300))
+        self.assertGreater(spill[0], 60)
+
+    def test_world_space_record_raises(self):
+        img = Image.new("RGB", (400, 300), (40, 40, 40))
+        with self.assertRaises(ValueError):
+            paint_energy_glow_excluding(
+                img, _record(source_position=(1.0, 2.0, 3.0)), [])
 
 
 class TestDefaultEnergySpec(unittest.TestCase):
@@ -166,10 +200,16 @@ class TestBoltGlowRender(unittest.TestCase):
         self.assertGreater(int(diff.sum()), 10000,
                            "the glow must change the frame")
         ys, xs = np.nonzero(diff)
-        # A local disc, not a global shift: the 240px default
-        # radius bounds the differ region.
-        self.assertLessEqual(xs.max() - xs.min(), 480)
-        self.assertLessEqual(ys.max() - ys.min(), 480)
+        # Local light, not a global shift. Spied geometry for this
+        # still (r10_glow_probe.py): halo source (937, 264.5),
+        # radius 240 at intensity 1.0; pool centred at (937, 479),
+        # rx 1.6R, ry 0.608R. Predicted union x 553-1321 (768px),
+        # y 24.5-624.9 (600px); measured x 560-1312 (752px),
+        # y 30-621 (591px) -- inside on all four sides, the outer
+        # rings being too faint to flip a pixel. The y bound allows
+        # rasterization slack over the predicted 600px union.
+        self.assertLessEqual(xs.max() - xs.min(), 768)
+        self.assertLessEqual(ys.max() - ys.min(), 640)
         self.assertGreater(float(glow[diff].mean()),
                            float(plain[diff].mean()),
                            "the glow must add light")

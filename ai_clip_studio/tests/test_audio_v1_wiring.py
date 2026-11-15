@@ -44,9 +44,14 @@ from ai_clip_studio.audio_events import (  # noqa: E402
 from ai_clip_studio.product_flow import (  # noqa: E402
     _mix_audio,
     _rms_db_windows,
+    _synth_segment,
 )
 from ai_clip_studio.product_renderer import plan_shots  # noqa: E402
+from ai_clip_studio.studio_script_v1 import (  # noqa: E402
+    parse_studio_script_v1,
+)
 from ai_clip_studio.studio_script_v1_adapter import (  # noqa: E402
+    adapt_document,
     resolve_v1_plan,
 )
 from ai_clip_studio.timeline import (  # noqa: E402
@@ -1600,3 +1605,153 @@ class TestBgmDuckingMeasurement(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestRound6Audio(unittest.TestCase):
+    """Round 6 (R6-5): the stone-crack SFX renders (no more
+    silence for SFX_002), location AMBIENCE traits become
+    scene-span beds under AMBIENCE_MODE: LOCATION_BASED, and
+    the new syntheses render non-silent audio."""
+
+    def _resolve(self, cues):
+        package, shots, entries = _resolver_fixture()
+        return resolve_v1_cues(
+            cues, package=package, shots=shots,
+            timeline_entries=entries, rainy_scenes=(),
+            script_text="")
+
+    def test_stone_crack_sfx_renders_a_segment(self):
+        cue = {"cue_type": "SFX", "cue_id": "SFX_002",
+               "name": "Stone cracking",
+               "cue_type_text": "Sharp crackle",
+               "trigger": "PROP_STONE_CRACK",
+               "intensity": "MEDIUM", "scene_number": 1,
+               "shot_id": None, "line": 602, "source_key": "SFX",
+               "duration": "0.6s", "duration_seconds": 0.6}
+        rep = self._resolve([cue])
+        self.assertEqual(rep["unmapped_cues"], [])
+        self.assertEqual(len(rep["segments"]), 1)
+        seg = rep["segments"][0]
+        self.assertEqual(seg["synth_kind"], "stone_crack")
+        self.assertEqual(seg["duration"], 0.6)
+
+    def test_fire_crackle_ambience_renders_a_bed(self):
+        cue = {"cue_type": "AMBIENCE",
+               "cue_id": "LOC_AMB_SC01",
+               "name": "Fire crackle, distant hammering",
+               "scene_number": 1, "shot_id": None,
+               "source_key": "LOCATION_AMBIENCE"}
+        rep = self._resolve([cue])
+        self.assertEqual(len(rep["beds"]), 1)
+        bed = rep["beds"][0]
+        self.assertEqual(bed["synth_kind"], "crackle_bed")
+        self.assertEqual(bed["stem"], "ambience")
+        self.assertEqual((bed["start"], bed["end"]), (0.0, 5.7))
+
+    def test_water_drips_and_room_and_village_beds(self):
+        cues = [
+            {"cue_type": "AMBIENCE", "cue_id": "A1",
+             "name": "Water drips, cave echo", "scene_number": 1,
+             "shot_id": None, "source_key": "LOCATION_AMBIENCE"},
+            {"cue_type": "AMBIENCE", "cue_id": "A2",
+             "name": "Quiet evening room", "scene_number": 2,
+             "shot_id": None, "source_key": "LOCATION_AMBIENCE"},
+            {"cue_type": "AMBIENCE", "cue_id": "A3",
+             "name": "Birds, distant village sounds",
+             "scene_number": 2, "shot_id": None,
+             "source_key": "LOCATION_AMBIENCE"},
+        ]
+        rep = self._resolve(cues)
+        by_id = {b["cue_id"]: b["synth_kind"]
+                 for b in rep["beds"]}
+        self.assertEqual(by_id["A1"], "drip_bed")
+        self.assertEqual(by_id["A2"], "room_tone")
+        self.assertEqual(by_id["A3"], "street_bed")
+
+    def test_new_synth_specs_render_non_silent_audio(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            for kind, dur in (("stone_crack", 0.6),
+                              ("crackle_bed", 2.0),
+                              ("drip_bed", 2.0)):
+                path = _synth_segment(
+                    SYNTHESIS_MAP[kind], dur,
+                    Path(tmp) / f"{kind}.wav")
+                rms = _rms_db_windows(path, [(0.0, dur)])
+                self.assertIsNotNone(rms)
+                self.assertGreater(rms, -60.0, kind)
+
+    def test_loop01_chain_renders_sfx_plus_four_beds(self):
+        text = (REPO_ROOT / "examples"
+                / "loop_test_01_fire_stone.studio.md").read_text(
+                    encoding="utf-8")
+        package = adapt_document(parse_studio_script_v1(text))
+        cues = package["v1_audio_cues"]
+        self.assertEqual(
+            sorted(c["cue_id"] for c in cues
+                   if c["source_key"] == "LOCATION_AMBIENCE"),
+            ["LOC_AMB_SC01", "LOC_AMB_SC02", "LOC_AMB_SC03",
+             "LOC_AMB_SC04"])
+        fixture_pkg, shots, entries = _resolver_fixture()
+        # The fixture clock covers scenes 1-2; Loop 01 has four
+        # scenes, so extend the clock or the scene 3-4 beds
+        # resolve to no span and stay unrendered.
+        shots = list(shots) + [
+            {"scene": 3, "kind": "action", "duration": 2.0,
+             "line_index": None, "action_text": "",
+             "action_cues": []},
+            {"scene": 4, "kind": "action", "duration": 2.0,
+             "line_index": None, "action_text": "",
+             "action_cues": []},
+        ]
+        rep = resolve_v1_cues(
+            cues, package=fixture_pkg, shots=shots,
+            timeline_entries=entries, rainy_scenes=(),
+            script_text=text)
+        kinds = sorted(s["synth_kind"] for s in rep["segments"])
+        self.assertEqual(kinds, ["metal_strike", "stone_crack"])
+        bed_kinds = sorted(b["synth_kind"] for b in rep["beds"])
+        self.assertEqual(
+            bed_kinds,
+            ["crackle_bed", "drip_bed", "room_tone", "street_bed"])
+        self.assertEqual(rep["unmapped_cues"], [])
+
+    def test_location_ambience_requires_location_based_mode(self):
+        text = (REPO_ROOT / "examples"
+                / "loop_test_01_fire_stone.studio.md").read_text(
+                    encoding="utf-8")
+        text = text.replace("AMBIENCE_MODE: LOCATION_BASED",
+                            "AMBIENCE_MODE: LOOP", 1)
+        package = adapt_document(parse_studio_script_v1(text))
+        synthetic = [c for c in package["v1_audio_cues"]
+                     if c["source_key"] == "LOCATION_AMBIENCE"]
+        self.assertEqual(synthetic, [])
+
+    def test_explicit_ambience_cue_wins_over_location_trait(self):
+        # Ep1: every scene with a location AMBIENCE trait already
+        # carries an explicit AMBIENCE cue — no synthetic cue
+        # may double it.
+        text = (REPO_ROOT / "examples"
+                / "hitler_ep01_munich_1914.studio.md").read_text(
+                    encoding="utf-8")
+        package = adapt_document(parse_studio_script_v1(text))
+        synthetic = [c for c in package["v1_audio_cues"]
+                     if c["source_key"] == "LOCATION_AMBIENCE"]
+        self.assertEqual(synthetic, [])
+        # Zeus: scenes without an explicit cue get exactly one
+        # synthetic cue each, and no scene carries both.
+        text = (REPO_ROOT / "examples"
+                / "zeus_ep01_fall_of_cronus.studio.md").read_text(
+                    encoding="utf-8")
+        package = adapt_document(parse_studio_script_v1(text))
+        by_scene: dict[int, list[str]] = {}
+        for cue in package["v1_audio_cues"]:
+            if cue["cue_type"] != "AMBIENCE":
+                continue
+            by_scene.setdefault(cue["scene_number"], []).append(
+                cue["source_key"])
+        for scene_no, sources in by_scene.items():
+            self.assertEqual(len(sources), 1, scene_no)
+        self.assertEqual(
+            sorted(s for s, ss in by_scene.items()
+                   if ss == ["LOCATION_AMBIENCE"]),
+            [1, 2, 5, 6, 8, 10])

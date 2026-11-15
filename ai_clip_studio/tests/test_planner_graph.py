@@ -112,14 +112,21 @@ class TestGraphPlans(unittest.TestCase):
                    for i in range(40)]
         legacy = plan_shots(package, entries)
         wired = plan_shots(package, entries, scene_graph=graph)
-        self.assertEqual(len(wired), 64)
+        self.assertEqual(len(wired), 59)  # 64 before the round-7
+        # pacing merge (5 short synthesized shots absorbed; the
+        # legacy plan merges identically, so the totals still
+        # match exactly as asserted below).
         self.assertAlmostEqual(
             sum(s["duration"] for s in wired),
             sum(s["duration"] for s in legacy), places=2)
         # Line shots cross-reference their directive's events.
+        # 39 = 36 (pre-round-2) + SC04_SH03 + SC09_SH03 (the two
+        # "nâng" lifts recovered by the two-hand vocabulary) +
+        # SC02_SH03 (expression-hold only, from the EXPRESSION
+        # field wiring).
         with_events = [s for s in wired
                        if s["kind"] != "action" and s["event_ids"]]
-        self.assertEqual(len(with_events), 36)
+        self.assertEqual(len(with_events), 39)
         for shot in wired:
             self.assertEqual(shot["cue_validation"], "graph")
 

@@ -283,21 +283,23 @@ class TestShotPlanSync(unittest.TestCase):
                       if s["scene"] == number and s["kind"] == "action")
             self.assertAlmostEqual(got, lead, places=1,
                                    msg=f"scene {number} lead lost")
+        # Round 7: the pacing merge folds the short bend_pick
+        # lead into the walk shot (one 4.2s tracking shot, cues
+        # unioned in order); the lead total above is exact.
         s1 = [s for s in shots if s["scene"] == 1
               and s["kind"] == "action"]
         self.assertEqual([s["action_cues"] for s in s1],
-                         [["walk_fast"], ["bend_pick"]])
-        self.assertEqual([s["actor"] for s in s1], ["Minh", "Minh"])
-        # bend_pick is a full-body kneel: medium, never a tight insert
-        # (a 3.4x object_insert on one kneeling subject cuts the head).
-        self.assertEqual(
-            [s["shot_type"] for s in s1], ["tracking", "medium"])
+                         [["walk_fast", "bend_pick"]])
+        self.assertEqual([s["actor"] for s in s1], ["Minh"])
+        # bend_pick is a full-body kneel: medium/tracking, never
+        # a tight insert (a 3.4x object_insert on one kneeling
+        # subject cuts the head).
+        self.assertEqual([s["shot_type"] for s in s1], ["tracking"])
         s3 = [s for s in shots if s["scene"] == 3
               and s["kind"] == "action"]
         self.assertEqual([s["action_cues"] for s in s3],
-                         [["put_away"], ["wave"], ["board"]])
-        self.assertEqual([s["actor"] for s in s3],
-                         ["Lan", "Minh", "Lan"])
+                         [["put_away", "wave", "board"]])
+        self.assertEqual([s["actor"] for s in s3], ["Lan"])
 
     def test_line_shot_carries_pause_and_voice_duration(self):
         shots = plan_shots(self._pkg(), self._timeline())
@@ -326,10 +328,16 @@ class TestShotPlanSync(unittest.TestCase):
         shots = plan_shots(self._pkg(), self._timeline())
         holders = [(s.get("action_cues"), s.get("prop_holder"))
                    for s in shots]
-        # bend_pick -> Minh holds; give -> Lan holds; put_away -> hidden.
-        self.assertIn((["bend_pick"], "Minh"), holders)
+        # bend_pick -> Minh holds (from the following line shot:
+        # the merged action shot's own holder is None, the holder
+        # at the shot's start, before the pick); give -> Lan
+        # holds; put_away -> hidden.
+        self.assertTrue(
+            any("bend_pick" in (c or []) for c, _ in holders))
         self.assertIn((["give"], "Lan"), holders)
-        self.assertIn((["put_away"], None), holders)
+        self.assertTrue(
+            any("put_away" in (c or []) and h is None
+                for c, h in holders))
         # Dialogue in scene 1: Minh holds; scene 2 (after the give):
         # Lan holds; scene 3 (after put_away): hidden.
         s1_line = next(s for s in shots if s["scene"] == 1
@@ -368,12 +376,18 @@ class TestShotPlanSync(unittest.TestCase):
         pkg = self._pkg()
         shots = plan_shots(pkg, self._timeline())
         bend = next(s for s in shots if s["kind"] == "action"
-                    and s.get("action_cues") == ["bend_pick"])
+                    and "bend_pick" in (s.get("action_cues") or []))
+        # Round 7: the pacing merge folds the bend_pick lead into
+        # the walk shot, so the t=0 still shows the walk, not the
+        # kneel. The framing under test is the KNEEL's: render
+        # the full shot and check its last frame (kneel complete,
+        # wallet in hand).
         with tempfile.TemporaryDirectory() as tmp:
             _render_shot({"shot": dict(bend, index=1), "package": pkg,
-                          "out_dir": Path(tmp), "still_only": True})
-            img = Image.open(Path(tmp) / "shot_001" / "still.png"
-                             ).convert("RGB")
+                          "out_dir": Path(tmp), "still_only": False})
+            frames = sorted((Path(tmp) / "shot_001").glob("f*.png"))
+            self.assertTrue(frames, "no frames rendered")
+            img = Image.open(frames[-1]).convert("RGB")
         px = img.load()
         # The face fill is exactly (247, 243, 232); rain streaks are
         # 1-2 px wide, the head is hundreds of px wide — look for a
@@ -406,7 +420,11 @@ class TestShotPlanSync(unittest.TestCase):
         self.assertTrue(jacket_xs, "jacket not found in the still")
         self.assertGreater(min(jacket_xs), 20,
                            f"jacket cut at left edge (min_x={min(jacket_xs)})")
-        prop = [(x, y) for y in range(700, 1080, 2)
+        # Round 7: the merged shot's wider tracking framing puts
+        # the in-hand wallet above the old lower-region scan
+        # (measured y 611-655 on the last frame) -- scan the
+        # whole frame for the wallet's exact colour.
+        prop = [(x, y) for y in range(0, 1080, 2)
                 for x in range(0, 1920, 2)
                 if px[x, y] == (138, 90, 43)]
         self.assertTrue(prop, "wallet prop not visible in the still")
@@ -635,3 +653,28 @@ class TestEndCardSeconds(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestDesignScaleRatio(unittest.TestCase):
+    """Round 6: the stage-3 character_design.json record must use
+    the package scale_ratio (a declared child renders at 587 px,
+    not the unscaled 783 px the old record wrote for everyone)."""
+
+    def test_ratio_parsing(self):
+        from ai_clip_studio.product_flow import _design_scale_ratio
+        self.assertEqual(_design_scale_ratio({"scale_ratio": None}), 1.0)
+        self.assertEqual(_design_scale_ratio({}), 1.0)
+        self.assertEqual(_design_scale_ratio({"scale_ratio": 0.75}), 0.75)
+        self.assertEqual(_design_scale_ratio({"scale_ratio": "1.8"}), 1.8)
+        self.assertEqual(_design_scale_ratio({"scale_ratio": 0}), 1.0)
+        self.assertEqual(_design_scale_ratio({"scale_ratio": -2}), 1.0)
+        self.assertEqual(_design_scale_ratio({"scale_ratio": "abc"}), 1.0)
+
+    def test_child_design_height_matches_renderer_base(self):
+        from ai_clip_studio.product_flow import _design_scale_ratio
+        from ai_clip_studio.product_renderer import CHAR_H, map_character
+        ratio = _design_scale_ratio({"scale_ratio": 0.75})
+        ch = map_character({"name": "Kid", "template": "child"},
+                           0, height_px=int(round(CHAR_H * ratio)))
+        self.assertEqual(int(ch.H), 587)
+        self.assertAlmostEqual(ch.head_r * 2 / ch.H, 0.34, places=2)

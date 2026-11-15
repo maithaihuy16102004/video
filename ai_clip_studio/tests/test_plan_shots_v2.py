@@ -64,7 +64,12 @@ class TestDirectiveConsumption(unittest.TestCase):
                     if s.get("directive_shot_id")}
         self.assertEqual(len(declared), 41)
         self.assertEqual(consumed, declared)
-        self.assertEqual(len(shots), 64)  # 63 before the A2
+        self.assertEqual(len(shots), 59)  # 64 before the round-7
+        # pacing merge: 5 short synthesized shots (< 2.5 s, no
+        # directive) merged into their predecessors (verified:
+        # pacing_merge records on 4 shots absorbing 5); all 41
+        # directives still consumed exactly as asserted above;
+        # total duration preserved.
         # phrase-aware cue fix + head_tilt wiring (2026-11-12): one
         # extra default lead segment from the new cue distribution.
         # All 41 directives still consumed exactly once, every
@@ -91,11 +96,15 @@ class TestDirectiveConsumption(unittest.TestCase):
         # SC04 directive sequence (SRS -> OTS -> reaction) moved from
         # 13-15 to 11-13. The sequence itself and the anchor shots
         # (0/4/10) are unchanged; re-pin the measured positions.
+        # Round-7 item 2: shot 0's directive says MEDIUM_CLOSEUP,
+        # which the camera-text mapping now resolves correctly to
+        # medium_close_up (the old close_up was the substring
+        # mapping bug); the other indices are unchanged.
         pkg = _package("hitler_ep01_munich_1914")
         shots = _plan(pkg, [0.65] * 9)
-        want = {0: "close_up", 4: "establishing", 10: "medium",
-                11: "shot_reverse_shot", 12: "over_the_shoulder",
-                13: "reaction"}
+        want = {0: "medium_close_up", 4: "establishing",
+                10: "medium", 11: "shot_reverse_shot",
+                12: "over_the_shoulder", 13: "reaction"}
         for idx, st in want.items():
             self.assertEqual(shots[idx]["shot_type"], st, idx)
 
@@ -214,11 +223,19 @@ class TestPolicyRecords(unittest.TestCase):
     def test_repeated_framing_flags_identical_pair(self):
         pkg = _package("hitler_ep01_munich_1914")
         shots = _plan(pkg, [0.65] * 9)
-        # SC06_SH03 + SC06_SH04: consecutive close_ups, same
-        # viewpoint AND same crop scale — the cut changes nothing.
+        # Round-7 item 2: SC06_SH03's directive says MEDIUM_CLOSEUP
+        # (crop 1.6) and SC06_SH04 is close_up (crop 2.6) -- the
+        # same viewpoint but a framing change by cut, so the
+        # warning says "crop scale differs", not "changes
+        # nothing" (the old wording came from the substring
+        # mapping bug that resolved both to close_up). The
+        # "changes nothing" branch is exercised by SC06_SH03
+        # itself against its same-scale predecessor.
         by_id = {s.get("directive_shot_id"): s for s in shots}
+        self.assertIn("changes nothing",
+                      by_id["SC06_SH03"]["repeated_framing_warning"])
         warn = by_id["SC06_SH04"]["repeated_framing_warning"]
-        self.assertIn("changes nothing", warn)
+        self.assertIn("crop scale differs", warn)
         # SC04_SH01 (new scene/location) is NOT flagged.
         self.assertIsNone(
             by_id["SC04_SH01"]["repeated_framing_warning"])

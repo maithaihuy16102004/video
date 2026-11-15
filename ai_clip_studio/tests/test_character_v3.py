@@ -475,10 +475,12 @@ class TestV4ReferenceProportions(unittest.TestCase):
         self.assertGreater(body_diff("three_quarter", "profile"), 0.3,
                            "3/4 and profile bodies are identical")
 
-    def test_neutral_face_has_no_brows_like_reference(self):
-        """The reference face is two eyes + a mouth, no brows. In the
-        neutral render, the strip where brows would sit (just above
-        the eyes, below the hair chord) must contain no ink."""
+    def test_neutral_face_has_brows_like_ricksclips(self):
+        """RicksClips loop round 1 (2026-11-14, Mai: full scope incl.
+        character) SUPERSEDES the old browless neutral: brows are
+        always drawn, short and thick -- the reference's primary
+        expression carrier. The strip above the eyes must carry brow
+        ink in the neutral render too."""
         img, joints = _render(_standing_char(), expression="neutral")
         arr = np.asarray(img)
         hx, hy = joints["head"]
@@ -489,8 +491,8 @@ class TestV4ReferenceProportions(unittest.TestCase):
         x0, x1 = int(hx - 0.6 * r), int(hx + 0.6 * r)
         strip = arr[y0:y1, x0:x1, :3].astype(int)
         ink_px = np.sum(np.all(np.abs(strip - np.array(INK)) < 12, axis=2))
-        self.assertEqual(int(ink_px), 0,
-                         f"neutral face has brow ink: {ink_px}px")
+        self.assertGreater(int(ink_px), 20,
+                           "neutral face lost its brows")
 
     def test_angry_brows_visible_above_eyes(self):
         """The same strip DOES carry ink for angry (brows moved)."""

@@ -14,6 +14,8 @@ import unittest
 from PIL import Image
 
 from ai_clip_studio.paint_textures import (
+    _pad_texture_edges,
+    _perspective_coeffs,
     clear_texture_cache,
     darken,
     facade_window_layout,
@@ -426,3 +428,49 @@ class TestEnvironmentWiring(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestQuadEdgeSeamRound6(unittest.TestCase):
+    """Round-6 seam fix: PIL's PERSPECTIVE transform samples
+    outside the texture at quad edges (black fill), so every
+    textured quad carried a dark fringe -- the dotted diagonal
+    seam on ground bands. Edge-replicated padding removes it."""
+
+    def test_padding_replicates_edges_and_corners(self):
+        tex = Image.new("RGB", (4, 4), (10, 20, 30))
+        tex.putpixel((0, 0), (200, 0, 0))
+        tex.putpixel((3, 3), (0, 0, 200))
+        padded = _pad_texture_edges(tex, pad=2)
+        self.assertEqual(padded.size, (8, 8))
+        self.assertEqual(padded.getpixel((2, 2)), (200, 0, 0))
+        self.assertEqual(padded.getpixel((0, 0)), (200, 0, 0))
+        self.assertEqual(padded.getpixel((7, 7)), (0, 0, 200))
+        self.assertEqual(padded.getpixel((0, 4)), (10, 20, 30))
+
+    def test_coeffs_default_origin_is_legacy(self):
+        quad = [(10.0, 50.0), (10.0, 10.0), (50.0, 10.0),
+                (50.0, 50.0)]
+        self.assertEqual(_perspective_coeffs(quad, (64, 64)),
+                         _perspective_coeffs(quad, (64, 64),
+                                             origin=(0.0, 0.0)))
+
+    def test_skewed_quad_has_no_dark_edge_fringe(self):
+        # Solid mid-grey texture on a skewed quad over a BLACK
+        # canvas: any out-of-bounds sampling shows as darkened
+        # pixels along the quad edges. Before the fix the edge
+        # columns read near black; now they read the texture.
+        canvas = Image.new("RGB", (120, 120), (0, 0, 0))
+        tex = Image.new("RGB", (64, 64), (150, 150, 150))
+        quad = [(20, 100), (30, 20), (100, 30), (90, 100)]
+        paste_textured_quad(canvas, quad, tex, 1.0)
+        # Sample just inside the edges: the left edge at y=60
+        # sits at x=25 and the top edge at x=60 sits at y=24.3,
+        # so x=26..28 / y=26..28 are 1-3 px inside the mask.
+        # All must read the texture, not the black fringe.
+        for x in (26, 27, 28):
+            self.assertGreater(canvas.getpixel((x, 60))[0], 120,
+                               f"left-edge fringe at x={x}")
+        for y in (26, 27, 28):
+            self.assertGreater(canvas.getpixel((60, y))[0], 120,
+                               f"top-edge fringe at y={y}")
+        self.assertGreater(canvas.getpixel((60, 60))[0], 140)

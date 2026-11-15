@@ -161,21 +161,26 @@ class TestProps(unittest.TestCase):
     def test_all_prop_kinds_draw_distinct_shapes(self):
         canvases = {}
         for kind in sorted(PROP_KINDS):
-            img = Image.new("RGB", (200, 160), (255, 255, 255))
-            _draw_prop(ImageDraw.Draw(img), 100, 80, kind=kind)
+            # Canvas fits the tallest footprint (170px) with margin.
+            img = Image.new("RGB", (200, 240), (255, 255, 255))
+            _draw_prop(ImageDraw.Draw(img), 100, 120, kind=kind)
             canvases[kind] = np.asarray(img).astype(int)
         kinds = sorted(PROP_KINDS)
-        # Compare within the footprint region around the draw
-        # point: a full-canvas mean dilutes thin geometry shapes
-        # (staff vs trident) with empty canvas. Most-similar pair
-        # measured 3.34 (staff/trident) in the footprint region.
-        y0, y1, x0, x1 = 45, 115, 52, 148
+        # Compare each pair over the UNION of the two shapes' ink:
+        # footprint-agnostic (a fixed region calibrated for the old
+        # single 76x50 footprint clipped tall props' distinguishing
+        # features -- trident prongs fell outside it and staff /
+        # trident compared identical). Worst pair measured 31.43
+        # (book/wallet) under this method.
         worst = None
         for i, a in enumerate(kinds):
             for b in kinds[i + 1:]:
+                ma = (np.abs(canvases[a] - 255).sum(axis=2) > 30)
+                mb = (np.abs(canvases[b] - 255).sum(axis=2) > 30)
+                union = ma | mb
                 diff = float(np.abs(
-                    canvases[a][y0:y1, x0:x1]
-                    - canvases[b][y0:y1, x0:x1]).mean())
+                    canvases[a][union] - canvases[b][union]).mean()) \
+                    if union.any() else 0.0
                 if worst is None or diff < worst[0]:
                     worst = (diff, a, b)
         self.assertGreater(worst[0], 1.0,

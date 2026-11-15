@@ -41,7 +41,7 @@ class TestCameraPlanner(unittest.TestCase):
         self.assertEqual([s["shot_type"] for s in shots],
                          ["establishing", "object_insert", "reaction"])
         self.assertEqual([s["camera"]["scale"] for s in shots],
-                         [1.0, 3.4, 2.6])
+                         [1.0, 5.0, 2.6])
         self.assertEqual([s["camera"]["focus_target"] for s in shots],
                          ["two_shot_center", "object", "subject_head"])
         # durations split the segment and sum back to it
@@ -75,7 +75,7 @@ class TestCameraPlanner(unittest.TestCase):
     def test_bend_pick_is_object_insert(self):
         shots = CameraPlanner.plan([_seg(["bend_pick"], duration=2.0)])
         self.assertEqual(shots[0]["shot_type"], "object_insert")
-        self.assertEqual(shots[0]["camera"]["scale"], 3.4)
+        self.assertEqual(shots[0]["camera"]["scale"], 5.0)
         self.assertEqual(shots[0]["camera"]["focus_target"], "object")
 
     def test_open_is_object_insert(self):

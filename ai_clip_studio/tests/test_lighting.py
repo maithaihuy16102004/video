@@ -36,9 +36,23 @@ def _solid(rgb, size=(64, 48)):
 
 class TestNormalization(unittest.TestCase):
     def test_time_of_day_aliases(self):
-        self.assertEqual(normalize_time_of_day("morning"), "day")
+        # Round 7: morning / midday / afternoon are distinct
+        # palettes, not one collapsed "day".
+        self.assertEqual(normalize_time_of_day("morning"), "morning")
+        self.assertEqual(normalize_time_of_day("Morning"), "morning")
+        self.assertEqual(normalize_time_of_day("buổi sáng"), "morning")
+        self.assertEqual(normalize_time_of_day("midday"), "midday")
+        self.assertEqual(normalize_time_of_day("noon"), "midday")
+        self.assertEqual(normalize_time_of_day("buổi trưa"), "midday")
+        self.assertEqual(normalize_time_of_day("afternoon"),
+                         "afternoon")
+        self.assertEqual(normalize_time_of_day("buổi chiều"),
+                         "afternoon")
         self.assertEqual(normalize_time_of_day("sunset"), "dusk")
+        self.assertEqual(normalize_time_of_day("evening"), "dusk")
+        self.assertEqual(normalize_time_of_day("buổi tối"), "dusk")
         self.assertEqual(normalize_time_of_day("midnight"), "night")
+        self.assertEqual(normalize_time_of_day("đêm"), "night")
         self.assertEqual(normalize_time_of_day("indoor"), "interior")
         self.assertEqual(normalize_time_of_day("nonsense"), "day")
         self.assertEqual(normalize_time_of_day(None), "day")
@@ -52,9 +66,23 @@ class TestNormalization(unittest.TestCase):
 
 class TestPalettes(unittest.TestCase):
     def test_all_combinations_present(self):
-        for tod in ("day", "dusk", "night", "interior"):
+        for tod in ("day", "morning", "midday", "afternoon",
+                    "dusk", "night", "interior"):
             for mood in ("warm", "cold", "neutral"):
                 self.assertIn((tod, mood), TIME_OF_DAY_PALETTES)
+
+    def test_daytime_palettes_differ(self):
+        # Round 7: morning / midday / afternoon must read
+        # differently -- distinct skies and shadow directions.
+        skies = set()
+        dirs = set()
+        for tod in ("morning", "midday", "afternoon"):
+            spec = TIME_OF_DAY_PALETTES[(tod, "warm")]
+            skies.add(spec["sky_top"])
+            skies.add(spec["sky_bottom"])
+            dirs.add(spec["light_direction"])
+        self.assertEqual(len(skies), 6)
+        self.assertEqual(len(dirs), 3)
 
     def test_day_palettes_are_bright(self):
         # A day sky must never be dark: sky_top luminance > 120.

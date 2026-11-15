@@ -91,13 +91,22 @@ class TestInsertAnchorFromTelemetry(unittest.TestCase):
         self.assertEqual(anchor["n_draws"], 0)
 
     def test_subjects_from_median(self):
+        # Hero prop grammar: the box is sized from the prop
+        # footprint (bolt 76x156 x 1.5 margin -> 180x234, the
+        # round-6 aspect-preserving footprint), not the old
+        # fixed +-170/+-90 box. No hand telemetry here, so the
+        # box is prop-only.
         tel = [self._entry([{"kind": "bolt", "x": 500.0,
                               "y": 300.0}])]
         subjects, anchor = _insert_anchor_subjects(tel, [])
-        self.assertEqual(subjects, [{"cx": 500.0, "head_y": 210.0,
-                                     "foot_y": 390.0,
-                                     "half_w": 170}])
+        self.assertEqual(subjects, [{"cx": 500.0, "head_y": 183.0,
+                                     "foot_y": 417.0,
+                                     "half_w": 90.0}])
         self.assertEqual(anchor["source"], "telemetry_median")
+        self.assertEqual(anchor["prop_w"], 76.0)
+        self.assertEqual(anchor["prop_h"], 156.0)
+        self.assertFalse(anchor["hands_included"])
+        self.assertFalse(anchor["pair_anchored"])
 
 
 class TestScreenGlowRecord(unittest.TestCase):
@@ -142,23 +151,51 @@ class TestInsertTwoPassRender(unittest.TestCase):
         cls._tmp = tempfile.TemporaryDirectory()
         cls.out = Path(cls._tmp.name)
         cls.results = {}
-        # Shot 44: SC08_SH02 handover insert (bolt travels giver ->
-        # receiver). Shot 10: insert with no prop events (fallback).
-        # Shot 0: control (non-insert, behaviour unchanged).
-        for idx in (44, 10, 0):
+        # Round 7: the pacing merge shifts plan indices, so the
+        # three shots are resolved by identity, not fixed
+        # positions. Handover: SC08_SH02 (bolt travels giver ->
+        # receiver). Fallback: the earliest directive-less
+        # insert with no prop events in its span. Control: the
+        # first non-insert shot.
+        clock = 0.0
+        spans = []
+        for s in cls.shots:
+            spans.append((clock, clock + float(s["duration"])))
+            clock += float(s["duration"])
+        events = cls.package["compiled_actions"]["events"]
+
+        def _has_prop_event(i):
+            a, b = spans[i]
+            return any(e.get("prop_id") and e["start_time"] < b
+                       and e["end_time"] > a for e in events)
+
+        handover = next(
+            i for i, s in enumerate(cls.shots)
+            if s.get("directive_shot_id") == "SC08_SH02")
+        fallback = next(
+            i for i, s in enumerate(cls.shots)
+            if s["shot_type"] == "object_insert"
+            and s.get("directive_shot_id") is None
+            and not _has_prop_event(i))
+        control = next(
+            i for i, s in enumerate(cls.shots)
+            if s["shot_type"] != "object_insert")
+        for role, idx in (("handover", handover),
+                          ("fallback", fallback),
+                          ("control", control)):
             s = cls.shots[idx]
-            cls.results[idx] = _render_shot({
+            cls.results[role] = _render_shot({
                 "shot": s, "package": cls.package,
                 "out_dir": str(cls.out / f"shot_{idx:02d}"),
             })
-            cls.results[idx]["_out_dir"] = cls.out / f"shot_{idx:02d}"
+            cls.results[role]["_out_dir"] = cls.out / f"shot_{idx:02d}"
 
     @classmethod
     def tearDownClass(cls):
         cls._tmp.cleanup()
 
     def test_handover_insert_anchors_from_telemetry_median(self):
-        r = self.results[44]
+        r = self.results["handover"]
         self.assertEqual(r["shot_type"], "object_insert")
         self.assertTrue(r["insert_two_pass"])
         anchor = r["insert_anchor"]
@@ -194,10 +231,11 @@ class TestInsertTwoPassRender(unittest.TestCase):
                 self.assertEqual(im.size, (1920, 1080))
 
     def test_insert_without_prop_events_still_two_pass(self):
-        # Shot 10 has no prop EVENTS, but the renderer still draws
+        # The fallback insert has no prop EVENTS, but the renderer
+        # still draws
         # a prop (rest/cue path), so the median branch runs. The
         # no-draw fallback is pinned at the helper level above.
-        r = self.results[10]
+        r = self.results["fallback"]
         self.assertEqual(r["shot_type"], "object_insert")
         self.assertTrue(r["insert_two_pass"])
         self.assertIsNotNone(r["crop_anchor"])
@@ -207,27 +245,63 @@ class TestInsertTwoPassRender(unittest.TestCase):
         # The pre-crop halo washed the whole insert frame (annulus
         # brightness 76.4); the deferred screen-space halo must
         # leave the far region at the bare-background level while
-        # the bolt region still glows.
-        r = self.results[44]
+        # the bolt region still glows. Regions are derived from
+        # the frame's own geometry (the mapped anchor + the
+        # farthest corner), not fixed pixels: the meeting-point
+        # fix moved the crop, and the old fixed annulus now
+        # catches Zeus's chin (240.7 -- face, not glow). The glow
+        # signal is WARMTH (R-B): the yellow halo is warm near
+        # the bolt (24.1) and absent at the far corner (-0.1);
+        # mean brightness does not discriminate (the dark grip
+        # blob drags the bolt box down to the background level).
+        r = self.results["handover"]
         frames = sorted(r["_out_dir"].rglob("f*.png"))
         arr = np.asarray(
             Image.open(frames[len(frames) // 2]).convert("RGB")
         ).astype(float)
-        annulus = arr[150:350, 1450:1750].mean()
-        self.assertLess(annulus, 65.0)
-        bolt_box = arr[440:640, 860:1060].mean()
-        self.assertGreater(bolt_box, 100.0)
+        anchor = r["insert_anchor"]
+        x0, y0, x1, _y1 = r["crop_anchor"]["crop_rect"]
+        sc = 1920.0 / (x1 - x0)
+        ax = int((anchor["x"] - x0) * sc)
+        ay = int((anchor["y"] - y0) * sc)
+        bolt_box = arr[ay - 100:ay + 100, ax - 100:ax + 100]
+        bolt_warm = (bolt_box[:, :, 0] - bolt_box[:, :, 2]).mean()
+        self.assertGreater(bolt_warm, 15.0)
+        corners = {
+            "TL": (slice(40, 240), slice(40, 340)),
+            "TR": (slice(40, 240), slice(1540, 1840)),
+            "BL": (slice(800, 1000), slice(40, 340)),
+            "BR": (slice(800, 1000), slice(1540, 1840)),
+        }
+        centres = {"TL": (190, 140), "TR": (1690, 140),
+                   "BL": (190, 900), "BR": (1690, 900)}
+        far_name = max(
+            corners,
+            key=lambda k: (centres[k][0] - ax) ** 2
+            + (centres[k][1] - ay) ** 2)
+        far_box = arr[corners[far_name]]
+        # The far region must carry no halo: the deferred glow is
+        # yellow (255, 200, 90) and a pre-crop wash would paint the
+        # whole frame with it. Warmth/brightness no longer
+        # discriminate here -- the far corner contains forge brick
+        # (warm, dark) and, since the distinct-palette system, a
+        # warm pink jacket -- so the assertion counts glow-coloured
+        # pixels directly instead of the corner's mean warmth.
+        glow = np.abs(far_box - np.array([255.0, 200.0, 90.0])).sum(
+            axis=2)
+        self.assertLess(int((glow < 60).sum()),
+                        0.005 * far_box.shape[0] * far_box.shape[1])
 
     def test_telemetry_hands_carry_hip(self):
         # Pass-2 glow re-derivation reads the same joints the
         # state machine read, including the hip (pocket rests).
-        for entry in self.results[44]["grip_telemetry"]:
+        for entry in self.results["handover"]["grip_telemetry"]:
             for hands in entry["hands"].values():
                 self.assertIn("hip", hands)
                 self.assertEqual(len(hands["hip"]), 2)
 
     def test_non_insert_shot_unchanged(self):
-        r = self.results[0]
+        r = self.results["control"]
         self.assertNotEqual(r["shot_type"], "object_insert")
         self.assertFalse(r["insert_two_pass"])
         self.assertIsNone(r["insert_anchor"])

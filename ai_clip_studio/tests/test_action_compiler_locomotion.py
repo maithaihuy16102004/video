@@ -64,6 +64,25 @@ class TestLocomotionMetadata(unittest.TestCase):
             by_type["STOP"]["required_pose"]["params"]["locomotion_state"],
             "STOP_WALK")
 
+    def test_retreat_step_back_marks_event(self):
+        pkg = _package([_scene("SC01_SH01", [
+            "Ben lùi lại một bước."])])
+        events, _unsupported = compile_actions(pkg)
+        walks = [e for e in events if e["action_type"] == "WALK"]
+        self.assertEqual(len(walks), 1)
+        self.assertTrue(
+            walks[0]["required_pose"]["params"].get("retreat"))
+
+    def test_forward_walk_has_no_retreat_marker(self):
+        pkg = _package([_scene("SC01_SH01", [
+            "Ana đi bộ trên đường đất.", "Ben bước tới cửa."])])
+        events, _unsupported = compile_actions(pkg)
+        walks = [e for e in events if e["action_type"] == "WALK"]
+        self.assertEqual(len(walks), 2)
+        for walk in walks:
+            self.assertNotIn(
+                "retreat", walk["required_pose"]["params"])
+
     def test_non_locomotion_events_have_no_locomotion_state(self):
         pkg = _package([_scene("SC01_SH01", ["Ana vẫy tay."])])
         events, _unsupported = compile_actions(pkg)

@@ -66,15 +66,34 @@ class TestClassifyUnsupported(unittest.TestCase):
     def test_zeus_counts(self):
         # Measured 2026-11-13: 94 unsupported = 58 vocabulary gaps
         # + 5 constraints + 28 routed + 3 staged expressions.
+        # 91 now: the 3 "nâng" lifts classify as events. The staged
+        # count stays 3: expression matching is whole-word, so a
+        # narration sentence containing "của"/"nôi" no longer
+        # false-positives on the interjections "ủa"/"ôi".
         _pkg, _events, unsupported = _compile(
             "zeus_ep01_fall_of_cronus")
         result = classify_unsupported(
             unsupported, _package("zeus_ep01_fall_of_cronus"))
         self.assertEqual(result["counts"], {
-            "VOCABULARY_GAP": 58, "CONSTRAINT": 5, "ROUTED": 28,
+            "VOCABULARY_GAP": 55, "CONSTRAINT": 5, "ROUTED": 28,
             "EXPRESSION_STAGED": 3})
-        self.assertEqual(len(result["entries"]), 94)
+        self.assertEqual(len(result["entries"]), 91)
         self.assertTrue(result["warnings"])
+
+    def test_expression_matching_is_whole_word(self):
+        # "của"/"nôi" contain the interjections "ủa"/"ôi" as
+        # substrings; a narration sentence about cradles is a
+        # vocabulary gap, never a staged expression.
+        from ai_clip_studio.production_errors import (
+            _expression_phrases, _looks_like_expression)
+        phrases = _expression_phrases()
+        self.assertFalse(_looks_like_expression(
+            "mỗi chiếc nôi chuyển thành biểu tượng của một người con",
+            phrases))
+        self.assertTrue(_looks_like_expression("Zeus mỉm cười",
+                                               phrases))
+        self.assertTrue(_looks_like_expression("Nụ cười dần biến mất",
+                                               phrases))
 
     def test_zeus_constraint_and_expression_spots(self):
         pkg, _events, unsupported = _compile(

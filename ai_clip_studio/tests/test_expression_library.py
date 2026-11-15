@@ -7,6 +7,7 @@ from ai_clip_studio.animation.character_art import EXPRESSIONS
 from ai_clip_studio.expression_library import (
     NEGATION_WORDS,
     blink_envelope,
+    blink_times_for,
     blend,
     gaze_for_target,
     interpret,
@@ -140,13 +141,28 @@ class TestInterpret(unittest.TestCase):
 class TestEnvelopes(unittest.TestCase):
     def test_blink_envelope(self):
         self.assertEqual(blink_envelope(0.5, []), 1.0)
-        # The dip bottoms out at the blink midpoint (start + 0.06 s),
+        # The dip bottoms out at the blink midpoint (start + 0.08 s),
         # not at the start: the eye closes, then reopens.
         self.assertEqual(blink_envelope(1.0, [1.0]), 1.0)
-        self.assertAlmostEqual(blink_envelope(1.06, [1.0]), 0.1)
+        # Midpoint of the 0.16 s blink (round 7: up from 0.12 so
+        # the closure spans ~2 frames) dips eye_h to 0.1.
+        self.assertAlmostEqual(blink_envelope(1.08, [1.0]), 0.1)
         self.assertEqual(blink_envelope(1.5, [1.0]), 1.0)
         # Between blinks the eye is open.
         self.assertEqual(blink_envelope(1.3, [1.0, 2.0]), 1.0)
+
+    def test_blink_schedule_covers_long_shots(self):
+        # Round 7: no shot over 2.5 s goes unblinked, and no
+        # within-shot gap exceeds the 3.5 s max gap, for any
+        # seed (the tester found a 3.8 s shot with no blink).
+        for seed in range(40):
+            times = blink_times_for(3.8, seed=seed)
+            self.assertTrue(times, seed)
+            self.assertLess(times[0], 2.2, seed)
+            times6 = blink_times_for(6.0, seed=seed)
+            gaps = [b - a for a, b in
+                    zip([0.0] + times6, times6)]
+            self.assertLessEqual(max(gaps), 3.5, seed)
 
     def test_speech_envelope_zero_outside(self):
         segments = [{"start": 1.0, "end": 2.0}]
@@ -178,7 +194,9 @@ class TestEnvelopes(unittest.TestCase):
         self.assertEqual(params["eye_h"], EXPRESSIONS["sad"]["eye_h"])
         self.assertGreaterEqual(params["mouth_open"],
                                 EXPRESSIONS["sad"]["mouth_open"])
-        blinked = params_at(keyframes, 5.06, speech_segments=None,
+        # Blink midpoint (start + 0.08 s for the 0.16 s blink,
+        # round 7) dips eye_h to 0.1x the expression value.
+        blinked = params_at(keyframes, 5.08, speech_segments=None,
                             blink_times=[5.0])
         self.assertAlmostEqual(
             blinked["eye_h"], EXPRESSIONS["sad"]["eye_h"] * 0.1)

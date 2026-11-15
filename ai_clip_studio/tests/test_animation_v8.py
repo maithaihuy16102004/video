@@ -431,7 +431,11 @@ class TestIdentityTraits(unittest.TestCase):
             arr = np.asarray(img).sum(axis=2) < 400
             hx, hy = J["head"]
             r = ch.head_r
-            band = arr[int(hy - 0.85 * r):int(hy - 0.45 * r),
+            # Band stops at -0.60r: brows (always drawn since RicksClips
+            # loop round 1, centred at -0.52r) sit on the facing side
+            # in profile and would inflate the ratio; the cap edge
+            # (-0.72r at the sides) stays inside the band.
+            band = arr[int(hy - 0.85 * r):int(hy - 0.60 * r),
                        int(hx - r):int(hx + r)]
             mid = band.shape[1] // 2
             return (band[:, mid:].sum()
@@ -443,3 +447,63 @@ class TestIdentityTraits(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestHatDomeBrimJoin(unittest.TestCase):
+    """Round 6: the front-view bowler dome must meet its brim.
+    The pieslice diameter sits at the box centre, so the old box
+    bottom (hy-0.85r) put the dome's flat edge at hy-1.30r —
+    a 0.35r background gap with the dome floating above the
+    brim (visible on Be Nam in every R5 frame)."""
+
+    def test_dome_column_has_no_background_gap(self):
+        ch = make_character_instance("lustig", height=560)
+        bg = (15, 30, 51)
+        img = Image.new("RGB", (600, 700), bg)
+        d = ImageDraw.Draw(img, "RGBA")
+        standing(ch, 300, 620, facing=1)
+        joints = draw_character_v4(d, ch, expression="neutral",
+                                   view="front")
+        hx, hy = joints["head"]
+        r = ch.head_r
+        x = int(round(hx))
+        top = int(round(hy - 1.70 * r))
+        bottom = int(round(hy - 1.00 * r))
+        gap_rows = [y for y in range(top, bottom)
+                    if img.getpixel((x, y)) == bg]
+        self.assertEqual(gap_rows, [],
+                         f"background gap in the hat column: {gap_rows[:5]}")
+        # The brim line itself is drawn at hy-0.95r.
+        self.assertNotEqual(
+            img.getpixel((x, int(round(hy - 0.95 * r)))), bg)
+
+
+class TestNoGroundStrokes(unittest.TestCase):
+    """Round 8 (R2-H4): the v4 art draws NO ink sketch strokes
+    under the feet. The reference grounds characters with a soft
+    flat shadow only (dossier); the renderer paints that shadow,
+    and the hard strokes read as scratches on every floor. The
+    band below the ground line must be empty -- feet end ~1 px
+    below it, the tuft grows upward from it."""
+
+    def test_no_ink_below_ground_line(self):
+        ch = make_character_instance("minh", height=560)
+        img = Image.new("RGB", (600, 700), (255, 255, 255))
+        d = ImageDraw.Draw(img, "RGBA")
+        standing(ch, 300, 620, facing=1)
+        joints = draw_character_v4(d, ch, expression="neutral",
+                                   view="front")
+        arr = np.asarray(img).astype(int)
+        dark = arr.sum(axis=2) < 400
+        # The DRAWN ground line (front view): hip + both leg
+        # segments -- NOT the rig foot joints, which sit ~17 px
+        # above it. (The round-6 test measured from the joints
+        # and was reading the feet, not the strokes.)
+        ground_y = round(joints["hip"][1] + ch.u_leg + ch.l_leg)
+        for dy in (8, 13, 18):
+            row = dark[ground_y + dy]
+            self.assertEqual(int(row.sum()), 0,
+                             f"ink at ground+{dy}: strokes remain")
+        # Sanity: the feet themselves still draw, just above.
+        row = dark[ground_y - 5]
+        self.assertTrue(row.any(), "feet missing above ground line")

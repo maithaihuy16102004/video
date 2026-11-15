@@ -131,10 +131,34 @@ class TestMp4Verifier(unittest.TestCase):
     def _build(self, tmp: Path, *, line_starts=(2.0, 5.0, 8.0),
                truncate_last: bool = False, duplicate_first: bool = False,
                sfx_at: float | None = 4.45, segment_at: float = 4.45,
-               audio_total: float | None = None):
+               audio_total: float | None = None,
+               trailing_silence: float = 0.0, bed: bool = False):
         lines = _lines(tmp, starts=line_starts)
         placements = [(Path(line["wav"]), line["start"])
                       for line in lines]
+        if trailing_silence:
+            # Line 3's TTS file decays to silence over its last
+            # 0.35 s and then carries trailing silence, like the
+            # real Zeus round-1 lines (27/32/33/37). The mix
+            # contains the whole padded file: the speech is
+            # complete, only the file end is silent.
+            sig = _chirp(800.0, 2000.0, 1.5)
+            fade_len = int(0.35 * SR)
+            sig[-fade_len:] *= np.linspace(1.0, 0.0, fade_len)
+            padded = np.concatenate(
+                [sig, np.zeros(int(trailing_silence * SR))])
+            wav = _write_wav(tmp / "line3_padded.wav", padded)
+            lines[2]["wav"] = str(wav)
+            lines[2]["end"] = lines[2]["start"] + len(padded) / SR
+            placements[2] = (wav, lines[2]["start"])
+        if bed:
+            # Low ambience bed across the whole mix, like the real
+            # -36 dB bed that swamps a near-silent source tail.
+            t = np.arange(int(12.0 * SR)) / SR
+            bed_wav = _write_wav(
+                tmp / "bed.wav",
+                0.015 * np.sin(2 * np.pi * 220 * t))
+            placements.append((bed_wav, 0.0))
         if truncate_last:
             # Rebuild line 3 from its first 0.8 s only.
             with wave.open(str(lines[2]["wav"]), "rb") as handle:
@@ -212,6 +236,25 @@ class TestMp4Verifier(unittest.TestCase):
                             0.05)
             self.assertTrue(any("line 2" in f
                                 for f in report["failures"]))
+
+    def test_trailing_silence_tail_present(self):
+        # Zeus round-1 re-render: 4 lines failed the tail check
+        # although the speech was complete — the TTS files end
+        # with ~0.3 s of -70 dB trailing silence, and the tail
+        # correlated that silence against the mix bed (0.26-0.33).
+        # The tail must be the last SPEECH, so a complete line
+        # with trailing silence passes.
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            lines, mix, foley, segments, mp4 = self._build(
+                tmp, trailing_silence=0.35, bed=True)
+            report = verify_mp4(
+                mp4, lines=lines, subtitles=_subtitles(lines),
+                segments=segments, unified=_unified(lines),
+                mix_wav=mix, foley_wav=foley)
+            self.assertTrue(report["passed"], report["failures"])
+            self.assertTrue(report["lines"][2]["tail_present"],
+                            report["lines"][2])
 
     def test_truncated_line_fails_tail_check(self):
         with tempfile.TemporaryDirectory() as tmp:

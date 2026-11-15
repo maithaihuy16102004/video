@@ -22,12 +22,14 @@ class TestBlinkSchedule(unittest.TestCase):
                          blink_times_for(10.0, seed=3))
 
     def test_gaps_in_range_and_first_blink_early(self):
+        # Round 7: gaps tightened from [2.8, 5.0] to [2.2, 3.5]
+        # so long shots never go ~5 s unblinked.
         times = blink_times_for(20.0, seed=1)
         self.assertGreater(len(times), 2)
-        self.assertLess(times[0], 2.8)
+        self.assertLess(times[0], 2.2)
         for a, b in zip(times, times[1:]):
-            self.assertGreaterEqual(b - a, 2.8)
-            self.assertLessEqual(b - a, 5.0)
+            self.assertGreaterEqual(b - a, 2.2)
+            self.assertLessEqual(b - a, 3.5)
         self.assertLess(times[-1], 20.0)
 
     def test_empty_for_nonpositive_duration(self):
