@@ -244,6 +244,10 @@ LOCATION_KEYS = (
     "LABEL_LANGUAGE",
     "ANIMATION",
     "REFERENCE_RESEARCH",
+    # Landmark declarations (environment §E): the ONLY source of
+    # landmark elements (statues, towers, bridges...). Never
+    # inferred from other fields.
+    "LANDMARKS",
 )
 
 PROP_KEYS = (
@@ -570,6 +574,7 @@ class ScriptLocation:
     weather: str = ""
     palette: List[str] = field(default_factory=list)
     forbidden: List[str] = field(default_factory=list)
+    landmarks: List[str] = field(default_factory=list)
     line: int = 0
     type: str = ""
     fields: Dict[str, Any] = field(default_factory=dict)
@@ -1440,6 +1445,8 @@ class StudioScriptV1Parser:
                         loc.palette.extend(_split_csv(bullet_text))
                     elif key == "FORBIDDEN":
                         loc.forbidden.append(bullet_text)
+                    elif key == "LANDMARKS":
+                        loc.landmarks.append(bullet_text)
                     elif key in ("FOREGROUND", "MIDGROUND", "BACKGROUND"):
                         attr = key.lower()
                         current = getattr(loc, attr)
@@ -2125,6 +2132,9 @@ class StudioScriptV1Parser:
                             loc.palette = _split_csv(value)
                     elif key == "FORBIDDEN":
                         loc.forbidden = _split_list(value)
+                    elif key == "LANDMARKS":
+                        if value:
+                            loc.landmarks = _split_list(value)
                     elif key == "TYPE":
                         loc.type = value
                     if not value:
@@ -2132,7 +2142,7 @@ class StudioScriptV1Parser:
                             "kind": ("location_list" if key in (
                                 "FEATURES", "DISTINCTIVE_FEATURES", "PALETTE",
                                 "COLOR_PALETTE", "FORBIDDEN", "FOREGROUND",
-                                "MIDGROUND", "BACKGROUND") else "fields"),
+                                "MIDGROUND", "BACKGROUND", "LANDMARKS") else "fields"),
                             "key": key, "fields": loc.fields,
                             "location": loc,
                         }

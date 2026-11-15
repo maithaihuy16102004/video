@@ -38,6 +38,10 @@ COLOR_WORDS: list[tuple[str, str]] = [
     ("màu be", "#c9b18c"), ("be", "#c9b18c"), ("nâu", "#7a4a2b"),
     ("đen", "#222222"), ("đỏ", "#b03a2e"), ("vàng", "#d9a441"),
     ("trắng", "#f3f0e8"), ("xám", "#6b7280"), ("hồng", "#d98a9e"),
+    ("đỏ gạch", "#a84332"), ("xám tro", "#6b7280"), ("xanh lam", "#2b5ea7"),
+    ("xanh lục", "#2e7d4f"), ("tím", "#7a4a8c"), ("cam", "#d97a2b"),
+    ("nâu đậm", "#5a3421"), ("nâu nhạt", "#a67c52"), ("đỏ đậm", "#8c2b21"),
+    ("xanh nhạt", "#7fa8c9"),
 ]
 
 # Estimated seconds of pure action before the line that follows it.

@@ -64,7 +64,8 @@ INTERACTION_HANDS = frozenset({"LEFT", "RIGHT", "BOTH", "NONE"})
 SEMANTIC_ACTION_TYPES = frozenset({
     "HEAD_TILT_DOWN", "BEND_PICK", "TAKE_FROM_POCKET",
     "PICK_FROM_GROUND", "PICK_FROM_SURFACE", "CROUCH",
-    "RECEIVE_PROP", "HAMMER_STRIKE",
+    "RECEIVE_PROP", "HAMMER_STRIKE", "SHIELD",
+    "CRACK", "ACTIVATE", "EMIT",
     # Established compiler verbs, kept as semantic types:
     "WALK", "RUN", "STOP", "TURN", "LOOK_AT", "GIVE", "TAKE",
     "OPEN", "CLOSE", "PUT_AWAY", "TAKE_OUT", "SIT", "STAND",

@@ -160,10 +160,21 @@ def _measure_line(mix: np.ndarray, source: np.ndarray,
         second_peak_ratio=round(second_ratio, 4),
         status="measured")
     # Completeness: the line's tail must be present at the expected
-    # tail position (onset + duration - tail_len).
-    tail_len = min(int(0.5 * SAMPLE_RATE), max(1, len(source) // 3))
-    tail = source[-tail_len:]
-    expected_tail = onset + len(source) / SAMPLE_RATE \
+    # tail position (onset + duration - tail_len). TTS files end with
+    # ~0.3 s of near-silence after the last syllable, so the tail is
+    # the last SPEECH, not the file end: correlating trailing silence
+    # against the mix bed fails complete lines (Zeus round-1
+    # re-render, lines 27/32/33/37 — onsets 0.95+, tails 0.26-0.33,
+    # source tails at -70 dB). Trimming is measured on the SOURCE, so
+    # a mix that really truncates the speech still fails the check.
+    speech_end_sec = _speech_end_sec(source)
+    eff_len = max(1, min(len(source),
+                         int(round(speech_end_sec * SAMPLE_RATE))))
+    eff_source = source[:eff_len]
+    record["source_speech_end_sec"] = round(speech_end_sec, 3)
+    tail_len = min(int(0.5 * SAMPLE_RATE), max(1, len(eff_source) // 3))
+    tail = eff_source[-tail_len:]
+    expected_tail = onset + len(eff_source) / SAMPLE_RATE \
         - tail_len / SAMPLE_RATE
     search_lo = max(0, int((expected_tail - 0.15) * SAMPLE_RATE))
     search_hi = min(len(mix), int(
@@ -201,7 +212,7 @@ def _measure_line(mix: np.ndarray, source: np.ndarray,
         tail_dur = tail_len / SAMPLE_RATE
         candidates = [onset - back
                       for back in (1.0, 2.0, 3.0, 4.0, 5.0)]
-        candidates.append(onset + len(source) / SAMPLE_RATE + 1.0)
+        candidates.append(onset + len(eff_source) / SAMPLE_RATE + 1.0)
         control_at = None
         for cand in candidates:
             if cand < 0:
@@ -243,6 +254,24 @@ def _measure_line(mix: np.ndarray, source: np.ndarray,
                       tail_coefficient=0.0,
                       tail_reason="tail window outside the mix")
     return record
+
+
+def _speech_end_sec(signal: np.ndarray,
+                    silence_db: float = -60.0) -> float:
+    """Last time the RMS envelope exceeds ``silence_db``.
+
+    TTS files trail off into near-silence after the last syllable;
+    the speech end is the last above-threshold envelope frame.
+    Falls back to the full file length when nothing exceeds the
+    threshold (or the signal is too short to measure).
+    """
+    times, db = _rms_envelope(signal)
+    if len(times) == 0:
+        return len(signal) / SAMPLE_RATE
+    above = np.where(db > silence_db)[0]
+    if len(above) == 0:
+        return len(signal) / SAMPLE_RATE
+    return float(times[above[-1]])
 
 
 def _rms_envelope(signal: np.ndarray, window: int = 160,

@@ -77,8 +77,8 @@ from .prop_system import ForbiddenPropTransition, SemanticPropTracker
 from .scene_graph import (
     GraphValidationError, build_scene_graph, validate_or_raise)
 from .product_renderer import (
-    FPS, GROUND_Y, map_character, plan_shots, render_product_video,
-    render_storyboard_stills,
+    CHAR_H, FPS, GROUND_Y, map_character, plan_shots,
+    render_product_video, render_storyboard_stills,
 )
 from .qa_gates import (
     CharacterArtGate, CreativeGate, TechnicalGate, combine, probe_video,
@@ -168,6 +168,17 @@ class ProductJob:
                 if self.unified_timeline else None),
         }
 
+
+def _design_scale_ratio(char: dict) -> float:
+    """Stage-3 record: the body scale the renderer applies for a
+    package character (HEIGHT_RATIO trait, 0.75 for a declared
+    child, 1.0 otherwise). Invalid/non-positive values fall back
+    to 1.0, matching the renderer's char_scales guards."""
+    try:
+        ratio = float(char.get("scale_ratio"))
+    except (TypeError, ValueError):
+        return 1.0
+    return ratio if ratio > 0 else 1.0
 
 def _rms_db(path: Path) -> float | None:
     r = subprocess.run(
@@ -1579,14 +1590,23 @@ def run_product_job(script_text: str, job_dir: Path, *,
                   "no cue records (legacy package)")
 
         # --- 3. Character Design -------------------------------------
+        # The record must describe what the renderer draws: the
+        # design height is CHAR_H scaled by the package's
+        # scale_ratio (HEIGHT_RATIO trait, or 0.75 for a declared
+        # child) at the default camera, before per-shot
+        # perspective. The old record called map_character with
+        # no height, so every character read 783 px — including
+        # a child the renderer draws at 587.
         design = []
         for i, c in enumerate(package["characters"]):
-            ch = map_character(c, i)
+            _ratio = _design_scale_ratio(c)
+            ch = map_character(c, i, height_px=int(round(CHAR_H * _ratio)))
             design.append({"name": c["name"],
                            "template": ch.template,
                            "body_variant": ch.body_variant,
                            "suit": ch.suit,
                            "height_px": int(ch.H),
+                           "scale_ratio": _ratio,
                            "head_ratio": round(ch.head_r * 2 / ch.H, 3)})
         (job_dir / "character_design.json").write_text(json.dumps(
             design, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -2295,6 +2315,33 @@ def run_product_job(script_text: str, job_dir: Path, *,
         except Exception as exc:  # noqa: BLE001 - recorded, never fatal
             job.qa["contact"] = {"error": str(exc)[:300]}
             stage("contact_audit", "failed", str(exc)[:300])
+
+        # --- 13f. Staging-duplication audit (round-6, R2-C1) --------
+        # All-pairs MAD over rendered mid-frames: adjacent pairs,
+        # triplets and non-adjacent repeats the planner's
+        # subject-scoped warning misses. Non-gating audit: the
+        # measurement for the viewpoint-side alternation fix.
+        try:
+            from .staging_duplication_audit import (
+                audit_staging_duplication)
+            staging = audit_staging_duplication(job_dir)
+            staging["timeline_ref"] = dict(_timeline_ref)
+            (job_dir / "staging_duplication_audit.json").write_text(
+                json.dumps(staging, indent=2, ensure_ascii=False),
+                encoding="utf-8")
+            job.qa["staging_duplication"] = {
+                "passed": staging["passed"],
+                "pairs_flagged": staging["pairs_flagged"],
+                "pairs": staging["pairs"][:20],
+                "clusters": staging["clusters"]}
+            stage("staging_duplication_audit",
+                  "done" if staging["passed"] else "failed",
+                  f"{staging['shots_measured']} shots, "
+                  f"{staging['pairs_flagged']} pair(s) under MAD "
+                  f"{staging['threshold']}")
+        except Exception as exc:  # noqa: BLE001 - recorded, never fatal
+            job.qa["staging_duplication"] = {"error": str(exc)[:300]}
+            stage("staging_duplication_audit", "failed", str(exc)[:300])
         if not tech.passed or not verification["passed"]:
             # QA FAILED -> fix & re-render loop (technical failures the
             # pipeline can fix: re-run from the renderer with a fresh

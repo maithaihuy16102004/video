@@ -205,10 +205,12 @@ from .trait_derivation import (
     map_scene_costume_to_garment,
     moustache_style_from_fields,
     parse_duration_seconds,
+    resolve_cast_jacket_colors,
     validate_trait_blocks,
 )
 from .vi_script_parser import (extract_action_cues,
                               extract_action_cues_detailed)
+from .expression_library import parse_character_expressions
 
 # Planner label for V1-routed plans. Distinct from "gemini" (a real
 # Gemini call produced enrichment) and "fallback" (the free-form local
@@ -287,6 +289,19 @@ SCALE_RATIO_MAX = 3.0
 # default and the §15.2 height_px baseline. A scaled character gets
 # round(540 * scale_ratio) instead of the CHARACTER_HEIGHTS cycle.
 SCALE_BASE_HEIGHT_PX = 540
+# Costume fields whose bullet lists carry the outfit text (the
+# single-value char["costume"] attr is empty for bullet-form
+# COSTUME blocks). Order: the base outfit first, variants after.
+_COSTUME_FIELD_KEYS = (
+    "COSTUME", "COSTUME_CIVILIAN", "COSTUME_MILITARY",
+    "COSTUME_ADULT", "COSTUME_CHILD", "COSTUME_KING",
+)
+# A declared child (AGE < 14, no explicit scale) renders at 3/4
+# adult height -- the same scale_ratio mechanism as the Titan
+# scale variant, driven by the script's own AGE field. The head
+# ratio stays locked at 0.34; only the whole-figure height scales.
+CHILD_SCALE_RATIO = 0.75
+CHILD_AGE_MAX = 14
 
 
 def _parse_scale_ratio(value) -> float | None:
@@ -923,6 +938,16 @@ def _adapt_document(doc) -> tuple[dict, dict]:
         appearance = char.get("appearance", "") or ""
         voice_style = char.get("voice_style", "") or ""
         costume_text = char.get("costume", "") or ""
+        if not costume_text.strip():
+            # Bullet-form COSTUME lists live in the verbatim fields,
+            # not in the single-value char["costume"] attr: recover
+            # them, or the colour scan sees an empty costume and every
+            # character falls back to the default jacket colour.
+            costume_text = "; ".join(
+                p for p in (
+                    _field_text(fields, key)
+                    for key in _COSTUME_FIELD_KEYS)
+                if p.strip())
         trait_list = list(char.get("traits") or [])
         gender = _field_text(fields, "GENDER")
         is_narrator = (not first_person["enabled"]
@@ -940,6 +965,15 @@ def _adapt_document(doc) -> tuple[dict, dict]:
                 and not isinstance(raw_scale, bool)
                 and SCALE_RATIO_MIN <= float(raw_scale) <= SCALE_RATIO_MAX):
             scale_value = float(raw_scale)
+        if scale_value is None and not (is_narrator or is_extra):
+            # Declared child, no explicit scale: 3/4 adult height.
+            age_match = re.search(r"\d+", _field_text(fields, "AGE"))
+            if age_match and 1 <= int(age_match.group(0)) < CHILD_AGE_MAX:
+                scale_value = CHILD_SCALE_RATIO
+                v1_notes.append(
+                    f"character {name!r}: AGE {age_match.group(0)} "
+                    f"-> child scale {CHILD_SCALE_RATIO} (no explicit "
+                    f"scale declared; head ratio stays locked)")
         if scale_value is not None and not (is_narrator or is_extra):
             height = int(round(SCALE_BASE_HEIGHT_PX * scale_value))
         else:
@@ -966,6 +1000,13 @@ def _adapt_document(doc) -> tuple[dict, dict]:
                 f"extra character {name!r} excluded from the visible "
                 "cast (kept in v1_characters and trait blocks)")
             continue
+        # A declared SIGNATURE_PROP names the prop this character
+        # habitually carries (e.g. Poseidon's trident). The renderer
+        # seeds such a prop into the owner's hand when no compiled
+        # event ever stages it; every other prop keeps event-only
+        # presence. Stored raw (script token); the renderer matches
+        # it against the prop id and name.
+        signature_prop = _field_text(fields, "SIGNATURE_PROP").strip() or None
         description = " ".join(p for p in (role, appearance) if p).strip()
         cast.append({
             "name": name,
@@ -990,9 +1031,25 @@ def _adapt_document(doc) -> tuple[dict, dict]:
             "body_variant": render_traits["body_variant"],
             "costume": render_traits["costume"],
             "hair_style": render_traits["hair_style"],
+            "hair_color": render_traits["hair_color"],
+            "beard_style": render_traits["beard_style"],
+            "beard_color": render_traits["beard_color"],
             "hat": render_traits["hat"],
+            "hat_color": render_traits["hat_color"],
+            "scarf_color": render_traits["scarf_color"],
+            "apron_color": render_traits["apron_color"],
             "moustache_style": render_traits["moustache_style"],
             "glasses": render_traits["glasses"],
+            "eye_count": render_traits["eye_count"],
+            "signature_prop": signature_prop,
+            # The character's resting face (V1 DEFAULT_EXPRESSION,
+            # verbatim): the renderer falls back to it for
+            # characters with no shot expression or keyframe,
+            # instead of "neutral" for everyone. None when the
+            # script declares none.
+            "default_expression": (
+                _field_text(fields, "DEFAULT_EXPRESSION").strip()
+                or None),
             # Generic visual profile (species-neutral) + its flat
             # feature fields, so map_character reads the contract
             # regardless of which shape it receives.
@@ -1035,12 +1092,37 @@ def _adapt_document(doc) -> tuple[dict, dict]:
                 "body_variant": traits["body_variant"],
                 "costume": traits["costume"],
                 "hair_style": traits["hair_style"],
+                "hair_color": traits.get("hair_color"),
+                "beard_style": traits.get("beard_style", "none"),
+                "beard_color": traits.get("beard_color"),
                 "hat": traits["hat"],
+                "hat_color": traits.get("hat_color"),
+                "scarf_color": traits.get("scarf_color"),
+                "apron_color": traits.get("apron_color"),
                 "moustache_style": traits["moustache_style"],
                 "glasses": traits["glasses"],
+                "eye_count": traits.get("eye_count", 2),
+                "signature_prop": None,
                 "visual_profile": dict(
                     traits.get("visual_profile") or {}),
             })
+
+    # Distinct jacket colours across the cast (round-3 system 1):
+    # script-named colours are kept verbatim; members whose script
+    # names no colour take the next unused palette slot, so two
+    # characters never share the default. Both the entry and its
+    # render_traits are patched -- the renderer reads the entry.
+    _resolved_colors = resolve_cast_jacket_colors(
+        [(c["identity_id"], c["jacket_color"]) for c in cast])
+    for _entry in cast:
+        _new_color = _resolved_colors[_entry["identity_id"]]
+        if _new_color != _entry["jacket_color"]:
+            v1_notes.append(
+                f"character {_entry['name']!r}: no costume colour "
+                f"in the script; assigned palette colour {_new_color} "
+                f"so the cast stays distinct")
+            _entry["jacket_color"] = _new_color
+            _entry["render_traits"]["jacket_color"] = _new_color
 
     # --- Scenes ----------------------------------------------------
     package_scenes: list[dict] = []
@@ -1058,6 +1140,17 @@ def _adapt_document(doc) -> tuple[dict, dict]:
     scene_texts_norm: list[str] = []
     scene_person_norms: list[set[str]] = []
 
+    # Location-based ambience (round 6): GLOBAL_AUDIO
+    # AMBIENCE_MODE: LOCATION_BASED means each scene's bed comes
+    # from its LOCATION block's AMBIENCE trait. The mode value is
+    # free text in the global-audio fields (the parser's
+    # AMBIENCE_MODES enum constrains cue MODE params, not this
+    # field), so it is read verbatim here.
+    _ga_fields = ((data.get("global_audio") or {}).get("fields")
+                  or {})
+    _ambience_mode_location_based = str(
+        _ga_fields.get("AMBIENCE_MODE") or "").strip().upper() \
+        == "LOCATION_BASED"
     for scene_pos, sc in enumerate(scenes_data):
         number = sc.get("number") or (scene_pos + 1)
         loc_block = _resolve_location(locations, sc.get("location_ref"))
@@ -1113,6 +1206,16 @@ def _adapt_document(doc) -> tuple[dict, dict]:
             if isinstance(entry, str):
                 entry = {"character": None, "expression": entry, "line": 0}
             expr_text = str(entry.get("expression", "") or "")
+            # Named multi-character forms ("Cronus suspicious, Rhea
+            # worried") are NOT line expressions: mapping the whole
+            # string to one label and attaching it to every line
+            # would give every speaker the wrong face. The compiler
+            # emits per-character EXPRESSION_HOLD events for these;
+            # the line path owns bare forms only.
+            if entry.get("character") is None and \
+                    parse_character_expressions(
+                        expr_text, char_display, _normalize_name):
+                continue
             expr_name = map_expression_text(expr_text)
             if expr_name is None:
                 expression_unmapped.append({
@@ -1142,6 +1245,14 @@ def _adapt_document(doc) -> tuple[dict, dict]:
         for sh in scene_shots:
             expr_text = _shot_expression_text(sh)
             if not expr_text:
+                continue
+            # Named forms (colon or comma) belong to the compiler's
+            # per-character events, not to spoken lines: attaching
+            # the whole string's single label to the shot's lines
+            # gave the SPEAKER a bystander's expression (Zeus
+            # rendered "angry" from "Zeus amused, Cronus furious").
+            if parse_character_expressions(
+                    expr_text, char_display, _normalize_name):
                 continue
             char_key, expr_part = _parse_expression_prefix(
                 expr_text, char_display)
@@ -1311,6 +1422,36 @@ def _adapt_document(doc) -> tuple[dict, dict]:
         audio_cues.extend(sc.get("audio_cues") or [])
         audio_cues.extend(sc.get("vfx_cues") or [])
         trait_audio_cues.extend(sc.get("audio_cues") or [])
+        # Synthetic location-ambience cue (round 6): one
+        # AMBIENCE cue per scene from the LOCATION block's
+        # AMBIENCE trait, so the existing resolver path
+        # (keyword mapping, scene-span timing, NONE
+        # suppression, dedupe, audit trail) renders the beds.
+        # An explicit AMBIENCE cue in the scene wins; a scene
+        # AMBIENCE: NONE flag suppresses this cue in the
+        # resolver like any other cue. The cue is marked
+        # LOCATION_AMBIENCE so the report shows its origin.
+        if (_ambience_mode_location_based
+                and loc_block is not None):
+            _loc_amb = str(
+                (loc_block.get("fields") or {}).get("AMBIENCE")
+                or "").strip()
+            _has_explicit_amb = any(
+                str(c.get("cue_type", "")).upper() == "AMBIENCE"
+                for c in (sc.get("audio_cues") or []))
+            if (_loc_amb and _loc_amb.upper() != "NONE"
+                    and not _has_explicit_amb):
+                audio_cues.append({
+                    "cue_type": "AMBIENCE", "name": _loc_amb,
+                    "trigger": "", "priority": "", "mode": "",
+                    "intensity": "", "gain_db": None,
+                    "scene_number": number, "shot_id": None,
+                    "line": loc_block.get("line") or 0,
+                    "source_key": "LOCATION_AMBIENCE",
+                    "cue_id": f"LOC_AMB_SC{number:02d}",
+                    "event": "", "cue_type_text": "",
+                    "duration": "", "duration_mode": "",
+                    "duration_seconds": None})
 
         # Action items for section 15.5 directives.
         for action_text_item in (sc.get("actions") or []):
@@ -1559,6 +1700,7 @@ def _adapt_document(doc) -> tuple[dict, dict]:
             weather=_text_value(loc.get("weather")),
             palette=loc.get("palette") or [],
             forbidden=loc.get("forbidden") or [],
+            landmarks=loc.get("landmarks") or [],
             render_traits=traits))
     for pos, scene in enumerate(package_scenes):
         idx = scene_loc_index[pos]
@@ -1822,7 +1964,10 @@ def _apply_enrichment(package: dict, cleaned: dict, model: str,
             cast_entry["voice_hint"] = merged["voice_hint"]
             cast_entry["jacket_color"] = merged["jacket_color"]
             for trait_key in ("template", "body_variant", "costume",
-                              "hair_style", "hat", "moustache_style",
+                              "hair_style", "hair_color", "beard_style",
+                              "beard_color", "hat", "hat_color",
+                              "scarf_color", "apron_color",
+                              "moustache_style",
                               "glasses", "visual_profile"):
                 cast_entry[trait_key] = merged.get(trait_key)
 

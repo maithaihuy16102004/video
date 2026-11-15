@@ -452,6 +452,25 @@ class PropStateMachine:
                 self._add(pid, lift_t, "ATTACHED_TO_HAND",
                           {"event": event, "hand": hand, "actor": actor})
                 held[pid] = {"holder": actor, "hand": hand}
+            elif action == "SHIELD":
+                # Round-6 shield staging: the guard takes the
+                # shield prop with BOTH hands as the guard rises
+                # (the primitive's guard completes at u 0.30) and
+                # holds it through the span. The semantic record
+                # says BOTH, so the PSM hand is "both" regardless
+                # of the event params. Before this the shield prop
+                # never left its rest during a SHIELD beat.
+                grasp_t = start + 0.30 * dur
+                self._add(pid, start, "APPROACHING",
+                          {"event": event, "hand": "both",
+                           "actor": actor})
+                self._add(pid, grasp_t, "GRASPED",
+                          {"event": event, "hand": "both",
+                           "actor": actor})
+                self._add(pid, grasp_t, "ATTACHED_TO_HAND",
+                          {"event": event, "hand": "both",
+                           "actor": actor})
+                held[pid] = {"holder": actor, "hand": "both"}
             elif action == "HOLD_PEN":
                 grasp_t = start + 0.40 * dur
                 ready_t = start + 0.55 * dur
@@ -509,11 +528,13 @@ class PropStateMachine:
                           {"event": event, "hand": hand, "actor": actor})
             elif action == "HAND_OVER":
                 receiver = event.get("target_id")
-                # The receiver's taking hand: the compiler's
+                # The receiver's taking hand(s): the compiler's
                 # receive_hand param (from "tay phải" / "tay trái"
-                # in the shot text), else the historical "l".
+                # / "hai tay" in the shot text), else the
+                # historical "l". "both" transfers to the midpoint
+                # of the receiver's hands (see _hand_pos).
                 receive_hand = params.get("receive_hand", "l")
-                if receive_hand not in ("l", "r"):
+                if receive_hand not in ("l", "r", "both"):
                     receive_hand = "l"
                 self._add(pid, start, "TRANSFERRED",
                           {"event": event, "hand": hand, "actor": actor,
@@ -538,8 +559,9 @@ class PropStateMachine:
                 giver = (held.get(pid) or {}).get("holder")
                 giver_hand = (held.get(pid) or {}).get("hand", "r")
                 receive_hand = params.get("receive_hand", hand)
-                if receive_hand not in ("l", "r"):
-                    receive_hand = hand if hand in ("l", "r") else "l"
+                if receive_hand not in ("l", "r", "both"):
+                    receive_hand = (hand if hand in ("l", "r", "both")
+                                    else "l")
                 if id(event) not in paired_recv:
                     # Unpaired: the transfer window starts here (the
                     # giver is unknown -- transform_at falls back to
@@ -701,7 +723,15 @@ class PropStateMachine:
             nxt = self._next_marker(pid, t)
             grasp_t = nxt[0] if nxt else t
             start_t = marker[0]
-            u = _smooth((t - start_t) / max(grasp_t - start_t, 1e-9))
+            u = (t - start_t) / max(grasp_t - start_t, 1e-9)
+            # Round 8 (R2-A3): the prop holds still for the first
+            # half of the reach -- the hands travel to it -- then
+            # glides to meet the hands in the second half. The old
+            # full-span glide moved the prop from the first frame,
+            # so a stone on a distant surface floated up on its own
+            # before the hands arrived. At the grasp instant u == 1
+            # and the prop is exactly at the hand, matching GRASPED.
+            u = _smooth(max(0.0, (u - 0.5) / 0.5))
             actor_joints = _resolve_joints(joints, meta.get("actor"))
             if actor_joints is None:
                 return (rest_x, rest_y, rest_angle, state, hand)
@@ -727,7 +757,7 @@ class PropStateMachine:
                         state, hand)
             gx, gy = _hand_pos(giver, hand or "r")
             recv_hand = meta.get("receive_hand", "l")
-            if recv_hand not in ("l", "r"):
+            if recv_hand not in ("l", "r", "both"):
                 recv_hand = "l"
             rx, ry = _hand_pos(receiver, recv_hand)
             active_hand = ((hand or "r")
@@ -992,7 +1022,17 @@ def contact_report(event: dict, joints: dict, prop_transforms: dict,
                 entry["reason"] = f"actor {target_id!r} has no joints"
             else:
                 wanted = point.get("target_hand")
-                if wanted in ("l", "r"):
+                if wanted == "both":
+                    # The script names both receiving hands: the
+                    # pair converges on one meeting point, so the
+                    # giver's hand is measured against the pair's
+                    # midpoint, never the nearer hand alone.
+                    _lx, _ly = other["hand_l"]
+                    _rx, _ry = other["hand_r"]
+                    dist = math.hypot(
+                        joint_pos[0] - (_lx + _rx) / 2.0,
+                        joint_pos[1] - (_ly + _ry) / 2.0)
+                elif wanted in ("l", "r"):
                     # The script names the receiving hand: measure
                     # THAT hand only, never the nearer one.
                     other_hand = other["hand_" + wanted]
@@ -1105,7 +1145,7 @@ def sampled_max_jump(samples) -> dict:
 # (diagnostics); this helper FAILS them loudly for proofs and tests.
 
 _GRASP_ACTIONS = frozenset({"PICK_UP", "TAKE_OUT", "HOLD", "HOLD_PEN",
-                            "CARRY"})
+                            "CARRY", "SHIELD"})
 _USE_ACTIONS = frozenset({"WRITE", "SIGN", "OPEN_WALLET", "CLOSE_WALLET"})
 _RELEASE_ACTIONS = frozenset({"PUT_AWAY", "RELEASE"})
 
@@ -1213,6 +1253,8 @@ def _contact_moment_u(action_type: str, event: dict | None = None
         return RECEIVE_REACH_U
     if action_type == "HOLD_PEN":
         return _HOLD_PEN_GRASP_U
+    if action_type == "SHIELD":
+        return 0.30
     if action_type in ("PUT_AWAY", "RELEASE"):
         return PUT_AWAY_RELEASE_U
     if action_type == "HAMMER_STRIKE":
@@ -1550,7 +1592,14 @@ class SemanticPropTracker:
                     sem = "TAKE"  # legacy take: ambiguous source
                 else:
                     continue  # verb with no prop-location semantics
-            if sem == "TAKE":
+            if sem == "TAKE" or sem == "SHIELD":
+                # SHIELD grasps like TAKE: the prop leaves its rest
+                # for the guarding hands when the guard finishes
+                # rising (u 0.30, the primitive's rise fraction).
+                # Before this the tracker left the shield at its
+                # rest through the whole SHIELD beat, so coverage
+                # reported it "never held" while the renderer --
+                # after the round-6 PSM branch -- drew it held.
                 froms = (PropLocation.IN_POCKET.value,
                          PropLocation.ON_SURFACE.value,
                          PropLocation.ON_GROUND.value)
@@ -1559,7 +1608,9 @@ class SemanticPropTracker:
                     has_sem, prev_sem, prev_shot, shot)
                 if from_loc is None:
                     continue
-                switch_t = start + PICK_UP_GRASP_U * dur
+                _grasp_u = 0.30 if sem == "SHIELD" \
+                    else PICK_UP_GRASP_U
+                switch_t = start + _grasp_u * dur
                 loc_changes.append((switch_t, held_loc))
                 holder_changes.append((switch_t, actor))
                 holder = actor
@@ -1610,7 +1661,8 @@ class SemanticPropTracker:
             elif sem in ("HAND_OVER", "GIVE"):
                 recv_hand = params.get("receive_hand") or "l"
                 comp_hand = {"l": PropLocation.HELD_LEFT.value,
-                             "r": PropLocation.HELD_RIGHT.value}.get(
+                             "r": PropLocation.HELD_RIGHT.value,
+                             "both": PropLocation.HELD_BOTH.value}.get(
                                  recv_hand, PropLocation.HELD_LEFT.value)
                 loc_changes.append((start, PropLocation.IN_TRANSIT.value))
                 holder_changes.append((start, None))
@@ -2147,17 +2199,31 @@ def _staff_spec(length=240.0):
                  {"grip": (0.0, 0.0), "tip": (0.0, 0.46 * L)})
 
 
-def _shield_spec(width=110.0, height=140.0):
-    w, h = 0.5 * float(width), 0.5 * float(height)
+def _shield_spec(width=120.0, height=120.0):
+    # Round-7: a ROUND WOODEN shield ("khiên gỗ tròn"), not the old
+    # grey kite. The face is a circle (radius from the smaller dim,
+    # so the shield stays round whatever box it is built in), wood
+    # slot, with a centre boss and two plank seams. The grip is the
+    # centre: the hand holds the shield's middle back, the boss
+    # covers the grip.
+    r = 0.5 * min(float(width), float(height))
+    _chord = math.sqrt(max(r * r - (r / 3.0) ** 2, 0.0))
     parts = [
-        {"op": "polygon", "name": "face", "slot": "metal",
-         "points": [(-w, -h), (w, -h), (w, 0.0), (0.0, h), (-w, 0.0)]},
+        {"op": "polygon", "name": "face", "slot": "wood",
+         "points": _ellipse_points(0.0, 0.0, r, r, n=24)},
+        {"op": "polyline", "name": "seam_left", "slot": "trim",
+         "points": [(-r / 3.0, -_chord), (-r / 3.0, _chord)]},
+        {"op": "polyline", "name": "seam_right", "slot": "trim",
+         "points": [(r / 3.0, -_chord), (r / 3.0, _chord)]},
         {"op": "polygon", "name": "boss", "slot": "trim",
-         "points": _ellipse_points(0.0, -0.1 * float(height),
-                                   0.14 * float(width),
-                                   0.14 * float(width), n=16)},
+         "points": _ellipse_points(0.0, 0.0, 0.32 * r,
+                                   0.32 * r, n=16)},
     ]
-    return _spec("shield", parts, {"grip": (0.0, 0.0)},
+    # Round-7: the grip is the upper strap, a third of the radius
+    # above the centre -- the hand grips the shield's upper third
+    # and the disc hangs over the torso, instead of the disc
+    # centring on the hand and covering the face.
+    return _spec("shield", parts, {"grip": (0.0, -0.33 * r)},
                  attachment_points={"forearm": (0.0, 0.0)})
 
 
@@ -2421,6 +2487,48 @@ PROP_GEOMETRY_BUILDERS = {
     "stone": _stone_spec,
     "boulder": _boulder_spec,
 }
+
+
+# Drawn footprints for semantic geometry kinds (round 1). Every
+# geometry kind used to squeeze into one 76x50 box: a trident spec
+# 110x258px scaled to 0.19x and drew 21x50px with a ~1px shaft --
+# present in telemetry, invisible on screen. Long-handled props get
+# a tall footprint so they read at the scale of the characters
+# holding them; compact kinds keep 76x50 (the bolt reads through its
+# gold fill + glow and stays untouched, as do its verified
+# measurements). The renderer (_draw_prop defaults) and the contact
+# audit (_spec_shapes) share this table: one source of truth for the
+# drawn size, so audit geometry never desyncs from the frame.
+DEFAULT_GEOMETRY_FOOTPRINT = (76.0, 50.0)
+# Round-6 (shield staging): _draw_geometry_prop scales each spec
+# UNIFORMLY to its footprint (scale = min(w/bw, h/bh)), so a tall or
+# square kind squeezed into the default 76x50 box shrinks to
+# invisibility -- measured: bolt 24x50, chain 8x50, shield 39x50,
+# stone 49x50, boulder 47x50. Every geometry kind whose native
+# aspect differs materially from 76:50 gets an aspect-preserving
+# footprint here, sized so the drawn prop reads at production
+# scale. prop_bottom_offset derives from this same table, so rest
+# snapping follows automatically; the audit's _spec_shapes shares
+# it too. Wide kinds (crown, hat, ring) keep the default: they
+# already draw at full width.
+GEOMETRY_FOOTPRINTS = {
+    "trident": (76.0, 170.0),
+    "staff": (76.0, 170.0),
+    "sword": (76.0, 170.0),
+    "hammer": (110.0, 110.0),
+    "bolt": (76.0, 156.0),
+    "shield": (76.0, 76.0),
+    "helmet": (76.0, 57.0),
+    "chain": (30.0, 170.0),
+    "stone": (76.0, 76.0),
+    "boulder": (96.0, 100.0),
+}
+
+
+def geometry_footprint(kind):
+    """(width, height) footprint a geometry kind draws at by default."""
+    return GEOMETRY_FOOTPRINTS.get(str(kind or "").strip().lower(),
+                                    DEFAULT_GEOMETRY_FOOTPRINT)
 
 
 def geometry_for_prop(prop, *, H=None, state=None, **overrides):

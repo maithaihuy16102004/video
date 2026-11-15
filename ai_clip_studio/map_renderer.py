@@ -238,6 +238,49 @@ def _auto_framing(features, pad_deg: float = 1.5) -> dict:
             "lat_min": min(lats) - pad_deg, "lat_max": max(lats) + pad_deg}
 
 
+def _feature_name(feat: dict) -> str:
+    props = feat.get("properties") or {}
+    return str(props.get("NAME", props.get("name", "")))
+
+
+def _highlight_framing(features, highlight, base, zoom: float = 0.6):
+    """A tighter framing centred on the highlighted regions.
+
+    Returns ``(framing, matched)``. The window is ``zoom`` times
+    the base framing's span, centred on the mean of the matched
+    features' largest-ring centroids, clamped inside the base
+    framing. Centroids (not polygon bboxes) are used deliberately:
+    a transcontinental feature's rings span the globe, so a bbox
+    fit goes wider than the full framing instead of tighter. With
+    no matched feature the base framing is returned, ``matched``
+    False. Name matching mirrors the draw loop (properties
+    NAME/name, lowercased)."""
+    centers = []
+    for feat in features:
+        if _feature_name(feat).lower() not in highlight:
+            continue
+        rings = [ring for ring, _ in _iter_rings(
+            feat.get("geometry") or {}) if ring]
+        if not rings:
+            continue
+        clon, clat = _polygon_centroid(max(rings, key=len))
+        centers.append((
+            min(max(clon, base["lon_min"]), base["lon_max"]),
+            min(max(clat, base["lat_min"]), base["lat_max"])))
+    if not centers:
+        return dict(base), False
+    cx = sum(c[0] for c in centers) / len(centers)
+    cy = sum(c[1] for c in centers) / len(centers)
+    w = (base["lon_max"] - base["lon_min"]) * zoom
+    h = (base["lat_max"] - base["lat_min"]) * zoom
+    lon_min = min(max(cx - w / 2, base["lon_min"]),
+                  base["lon_max"] - w)
+    lat_min = min(max(cy - h / 2, base["lat_min"]),
+                  base["lat_max"] - h)
+    return {"lon_min": lon_min, "lon_max": lon_min + w,
+            "lat_min": lat_min, "lat_max": lat_min + h}, True
+
+
 def parse_svg_paths(svg_paths) -> list[dict]:
     """Parse minimal SVG path data (M/L/Z, absolute coords) into
     polygon features. Coordinates are taken as (lon, lat) pairs.
@@ -405,15 +448,6 @@ def render_map(map_spec: dict):
     if not features:
         raise MapSpecError("no polygon features to draw")
 
-    framing = spec.get("framing") or "auto"
-    if framing == "auto":
-        framing = _auto_framing(features)
-    else:
-        framing = dict(framing)
-        for key in ("lon_min", "lon_max", "lat_min", "lat_max"):
-            if key not in framing:
-                raise MapSpecError(f"framing missing {key}")
-
     highlight = {}
     for entry in spec.get("highlight") or []:
         name = entry.get("region", "")
@@ -421,6 +455,39 @@ def render_map(map_spec: dict):
             "color": tuple(entry.get("color", (232, 180, 90))),
             "label": entry.get("label", name),
         }
+
+    # Framing: explicit bounds win; "auto" fits all features;
+    # "highlights" (RicksClips loop round 1, D3) centres a tighter
+    # window on the highlighted regions so consecutive map shots
+    # can alternate full/tight framings by cut. The tight window
+    # derives from ``base_framing`` (the framing that would
+    # otherwise apply) or the auto framing when none is given.
+    # With no matching highlight the base framing applies and the
+    # report says so.
+    requested = spec.get("framing") or "auto"
+    framing_mode = "explicit"
+    if requested == "highlights":
+        base = spec.get("base_framing")
+        if base is None:
+            base = _auto_framing(features)
+            base_mode = "auto"
+        else:
+            base = dict(base)
+            base_mode = "explicit"
+        framing, _matched = _highlight_framing(features, highlight,
+                                               base)
+        if _matched:
+            framing_mode = "highlights"
+        else:
+            framing, framing_mode = base, base_mode
+    elif requested == "auto":
+        framing = _auto_framing(features)
+        framing_mode = "auto"
+    else:
+        framing = dict(requested)
+        for key in ("lon_min", "lon_max", "lat_min", "lat_max"):
+            if key not in framing:
+                raise MapSpecError(f"framing missing {key}")
 
     img = Image.new("RGB", size, water)
     draw = ImageDraw.Draw(img)
@@ -551,6 +618,8 @@ def render_map(map_spec: dict):
     report = {
         "mode": mode,
         "year": spec.get("year"),
+        "framing": dict(framing),
+        "framing_mode": framing_mode,
         "dataset": provenance,
         "boundary_note": boundary_note,
         "attribution": attribution,

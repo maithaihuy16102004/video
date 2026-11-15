@@ -39,8 +39,13 @@ from PIL import Image, ImageDraw, ImageEnhance
 PX_PER_M = 72
 _MAX_TEX_SIDE = 1024
 # Faces smaller than this on screen keep the flat fill: texture
-# detail cannot read below ~40 px and the flat path is cheaper.
-MIN_FACE_PX = 40
+# detail cannot read below ~24 px and the flat path is cheaper.
+# (Lowered from 40 in round 2 after an A/B on real backgrounds:
+# 24 px faces gain readable surface detail -- column capitals,
+# chimneys, sidewalk seams -- with no visible noise in wide
+# shots; 16 px added almost nothing more. Faces below 24 px are
+# mostly tiny trim that no texture can rescue.)
+MIN_FACE_PX = 24
 
 __all__ = [
     "PX_PER_M",
@@ -51,6 +56,8 @@ __all__ = [
     "paint_plaster",
     "paint_brick",
     "paint_stone",
+    "paint_rock",
+    "paint_sand",
     "paint_roof",
     "paint_cobble",
     "paint_grass",
@@ -263,9 +270,24 @@ def paint_plaster(wm: float, hm: float, wall_color, seed: int,
     img = Image.new("RGB", (w, h), base)
     overlay = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     odraw = ImageDraw.Draw(overlay)
-    _blotches(odraw, rng, w, h, base, max(6, w * h // 6000), 15, 90, 16)
+    # Round 11: larger, stronger blotches (the old ones washed out
+    # at shot distance) plus a vertical light falloff -- the top
+    # of a wall catches the light, the bottom sits in grime -- so
+    # the wall reads as a lit surface, not a flat fill.
+    _blotches(odraw, rng, w, h, base, max(6, w * h // 6000), 25, 140,
+              28)
     _cracks(odraw, rng, w, h, darken(base, 0.7),
             rng.randint(2, 5))
+    for yy in range(h):
+        t = yy / max(1, h - 1)
+        if t < 0.35:
+            a = int(round(16 * (1.0 - t / 0.35)))
+            if a:
+                odraw.line([(0, yy), (w, yy)], fill=(255, 255, 255, a))
+        elif t > 0.60:
+            a = int(round(24 * (t - 0.60) / 0.40))
+            if a:
+                odraw.line([(0, yy), (w, yy)], fill=(0, 0, 0, a))
     img = Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB")
     draw = ImageDraw.Draw(img)
     # Fine grain, drawn DIRECTLY (alpha would dilute it ~7x): without
@@ -357,7 +379,15 @@ def _paint_facade_windows(draw, rng, w, h, px_per_m, wm, hm,
 
 def paint_brick(wm: float, hm: float, brick_color, seed: int,
                 px_per_m: int = PX_PER_M, mortar_color=None) -> Image.Image:
-    """Brick courses with per-brick jitter and soot near the top."""
+    """Brick courses with per-brick jitter and soot near the top.
+
+    Round 11: the courses also carry slow tonal weathering -- a
+    per-row value band that random-walks down the wall, so whole
+    courses read lighter/darker at full-frame distance instead of
+    one uniform field -- plus stronger per-brick jitter and rare
+    patched bricks (darker, greyer repairs). The mean stays near
+    the base colour: the walk is symmetric and clamped.
+    """
     rng = random.Random(seed)
     base = _as_rgb(brick_color)
     mortar = (_as_rgb(mortar_color) if mortar_color else darken(base, 0.72))
@@ -369,13 +399,21 @@ def paint_brick(wm: float, hm: float, brick_color, seed: int,
     joint = max(1.0, 0.01 * px_per_m)
     row = 0
     y = 0.0
+    band = 1.0
     while y < h:
+        band = max(0.86, min(1.08, band + rng.uniform(-0.05, 0.05)))
         offset = (bw / 2.0) if row % 2 else 0.0
         x = -offset
         while x < w:
-            col = jit_color(rng, base, dv=0.12, dh=4, ds=0.12)
-            if rng.random() < 0.08:
-                col = darken(col, 0.75)
+            roll = rng.random()
+            if roll < 0.03:
+                col = jit_color(rng, darken(base, 0.62), dv=0.08,
+                                dh=2, ds=0.25)
+            else:
+                col = jit_color(rng, base, dv=0.18, dh=5, ds=0.14)
+                if roll < 0.11:
+                    col = darken(col, 0.75)
+            col = darken(col, band)
             draw.rectangle([x + joint / 2, y + joint / 2,
                             x + bw - joint / 2, y + bh - joint / 2],
                            fill=col)
@@ -398,7 +436,13 @@ def paint_brick(wm: float, hm: float, brick_color, seed: int,
 
 def paint_stone(wm: float, hm: float, stone_color, seed: int,
                 px_per_m: int = PX_PER_M, mortar_color=None) -> Image.Image:
-    """Ashlar stone courses: bevelled blocks, speckles, cracks, grime."""
+    """Ashlar stone courses: bevelled blocks, speckles, cracks, grime.
+
+    Round 11: like brick, the courses carry slow tonal weathering
+    (a per-row value band that random-walks down the wall) plus
+    stronger per-block jitter and occasional dark blocks, so stone
+    walls and floors stop reading as one uniform field.
+    """
     rng = random.Random(seed)
     base = _as_rgb(stone_color)
     mortar = (_as_rgb(mortar_color) if mortar_color else darken(base, 0.78))
@@ -408,12 +452,17 @@ def paint_stone(wm: float, hm: float, stone_color, seed: int,
     sx = w / max(1.0, wm * px_per_m)
     sy = h / max(1.0, hm * px_per_m)
     y = 0.0
+    band = 1.0
     while y < h:
+        band = max(0.86, min(1.08, band + rng.uniform(-0.05, 0.05)))
         row_h = rng.uniform(0.35, 0.55) * px_per_m * sy
         x = -rng.uniform(0, 0.6) * px_per_m * sx
         while x < w:
             block_w = rng.uniform(0.8, 1.6) * px_per_m * sx
-            col = jit_color(rng, base, dv=0.08, dh=3, ds=0.10)
+            col = jit_color(rng, base, dv=0.14, dh=3, ds=0.10)
+            if rng.random() < 0.05:
+                col = darken(col, 0.72)
+            col = darken(col, band)
             x0, y0 = x + 2, y + 2
             x1, y1 = min(w, x + block_w - 2), min(h, y + row_h - 2)
             if x1 <= x0 or y1 <= y0:
@@ -441,6 +490,100 @@ def paint_stone(wm: float, hm: float, stone_color, seed: int,
         col = darken(base, 0.85 - 0.1 * t)
         draw.line([(0, h - grime_h + i), (w, h - grime_h + i)],
                   fill=col)
+    return img
+
+
+def paint_rock(wm: float, hm: float, rock_color, seed: int,
+               px_per_m: int = PX_PER_M) -> Image.Image:
+    """Uncut rock: angular facets, blotches, cracks, speckle. Unlike
+    paint_stone (dressed ashlar courses), rock has NO regular block
+    grid -- large jittered facets with shaded edges read as a
+    fractured face, which is what cave walls and boulders are."""
+    rng = random.Random(seed)
+    base = _as_rgb(rock_color)
+    w, h = _tex_size(wm, hm, px_per_m)
+    img = Image.new("RGB", (w, h), darken(base, 0.85))
+    draw = ImageDraw.Draw(img)
+    # Facet grid: 3-5 columns, 2-4 rows of jittered quads. Each
+    # facet gets its own jittered shade, a light top/left edge and
+    # a dark bottom/right edge, so the face reads as fractured
+    # planes instead of one flat slab.
+    cols = max(2, min(5, int(round(wm * 0.8))))
+    rows = max(2, min(4, int(round(hm * 0.8))))
+    xs = [0.0]
+    for _ in range(cols - 1):
+        xs.append(xs[-1] + w / cols + rng.uniform(-w * 0.06, w * 0.06))
+    xs.append(float(w))
+    ys = [0.0]
+    for _ in range(rows - 1):
+        ys.append(ys[-1] + h / rows + rng.uniform(-h * 0.06, h * 0.06))
+    ys.append(float(h))
+    for ri in range(rows):
+        for ci in range(cols):
+            jx = lambda v: v + rng.uniform(-4, 4)  # noqa: E731
+            jy = lambda v: v + rng.uniform(-4, 4)  # noqa: E731
+            quad = [(jx(xs[ci]), jy(ys[ri])),
+                    (jx(xs[ci + 1]), jy(ys[ri])),
+                    (jx(xs[ci + 1]), jy(ys[ri + 1])),
+                    (jx(xs[ci]), jy(ys[ri + 1]))]
+            col = jit_color(rng, base, dv=0.22, dh=3, ds=0.12)
+            draw.polygon(quad, fill=col)
+            draw.line([quad[0], quad[1]], fill=darken(col, 1.35),
+                      width=2)
+            draw.line([quad[0], quad[3]], fill=darken(col, 1.28),
+                      width=2)
+            draw.line([quad[2], quad[3]], fill=darken(col, 0.55),
+                      width=2)
+            draw.line([quad[1], quad[2]], fill=darken(col, 0.62),
+                      width=2)
+    overlay = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    odraw = ImageDraw.Draw(overlay)
+    _blotches(odraw, rng, w, h, base, max(6, w * h // 8000), 20, 110,
+              18, dv=0.16)
+    _cracks(odraw, rng, w, h, darken(base, 0.55), rng.randint(2, 5))
+    for _ in range(400):
+        odraw.point((rng.randint(0, w - 1), rng.randint(0, h - 1)),
+                    fill=darken(base, 0.6) + (26,))
+    img = Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB")
+    return img
+
+
+def paint_sand(wm: float, hm: float, sand_color, seed: int,
+               px_per_m: int = PX_PER_M) -> Image.Image:
+    """Sand / canvas sack surface: vertical relief shading, fine
+    grain, soft blotches and one fold seam near the top edge. The
+    shading (light top, dark bottom) gives each stacked sandbag a
+    rounded read that its flat fill cannot; the seam is the tied
+    fold of the sack. Grain is drawn directly (alpha would dilute
+    it), as in paint_plaster."""
+    rng = random.Random(seed)
+    base = _as_rgb(sand_color)
+    w, h = _tex_size(wm, hm, px_per_m)
+    img = Image.new("RGB", (w, h), base)
+    draw = ImageDraw.Draw(img)
+    # Relief shading: light at the top, dark at the bottom.
+    for yy in range(h):
+        t = yy / max(1, h - 1)
+        draw.line([(0, yy), (w, yy)],
+                  fill=darken(base, 1.07 - 0.20 * t))
+    overlay = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    odraw = ImageDraw.Draw(overlay)
+    _blotches(odraw, rng, w, h, base, max(4, w * h // 9000), 8, 40,
+              14, dv=0.10)
+    img = Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB")
+    draw = ImageDraw.Draw(img)
+    for _ in range(max(40, w * h // 12)):
+        gx = rng.randint(0, w - 1)
+        gy = rng.randint(0, h - 1)
+        gs = rng.randint(1, 2)
+        draw.rectangle([gx, gy, gx + gs, gy + gs],
+                       fill=jit_color(rng, base, dv=0.12))
+    # Fold seam near the top edge (the tied end of the sack).
+    if h >= 12:
+        sy = max(2, int(round(h * 0.18)))
+        draw.line([(0, sy), (w, sy)], fill=darken(base, 0.78), width=1)
+        draw.line([(0, sy - 1), (w, sy - 1)], fill=darken(base, 1.10),
+                  width=1)
     return img
 
 
@@ -506,7 +649,17 @@ def paint_cobble(wm: float, hm: float, stone_color, seed: int,
 
 def paint_grass(wm: float, hm: float, base_color, seed: int,
                 px_per_m: int = PX_PER_M) -> Image.Image:
-    """Grass: blotches + tufts + sparse flowers (ground painter)."""
+    """Grass: blotches + tufts + sparse flowers (ground painter).
+
+    Round 11: large clump blotches (mown/unmown tonal patches)
+    plus subtle horizontal row striping -- in texture space the
+    bands become perspective rows on the ground plane, so fields
+    stop reading as flat planes with speckle.
+
+    Round 13: the rows read as CROP rows -- stronger modulation
+    plus tufts planted along the row centres, so a field shows
+    vegetation structure instead of uniform speckle.
+    """
     rng = random.Random(seed)
     base = _as_rgb(base_color)
     w, h = _tex_size(wm, hm, px_per_m)
@@ -515,9 +668,45 @@ def paint_grass(wm: float, hm: float, base_color, seed: int,
     odraw = ImageDraw.Draw(overlay)
     _blotches(odraw, rng, w, h, base, max(8, w * h // 4000), 10, 50, 26,
               dv=0.16)
+    _blotches(odraw, rng, w, h, base, max(6, w * h // 9000), 40, 110,
+              20, dv=0.20)
     img = Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB")
     draw = ImageDraw.Draw(img)
-    for _ in range(max(20, w * h // 150)):
+    band_h = max(8, h // 12)
+    # Smooth sinusoidal row modulation: hard alternating bands
+    # left visible stripe edges on light fields. The alpha peaks
+    # at odd-band centres and falls to zero at even-band centres,
+    # so the rows roll instead of stepping.
+    row_overlay = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    rdraw = ImageDraw.Draw(row_overlay)
+    # Round 14: alpha 16 -> 24. The R13 rows measured present
+    # (row-centre std 3.95 vs 2.88 between rows) but read faint
+    # at full frame; the stronger modulation keeps the roll
+    # (cosine falloff, no hard stripe edges) while the rows
+    # survive ground-plane perspective.
+    for yy in range(h):
+        alpha = 24.0 * (1.0 + math.cos(
+            math.pi * (yy - 1.5 * band_h) / band_h))
+        if alpha >= 0.5:
+            rdraw.line([(0, yy), (w, yy)], fill=(0, 0, 0, int(alpha)))
+    img = Image.alpha_composite(img.convert("RGBA"),
+                                row_overlay).convert("RGB")
+    draw = ImageDraw.Draw(img)
+    # Crop rows: tufts planted along the odd-band centres (the
+    # dark row lines), spaced ~16 px with jitter, so the rows
+    # read as planted lines at ground-plane distance. Half the
+    # tufts stay scattered for naturalism.
+    for band in range(1, h // band_h, 2):
+        cy = band * band_h + band_h // 2
+        for x in range(8, w, 16):
+            tx = x + rng.randint(-4, 4)
+            ty = cy + rng.randint(-3, 3)
+            col = jit_color(rng, base, dv=0.18, dh=8, ds=0.2)
+            ln = rng.randint(2, 6)
+            draw.line([(tx, ty),
+                       (tx + rng.randint(-2, 2), ty - ln)],
+                      fill=col, width=1)
+    for _ in range(max(10, w * h // 300)):
         x = rng.randint(0, w - 1)
         y = rng.randint(0, h - 1)
         col = jit_color(rng, base, dv=0.18, dh=8, ds=0.2)
@@ -604,14 +793,39 @@ def texture_for_material(material: str, base_color, wm: float, hm: float,
     if material == "plaster":
         img = paint_plaster(wm, hm, base_color, seed, px_per_m,
                             windows=False)
+    elif material == "whitewash":
+        # Whitewash IS plaster (lime-washed wall): same painter,
+        # same windows=False contract.
+        img = paint_plaster(wm, hm, base_color, seed, px_per_m,
+                            windows=False)
     elif material == "brick":
         img = paint_brick(wm, hm, base_color, seed, px_per_m)
     elif material in ("stone", "marble"):
         img = paint_stone(wm, hm, base_color, seed, px_per_m)
+    elif material == "rock":
+        img = paint_rock(wm, hm, base_color, seed, px_per_m)
+    elif material == "sand":
+        img = paint_sand(wm, hm, base_color, seed, px_per_m)
     elif material == "roof_tile":
         img = paint_roof(wm, hm, base_color, seed, px_per_m)
     elif material == "wood":
         img = paint_planks(wm, hm, base_color, seed, px_per_m)
+    elif material == "grass":
+        # Round 9: field boxes kept the flat fill because grass
+        # had no face texture -- two giant flat-colour voids in
+        # every countryside establishing shot. paint_grass
+        # (blotches + tufts + sparse flowers) already existed as
+        # a ground painter; faces get it now. Only the field
+        # boxes carry material "grass".
+        img = paint_grass(wm, hm, base_color, seed, px_per_m)
+    elif material == "packed_earth":
+        # Round 10: the dirt road kept the flat fill for the
+        # same reason -- a flat tan strip down every countryside
+        # establishing shot. The ground painter for packed_earth
+        # is plaster; faces get the same mottle so road and
+        # verge agree.
+        img = paint_plaster(wm, hm, base_color, seed, px_per_m,
+                            windows=False)
     else:
         return None
     _TEXTURE_CACHE[key] = img
@@ -622,6 +836,7 @@ def texture_for_material(material: str, base_color, wm: float, hm: float,
 # takes its palette from the ground colour, so the ground stays
 # palette-driven; kinds with no painter keep the gradient fill.
 _GROUND_PAINTERS = {
+    "cave_rock": paint_rock,
     "cobblestone": paint_cobble,
     "grass": paint_grass,
     "forest_floor": paint_grass,
@@ -688,15 +903,54 @@ def _solve_linear(matrix, vector):
     return [aug[i][n] / aug[i][i] for i in range(n)]
 
 
-def _perspective_coeffs(quad, tex_size):
+# Edge-replication pad for perspective-mapped textures (round-6
+# seam fix): PIL's PERSPECTIVE transform samples outside the
+# texture at quad edges and fills out-of-bounds samples with
+# black, so every textured quad carried a dark fringe along its
+# edges -- the "dotted diagonal seam" on ground bands (each band
+# and each glow strip is its own quad, so the fringes tiled into
+# visible lines). Padding the texture with replicated edge
+# pixels gives the BICUBIC kernel real pixels to sample.
+_EDGE_PAD = 3
+
+
+def _pad_texture_edges(texture: Image.Image, pad: int = _EDGE_PAD
+                       ) -> Image.Image:
+    """``texture`` with ``pad`` replicated edge pixels on every
+    side (corners replicate the corner pixels). The original
+    texture occupies (pad, pad)..(pad+w, pad+h)."""
+    w, h = texture.size
+    padded = Image.new(texture.mode, (w + 2 * pad, h + 2 * pad))
+    padded.paste(texture, (pad, pad))
+    padded.paste(texture.crop((0, 0, 1, h)).resize((pad, h)),
+                 (0, pad))
+    padded.paste(texture.crop((w - 1, 0, w, h)).resize((pad, h)),
+                 (w + pad, pad))
+    padded.paste(texture.crop((0, 0, w, 1)).resize((w, pad)),
+                 (pad, 0))
+    padded.paste(texture.crop((0, h - 1, w, h)).resize((w, pad)),
+                 (pad, h + pad))
+    for cx, cy in ((0, 0), (w + pad, 0),
+                   (0, h + pad), (w + pad, h + pad)):
+        px = 0 if cx == 0 else w - 1
+        py = 0 if cy == 0 else h - 1
+        padded.paste(texture.getpixel((px, py)),
+                     (cx, cy, cx + pad, cy + pad))
+    return padded
+
+
+def _perspective_coeffs(quad, tex_size, origin=(0.0, 0.0)):
     """PIL PERSPECTIVE coefficients mapping target ``quad`` pixels
     to texture pixels. ``quad`` winding must be the consistent
     face loop (bottom-left, top-left, top-right, bottom-right in
     the face's local frame) produced by the box/gable projectors;
-    the texture is mapped upright onto that loop."""
+    the texture is mapped upright onto that loop. ``origin`` is
+    the texture rect's top-left inside the (possibly padded)
+    source image; (0, 0) reproduces the exact legacy mapping."""
     tw, th = tex_size
-    src = [(0.0, float(th)), (0.0, 0.0), (float(tw), 0.0),
-           (float(tw), float(th))]
+    ox, oy = float(origin[0]), float(origin[1])
+    src = [(ox, oy + float(th)), (ox, oy), (ox + float(tw), oy),
+           (ox + float(tw), oy + float(th))]
     matrix = []
     vector = []
     for (x, y), (u, v) in zip(quad, src):
@@ -750,11 +1004,18 @@ def paste_textured_quad(img: Image.Image, quad, texture: Image.Image,
     if _is_axis_rect(local, w, h):
         patch = texture.resize((w, h), Image.LANCZOS)
     else:
-        coeffs = _perspective_coeffs(local, texture.size)
+        # Edge-padded source: the BICUBIC kernel at quad edges
+        # samples replicated edge pixels instead of black (the
+        # seam fix -- see _EDGE_PAD). The quad maps onto the
+        # padded texture's interior rect, so the mapping is
+        # unchanged apart from the fringe removal.
+        padded = _pad_texture_edges(texture)
+        coeffs = _perspective_coeffs(
+            local, texture.size, origin=(_EDGE_PAD, _EDGE_PAD))
         if coeffs is None:
             return
-        patch = texture.transform((w, h), Image.PERSPECTIVE, coeffs,
-                                  Image.BICUBIC)
+        patch = padded.transform((w, h), Image.PERSPECTIVE, coeffs,
+                                 Image.BICUBIC)
     irr = max(0.0, min(1.0, float(irradiance)))
     if irr < 1.0:
         patch = ImageEnhance.Brightness(patch).enhance(irr)

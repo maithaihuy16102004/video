@@ -47,6 +47,7 @@ from __future__ import annotations
 
 import json
 import math
+import zlib
 import multiprocessing as mp
 import random
 import re
@@ -65,11 +66,18 @@ from .animation.landmarks import landmark_boxes
 from .animation.locomotion import footfall_times
 from .animation.scene_packages import register_scene_package
 from .animation.primitives import (
+    HAMMER_CYCLE_STRIKE_U,
     PRIMITIVES, bend_pick, breathe, carry_bag, close_wallet, cover_face,
-    give_to, hand_over, head_tilt, hold_pen, idle, kneel_pick, look_at_point,
-    nod, open_wallet, pen_tip_position, pick_up, point_at, put_away,
+    crouch, give_to, hammer_cycles, hammer_grip_angle,
+    hammer_head_position, hammer_strike, hammer_strike_times,
+    hand_over, head_tilt, hold_pen, idle,
+    kneel_pick, look_at_point,
+    nod, open_wallet, pen_tip_position, pick_up, place_on_surface,
+    point_at, present_prop,
+    put_away,
     raise_hand, reach_to,
-    react_event, run_to, shrug, sign_document, sit_at_desk, sit_down,
+    react_event, receive_prop, run_to, shield, shrug, sign_document,
+    sit_at_desk, sit_down,
     stand_from_chair, stand_up, standing, turn_to, walk_mud, walk_to, wave,
     write_on_paper,
 )
@@ -78,7 +86,9 @@ from .animation.rig import (
     check_bone_lengths, lerp, smoothstep,
 )
 from .expression_library import (
-    blink_envelope, gaze_for_target, interpret as interpret_expression,
+    blend as blend_expressions_lib,
+    blink_envelope, blink_times_for, gaze_for_target, gaze_wander,
+    interpret as interpret_expression,
     interpret_params as interpret_expression_params,
     speech_mouth_envelope,
 )
@@ -91,19 +101,32 @@ from .camera_planner import (
     build_camera_accounting,
     resolve_viewpoint_angle, static_directive_for_shot,
     validation_for_camera, viewpoint_for_shot,
+    ESTABLISHING_MAX_ELEV_DEG, elevation_for_angle,
 )
 from .renderer25d.camera import PerspectiveCamera
 from .renderer25d.render import render_boxes_layer, render_frame
 from .renderer25d.scene import Box3D, CharacterAnchor, Scene25D
-from .lighting import (MATERIAL_CATALOG, light_for, paint_energy_glow,
-                       shadow_ellipse_spec)
+from .lighting import (MATERIAL_CATALOG, cast_shadow_spec, light_for,
+                       paint_energy_glow,
+                       paint_energy_glow_excluding, paint_light_pool,
+                       rig_for, shadow_ellipse_spec)
+from .effects import (
+    BURST_TYPES, REACTION_GLOW_COLOR, REACTION_GLOW_RADIUS_PX,
+    REACTION_PAINT_FLOOR, burst_color_radius, burst_envelope,
+    burst_record, crack_lines, names_set_piece, strike_reaction)
 from .environment_v2 import (
-    build_environment, fit_foreground_to_frustum, render_environment,
-    select_archetype, to_box_dicts,
+    _DEBRIS_LIFETIME, _ENCLOSED_ARCHETYPES, _FLICKER_KINDS,
+    _SPARK_BURST_LIFETIME,
+    _draw_flames, _draw_sparks,
+    build_environment,
+    clear_foreground_from_subjects,
+    fit_foreground_to_frustum,
+    render_environment, select_archetype, to_box_dicts,
 )
 from .map_renderer import MapSpecError, render_map
 from .prop_system import (
-    PropStateMachine, SemanticPropTracker, geometry_for_prop)
+    PropStateMachine, SemanticPropTracker, geometry_for_prop,
+    geometry_footprint)
 from .semantic_contracts import PropLocation
 from .planner_fallback import ACTION_LEAD_SECONDS
 from .subtitles import (
@@ -130,9 +153,58 @@ INK_RGB = (20, 34, 43)
 
 SHOT_SCALE = {
     "establishing": 1.0, "medium": 1.6, "close_up": 2.6,
-    "reaction": 2.6, "object_insert": 3.4, "tracking": 1.6,
+    "reaction": 2.6, "object_insert": 5.0, "tracking": 1.6,
     "medium_close_up": 1.6, "graphic_insert": 1.0,
 }
+
+# Map-shot subtitle lift (RicksClips loop round 1, D4): map_renderer
+# burns the CC BY attribution at H-104 (22 px font) and the boundary
+# note at H-40, while subtitles end at H-40 by default -- so they
+# cover both. Map shots lift the subtitle block 80 px: its bottom
+# clears the attribution band by 16 px.
+_MAP_SUBTITLE_LIFT_PX = 80.0
+
+# Anchor tiers (RicksClips loop round 1, D1): a head-only anchor
+# crops hand actions out of the frame (the Ep1 opening: a 2.6x
+# close_up showed only a giant head while the wallet action played
+# below the crop). Shots staging hand-level interactions anchor
+# head -> waist; shots staging ground-level actions anchor the full
+# body. The safe_frame ladder steps the scale down until the anchor
+# fits; the shot TYPE is unchanged. Compiled verbs decide; legacy
+# cue names are the fallback when the shot has no compiled events.
+_ANCHOR_HAND_VERBS = frozenset((
+    "TAKE_OUT", "TAKE_FROM_POCKET", "TAKE", "OPEN", "CLOSE",
+    "OPEN_WALLET", "CLOSE_WALLET", "GIVE", "HAND_OVER",
+    "RECEIVE_PROP", "HOLD", "HOLD_PEN", "CARRY", "PUT_AWAY",
+    "RELEASE", "RELEASE_PROP", "PLACE_ON_SURFACE", "HAMMER_STRIKE",
+    "POINT", "RAISE_HAND", "SIGN", "WRITE", "REACH", "GRAB",
+    "PUSH", "PULL", "WAVE"))
+_ANCHOR_GROUND_VERBS = frozenset((
+    "PICK_FROM_GROUND", "BEND_PICK", "PICK_UP", "KNEEL_PICK",
+    "KNEEL", "CROUCH", "DROP"))
+_ANCHOR_HAND_CUES = frozenset((
+    "give", "take", "put_away", "hold", "carry", "open", "close",
+    "receive", "hand_over", "point", "hammer", "write", "sign",
+    "raise_hand", "wave", "reach", "grab", "push", "pull"))
+_ANCHOR_GROUND_CUES = frozenset((
+    "bend_pick", "pick_up", "kneel", "kneel_pick", "crouch",
+    "drop"))
+
+# Locomotion widening (RicksClips loop round 1, ECU-exit): a moving
+# subject + a frozen head-tight crop walks out of the frame (Zeus
+# shot 51: extreme_close_up on a walk, the last ~1.5 s empty).
+# Locomotion shots in head-anchored framings widen to the full body
+# at full frame; the shot TYPE is unchanged. Same authority rule
+# as the anchor tiers: compiled verbs decide, cues are the
+# fallback when the shot has no compiled events.
+_LOCOMOTION_VERBS = frozenset((
+    "WALK", "WALK_MUD", "WALK_FAST", "RUN", "MARCH", "BOARD",
+    "CLIMB"))
+_LOCOMOTION_CUES = frozenset((
+    "walk", "walk_fast", "run", "march", "board", "climb"))
+_LOCOMOTION_WIDENED_TYPES = frozenset((
+    "extreme_close_up", "close_up", "reaction",
+    "shot_reverse_shot", "medium_close_up"))
 
 # F7 (Stage 3): the general prop vocabulary. Every drawable prop kind
 # has a distinct simple 2D shape in _draw_prop (same line language,
@@ -784,6 +856,62 @@ def ws(screen_x: float, cam=None, z: float = WORLD_Z) -> float:
 OTS_FOREGROUND_Z_OFFSET = 0.9
 
 
+# Round-7 bystander clearance (R6-D1): hand-action sweep separation.
+# A character performing a hand action sweeps their hands plus any
+# held prop through a screen-space disc around the shoulder. When a
+# bystander stands inside that disc, the prop draws over their face:
+# in the R6 draft the hammer parked on the watcher's face for 1.7 s
+# because the striker stood behind the bystander and the presenting
+# hand rose through the bystander's head. The clearance pass in
+# _render_shot pushes non-participant, non-anchored bystanders
+# laterally until their head disc clears every acting character's
+# sweep disc, or the frame margin blocks the push (recorded, never
+# silent). Co-participants of the action (a handover's receiver, a
+# strike's target) are exempt: the action needs them close.
+_HAND_SWEEP_PRIMITIVES = frozenset({
+    "hammer_strike", "present_prop", "reach_to", "give_to",
+    "hand_over", "receive_prop", "point_at", "raise_hand",
+    "bend_pick", "kneel_pick", "pick_up", "put_away",
+})
+# Sweep disc: centred on the shoulder, radius = hand reach + handle
+# + head size, all in fractions of the actor's drawn height H.
+_SWEEP_CENTRE_FRAC = 0.72
+_SWEEP_RADIUS_FRAC = 0.60
+# Head disc: the head occupies the top 0.34 of H (head_ratio lock).
+_HEAD_CENTRE_FRAC = 0.83
+_HEAD_RADIUS_FRAC = 0.17
+# Extra clearance between a sweep disc and a head disc, in H.
+_SWEEP_MARGIN_FRAC = 0.05
+
+
+def _sweep_disc(gx: float, gy: float, gh: float):
+    """Screen-space hand-sweep disc for a character at (gx, gy, gh)."""
+    return (gx, gy - _SWEEP_CENTRE_FRAC * gh, _SWEEP_RADIUS_FRAC * gh)
+
+
+def _head_disc(gx: float, gy: float, gh: float):
+    """Screen-space head disc for a character at (gx, gy, gh)."""
+    return (gx, gy - _HEAD_CENTRE_FRAC * gh, _HEAD_RADIUS_FRAC * gh)
+
+
+def _discs_clear(a, b, margin: float = 0.0) -> bool:
+    """True when two (cx, cy, r) discs are separated by >= margin."""
+    dx = a[0] - b[0]
+    dy = a[1] - b[1]
+    return dx * dx + dy * dy >= (a[2] + b[2] + margin) ** 2
+
+
+def _prop_intrudes_head(point, head, head_r: float, H: float) -> bool:
+    """True when a held prop's drawn ``point`` lands inside a head
+    disc (centre ``head``, radius ``head_r``) plus a 0.05H margin.
+    The head-intrusion audit's predicate, factored out so the
+    threshold is pinned by unit tests."""
+    if head_r <= 0:
+        return False
+    return (math.hypot(point[0] - head[0], point[1] - head[1])
+            < head_r + 0.05 * float(H))
+
+
 def char_metrics(cam, world_x: float, world_z: float = WORLD_Z,
                  base_scale: float = 1.0):
     """Per-character screen metrics under a shot camera.
@@ -833,35 +961,62 @@ _FIT_MAX_RADIUS_SCALE = 3.0
 
 
 def _fit_radius_scale(shot_type, angle, target_x, target_z,
-                      counterpart_x, srs_side, positions, scales):
-    """Camera radius multiplier so scaled-up subjects fit the frame.
+                      counterpart_x, srs_side, positions, scales,
+                      top_fracs=None, elevation_deg=None):
+    """Camera radius multiplier so subjects fit the frame top.
+
+    ``elevation_deg`` (round 11): an explicit executed elevation
+    passed through to viewpoint_for_shot, so the fit measures the
+    camera that will actually render (a capped establishing
+    elevation fits differently from the steep requested one).
+    None (default) uses the angle table, exactly as before.
 
     ``positions``/``scales`` are parallel lists of (world_x, world_z)
     and per-character body scales for the shot's visible characters.
-    Returns 1.0 when no subject is scaled up (every unscaled shot is
-    untouched) or when every standing box already clears the top
-    margin. Otherwise iterates: drawn height is ~1/radius, so each
-    pass multiplies the radius by the worst overflow ratio; the
-    ground line shifts with radius too, so up to eight passes are
-    allowed (a 1.8x subject at the standard radius converges in six).
-    The radius is capped at 3.0x — beyond that the shot is reported
-    with the residual overflow, never silently re-scaled.
+    ``top_fracs`` (optional, parallel) carries each character's top
+    accessory extent as a fraction of the head radius above the head
+    circle (see ``_top_accessory_frac``): the fit protects the drawn
+    SILHOUETTE top, not just the head circle -- without it Linh's
+    bun clipped above the staging canvas in shot #3 (head circle
+    top at 27 px cleared the 12 px margin while the bun top sat at
+    -8 px). ``None`` (default) fits the head circle exactly as
+    before. Returns 1.0 when every silhouette top already clears
+    the top margin. Otherwise iterates: drawn height is ~1/radius,
+    so each pass multiplies the radius by the worst overflow ratio;
+    the ground line shifts with radius too, so up to eight passes
+    are allowed (a 1.8x subject at the standard radius converges
+    in six). The radius is capped at 3.0x — beyond that the shot
+    is reported with the residual overflow, never silently
+    re-scaled.
+
+    Round 7: the fit is no longer gated on scaled-up subjects. An
+    unscaled subject at a close camera overflows the top exactly the
+    same way (R6 shot #5: Linh's head cut for the whole shot), and
+    the gate left every unscaled shot unprotected. The first pass
+    still returns 1.0 immediately when nothing overflows, so fitting
+    shots are untouched.
     """
-    if not positions or max(scales, default=1.0) <= 1.0:
+    if not positions:
         return 1.0
+    fracs = list(top_fracs) if top_fracs is not None \
+        else [0.0] * len(positions)
     radius_scale = 1.0
     for _ in range(8):
         cam = viewpoint_for_shot(
             shot_type, angle,
             subject_pos=(target_x, 1.2, target_z),
             counterpart_x=counterpart_x, srs_side=srs_side,
-            radius_scale=radius_scale)
+            radius_scale=radius_scale, elevation_deg=elevation_deg)
         worst = 1.0
-        for (x, z), s in zip(positions, scales):
+        for (x, z), s, frac in zip(positions, scales, fracs):
             _gx, gy, h = char_metrics(cam, x, z, base_scale=s)
-            head_y = gy - h
-            if head_y < _FIT_TOP_MARGIN_PX:
-                worst = max(worst, h / max(1.0, gy - _FIT_TOP_MARGIN_PX))
+            # Silhouette height: the body plus the accessories
+            # above the head circle (head_r = 0.17 * h).
+            sil_h = h * (1.0 + 0.17 * float(frac))
+            if gy - sil_h < _FIT_TOP_MARGIN_PX:
+                worst = max(
+                    worst,
+                    sil_h / max(1.0, gy - _FIT_TOP_MARGIN_PX))
         if worst <= 1.0001:
             return radius_scale
         radius_scale = min(_FIT_MAX_RADIUS_SCALE, radius_scale * worst)
@@ -986,10 +1141,20 @@ def map_character(char: dict, index: int, costume_override=None,
         kwargs["costume"] = costume_override
     elif char.get("costume") in ("dress", "uniform"):
         kwargs["costume"] = char["costume"]
-    if char.get("hair_style") in ("short", "long", "tuft", "side_part"):
+    if char.get("hair_style") in ("short", "long", "tuft", "side_part",
+                                     "tied"):
         kwargs["hair_style"] = char["hair_style"]
-    if char.get("hat") in ("bowler", "none"):
+    if char.get("hat") in ("bowler", "cap", "none"):
         kwargs["hat"] = char["hat"]
+    # Worn traits (round-3 system 3): colours pass through only when
+    # the script named them (None = the art's ink default); the beard
+    # style passes only when valid, never a guessed value.
+    for _tkey in ("hair_color", "hat_color", "scarf_color", "beard_color",
+                    "apron_color"):
+        if char.get(_tkey):
+            kwargs[_tkey] = char[_tkey]
+    if char.get("beard_style") in ("none", "full"):
+        kwargs["beard_style"] = char["beard_style"]
     # Moustache: explicit trait data first, text scan only as fallback.
     moustache_style = char.get("moustache_style")
     moustache_flag = char.get("moustache")
@@ -1014,6 +1179,15 @@ def map_character(char: dict, index: int, costume_override=None,
         kwargs["glasses"] = False
     elif _has_any_word(desc, _GLASSES_PHRASES):
         kwargs["glasses"] = True
+    # Eye count (general face trait): explicit contract data only --
+    # a value outside {1, 2} fails loudly, never silently defaults.
+    if "eye_count" in char:
+        _eye_count = char["eye_count"]
+        if isinstance(_eye_count, bool) or _eye_count not in (1, 2):
+            raise ValueError(
+                f"unknown eye_count for {name!r}: {_eye_count!r} "
+                "(expected 1 or 2)")
+        kwargs["eye_count"] = int(_eye_count)
     # Species features (generic visual profile): explicit contract data
     # first, then flat trait fields. A value outside the drawing
     # vocabulary is skipped here (the validator already noted the drop)
@@ -1962,6 +2136,13 @@ def _map_spec_from_shot(shot: dict, package: dict) -> dict:
                     if rec.get("recommended_framing") and not cfg.get(
                             "framing"):
                         spec["framing"] = rec["recommended_framing"]
+    # D3: a planner-assigned tight framing ("highlights") wins
+    # over the registry default framing; the default is kept as
+    # base_framing so the tight window derives from it.
+    if shot.get("map_framing") == "highlights":
+        if spec.get("framing"):
+            spec["base_framing"] = spec.pop("framing")
+        spec["framing"] = "highlights"
     route = cfg.get("route") or shot.get("map_route")
     if route:
         route = dict(route)
@@ -2369,26 +2550,37 @@ def _segment_count(voice: float) -> int:
 def _split_line_phrases(text: str, spans: list) -> list:
     """Partition a line's subtitle phrases across voice spans so each
     segment's text covers exactly its own time slice. Phrases are
-    assigned by midpoint against the even time share each phrase
-    occupies (matching how phrase_windows lays them out). Every
-    phrase appears exactly once, in order; a span with no phrase
-    midpoint gets an empty string — text is never invented."""
+    assigned by the midpoint of the CHARACTER-PROPORTIONAL window
+    each phrase occupies -- the same time model ``phrase_windows``
+    lays out (weights = max(1, len(phrase))), so the segment texts,
+    the burned subtitles and subtitles.json all agree on which
+    words are spoken in which slice. (An earlier version assigned
+    by equal-share midpoints, which disagreed with the char-
+    proportional record by up to ~2.7 s at phrase boundaries.)
+    Every phrase appears exactly once, in order; a span with no
+    phrase midpoint gets an empty string -- text is never invented."""
     phrases = split_subtitle(text) if (text or "").strip() else []
     if not phrases:
         return [""] * len(spans)
     total = sum(spans)
+    weights = [max(1, len(p)) for p in phrases]
+    wsum = float(sum(weights))
     bounds = []
     cursor = 0.0
     for span in spans:
         cursor += span
         bounds.append(cursor)
+    mids = []
+    acc = 0.0
+    for w in weights:
+        mids.append((acc + w / 2.0) / wsum * total)
+        acc += w
     out: list = []
     idx = 0
     for end in bounds:
         take = []
         while idx < len(phrases):
-            mid = (idx + 0.5) / len(phrases) * total
-            if mid < end:
+            if mids[idx] < end:
                 take.append(phrases[idx])
                 idx += 1
             else:
@@ -2445,6 +2637,116 @@ def _viewpoint_signature(shot: dict) -> tuple:
     )
 
 
+# Pacing merge (round 7): a synthesized shot shorter than this
+# merges into its predecessor when the pair is mergeable (same
+# scene/location/cast/speaker/kind, no directive on the short
+# shot, no insert, different lines). The reference holds ~5-6 s
+# per shot; the planner's one-shot-per-line split produced
+# 1.2-1.8 s fragments that cut too fast to read.
+PACING_MERGE_MAX_SHORT_SEC = 2.5
+PACING_MERGE_MAX_TOTAL_SEC = 6.5
+
+_INSERT_SHOT_TYPES = frozenset(
+    {"object_insert", "graphic_insert"})
+
+# Round 9 (R2-C4): reach-without-grasp gestures. In an insert the
+# frozen crop amputates these into a disembodied frozen claw (EMIT ->
+# present_prop pinned at the reach limit inside the 5x crop, the hand
+# never touching anything). They resolve to idle in insert shots.
+# Prop-carrying primitives (hand_over, pick_up, put_away, shield,
+# hammer_strike, ...) are NOT in this set: the prop follows the hand,
+# so the hand IS the insert's subject (the handover insert's bolt).
+_INSERT_IDLE_PRIMITIVES = frozenset(
+    {"present_prop", "reach_to", "point_at", "raise_hand", "wave"})
+
+
+def _merge_short_shots(shots):
+    """Merge short synthesized shots into their predecessor.
+
+    Returns a new list; the input is untouched. A merge keeps
+    the predecessor's framing/camera, sums the durations and
+    breakdowns, unions the event ids, and records the merge on
+    the surviving entry (``pacing_merge``) -- never silent.
+    Total duration is preserved exactly (the sum is the sum).
+    Dialogue is never merged: different speakers or kinds keep
+    their cuts, and segments of one line keep their framing
+    progression.
+    """
+    merged: list[dict] = []
+    for shot in shots:
+        if not merged:
+            merged.append(dict(shot))
+            continue
+        prev = merged[-1]
+        dur = float(shot.get("duration", 0.0))
+        prev_dur = float(prev.get("duration", 0.0))
+        # Segments of one line share a non-None line_index and
+        # keep their framing progression; action-lead shots
+        # carry line_index None and are distinct beats.
+        same_line = (shot.get("line_index") is not None
+                     and shot.get("line_index")
+                     == prev.get("line_index"))
+        mergeable = (
+            dur < PACING_MERGE_MAX_SHORT_SEC
+            and not shot.get("directive_shot_id")
+            and shot.get("shot_type") not in _INSERT_SHOT_TYPES
+            and prev.get("shot_type") not in _INSERT_SHOT_TYPES
+            and shot.get("scene") == prev.get("scene")
+            and shot.get("v1_location") == prev.get("v1_location")
+            and set(shot.get("visible") or [])
+            == set(prev.get("visible") or [])
+            and shot.get("speaker") == prev.get("speaker")
+            and shot.get("kind") == prev.get("kind")
+            and not same_line
+            and prev_dur + dur <= PACING_MERGE_MAX_TOTAL_SEC)
+        if not mergeable:
+            merged.append(dict(shot))
+            continue
+        new = dict(prev)
+        new["duration"] = round(prev_dur + dur, 2)
+        prev_bd = dict(prev.get("duration_breakdown") or {})
+        shot_bd = dict(shot.get("duration_breakdown") or {})
+        new["duration_breakdown"] = {
+            "voice_sec": round(
+                float(prev_bd.get("voice_sec", 0.0))
+                + float(shot_bd.get("voice_sec", 0.0)), 2),
+            "beat_sec": round(
+                float(prev_bd.get("beat_sec", 0.0))
+                + float(shot_bd.get("beat_sec", 0.0)), 2),
+            "action_lead_sec": round(
+                float(prev_bd.get("action_lead_sec", 0.0))
+                + float(shot_bd.get("action_lead_sec", 0.0)), 2),
+            "total_sec": new["duration"],
+        }
+        new["voice_duration"] = round(
+            float(prev.get("voice_duration", 0.0))
+            + float(shot.get("voice_duration", 0.0)), 2)
+        new["text"] = " ".join(
+            t for t in (str(prev.get("text") or "").strip(),
+                        str(shot.get("text") or "").strip()) if t)
+        seen = set()
+        new["event_ids"] = [
+            e for e in list(prev.get("event_ids") or [])
+            + list(shot.get("event_ids") or [])
+            if not (e in seen or seen.add(e))]
+        for _cue_key in ("action_cues", "scene_cues",
+                         "dropped_cues"):
+            _seen_cues = set()
+            new[_cue_key] = [
+                c for c in list(prev.get(_cue_key) or [])
+                + list(shot.get(_cue_key) or [])
+                if not (c in _seen_cues or _seen_cues.add(c))]
+        if shot.get("is_reveal_shot"):
+            new["is_reveal_shot"] = True
+            new["reveal_type"] = shot.get("reveal_type")
+        new["segment_index"] = 0
+        new["segment_count"] = 1
+        new["pacing_merge"] = list(
+            prev.get("pacing_merge") or []) + [round(dur, 2)]
+        merged[-1] = new
+    return merged
+
+
 def plan_shots(package: dict, timeline: list[dict],
                scene_graph: dict | None = None) -> list[dict]:
     """Package + measured line durations -> ordered shot list.
@@ -2461,9 +2763,13 @@ def plan_shots(package: dict, timeline: list[dict],
     audio timeline: a long narration line MAY span several shots
     (voice > 6 s splits into 2-5 s segments, each carrying its own
     voice span + subtitle phrases, the narration never duplicated,
-    restarted, truncated or rewritten); one shot covers one line
-    (multi-line shots are permitted by the format but the planner
-    does not merge lines on its own).
+    restarted, truncated or rewritten); one shot covers one line,
+    except the pacing merge (round 7): a short (< 2.5 s)
+    synthesized shot with no directive merges into its
+    predecessor when the pair shares scene/location/cast/
+    speaker/kind and the total stays <= 6.5 s, so the cut rhythm
+    approaches the reference ~5-6 s without dropping or
+    duplicating any line.
 
     Shot duration policy: default target 2-5 s; shots over 6 s
     carry ``duration_warning`` unless justified (an establishing
@@ -2603,6 +2909,24 @@ def plan_shots(package: dict, timeline: list[dict],
                                   char_names)
             if _actor:
                 first_scene.setdefault(_actor, _num)
+        # Round-6 shield staging: a character NAMED in a scene's
+        # action text is present in that scene's action -- the
+        # protected figure of a SHIELD beat ("che chắn cho Bé Nam")
+        # neither speaks nor acts, so the speaker/actor rules above
+        # left them invisible until their first speaking scene and
+        # the shield beat staged with nobody to protect. Names match
+        # longest-first with matched spans blanked, so "Bé Nam"
+        # never also introduces a shorter "Nam". Spoken lines are
+        # NOT scanned: being talked about is not being present.
+        _atext = str(_sc.get("action_text", "") or "")
+        _scan = _atext
+        for _nm in sorted(char_names, key=len, reverse=True):
+            _m = re.search(r"(?<!\w)" + re.escape(_nm) + r"(?!\w)",
+                           _scan)
+            if _m:
+                first_scene.setdefault(_nm, _num)
+                _scan = (_scan[:_m.start()] + " " * (_m.end()
+                         - _m.start()) + _scan[_m.end():])
     for _name in char_names:
         first_scene.setdefault(_name, 1)
     for scene in package["scenes"]:
@@ -3012,6 +3336,20 @@ def plan_shots(package: dict, timeline: list[dict],
                         expr_non_neutral, prev_type,
                         active_prop is not None)
                     st_source = "progression"
+                # Round 10 (R9-D1): a progression segment is a NEW
+                # shot by cut, not the directive's shot. It keeps
+                # the directive's elevation-only angle (a high_angle
+                # reaction stays high), but never inherits
+                # over_shoulder: that angle names an azimuth (28
+                # deg OTS), which blocks the viewpoint flip and
+                # froze shot #9's camera across rounds while every
+                # other eligible shot moved. Fall back to the scene
+                # angle, or None when the scene angle is
+                # over_shoulder too (the flip then applies).
+                seg_angle = angle_v
+                if seg_idx > 0 and seg_angle == "over_shoulder":
+                    seg_angle = scene_angle \
+                        if scene_angle != "over_shoulder" else None
                 prev_type = st
                 seg_dur = seg_durs[seg_idx]
                 is_last = seg_idx == n_seg - 1
@@ -3043,7 +3381,7 @@ def plan_shots(package: dict, timeline: list[dict],
                     "shot_type": st,
                     "shot_type_source": st_source,
                     "camera_movement": movement_v,
-                    "camera_angle": angle_v,
+                    "camera_angle": seg_angle,
                     "camera_mode": mode_v,
                     "camera_mode_source": (
                         f"directive:{directive['shot_id']}"
@@ -3113,6 +3451,12 @@ def plan_shots(package: dict, timeline: list[dict],
             boarded[s["actor"]] = BUS_DOOR_X
         elif boarded:
             s["staging_override"] = dict(boarded)
+    # Pacing merge (round 7): short synthesized fragments merge
+    # into their predecessor (same scene/location/cast/speaker/
+    # kind) so the cut rhythm approaches the reference ~5-6 s.
+    # Runs before END_HOLD so the hold still extends the last
+    # content shot, and before the end card is appended.
+    shots = _merge_short_shots(shots)
     # END_HOLD (Stage 3): end_hold_sec extends the LAST CONTENT shot
     # (the final image holds before the end card / fade). Applied
     # before the end card is appended, so it never extends the card.
@@ -3186,6 +3530,14 @@ def plan_shots(package: dict, timeline: list[dict],
     _clock = 0.0
     _prev_sig = None
     _prev_type = None
+    _map_run_key = None
+    _map_run_idx = 0
+    # Round-9 viewpoint alternation (F9): per-scene flip counter
+    # + used sides per staging signature (see the post-pass
+    # block below).
+    _az_scene = None
+    _az_flip = 0
+    _az_used: dict[tuple, set] = {}
     for _i, _s in enumerate(shots):
         _s["start_sec"] = round(_clock, 3)
         _clock += float(_s["duration"])
@@ -3208,6 +3560,85 @@ def plan_shots(package: dict, timeline: list[dict],
                " (crop scale differs: a framing change by cut)")
             + " — verify intent"
             if _prev_sig is not None and _sig == _prev_sig else None)
+        # D3: consecutive map shots of one location alternate
+        # full/tight framings by cut (close_up map shots are
+        # always tight -- a close_up showing the full map is a
+        # lie). Highlights themselves never change: only the
+        # framing varies, a presentation choice.
+        _loc = _s.get("v1_location")
+        _is_map = (isinstance(_loc, dict)
+                   and select_archetype(_loc)[0] == "MAP")
+        if _is_map:
+            _key = _loc.get("id") or _loc.get("location_id") or ""
+            if _key != _map_run_key:
+                _map_run_key, _map_run_idx = _key, 0
+            if _s["shot_type"] in ("close_up", "extreme_close_up",
+                                   "graphic_insert"):
+                _s["map_framing"] = "highlights"
+            elif _map_run_idx % 2 == 1:
+                _s["map_framing"] = "highlights"
+            else:
+                _s["map_framing"] = "full"
+            _s["map_framing_source"] = "planner:alternation"
+            _map_run_idx += 1
+        else:
+            _map_run_key, _map_run_idx = None, 0
+        # Round-9 viewpoint alternation (F9): EVERY eligible shot
+        # gets a real viewpoint side. Round 6 only flipped REPEAT
+        # occurrences of a staging signature, so a plan with
+        # all-distinct signatures (Loop-01: all 17 shots) rendered
+        # every shot from azimuth 0 -- the zoom-only defect: the
+        # same frontal axis at different crop scales, the
+        # background's left-right parallax never shifting. Within
+        # a scene, eligible shots alternate +1/-1 (18-degree 3/4
+        # views, both on the camera side of the 180-degree line,
+        # fixed within the shot, changing BY CUT). A repeat of a
+        # staging signature escalates to an unused side (+2/-2)
+        # so no two same-signature shots in a scene share a
+        # viewpoint (the round-6 repeat protection, kept). First
+        # occurrences are NOT pixel-identical to before -- that
+        # is the point of the fix. Exemptions unchanged:
+        # end card, establishing (geography anchors), inserts
+        # (subject centred), OTS/SRS (own azimuth logic). A
+        # scripted camera_angle does NOT exempt a shot: the flip
+        # changes azimuth only and preserves the resolved angle's
+        # elevation exactly. EXCEPTION (round 10, R9-D1):
+        # over_shoulder DOES name an azimuth (28 deg OTS), and the
+        # resolver's OTS branch blocks the flip -- so progression
+        # segments never inherit it (see the segment loop above);
+        # only a shot whose own directive/type is OTS keeps it.
+        if (_s["kind"] != "end_card"
+                and _s["shot_type"] not in (
+                    "establishing", "object_insert",
+                    "over_the_shoulder", "shot_reverse_shot",
+                    "graphic_insert")):
+            _loc_key = ""
+            if isinstance(_loc, dict):
+                _loc_key = str(_loc.get("id")
+                               or _loc.get("location_id") or "")
+            # "tracking" executes STATIC (camera fixed within
+            # the shot, same 1.6 crop scale as medium), so a
+            # tracking shot and a medium shot stage identically
+            # -- group them in one signature.
+            _sig_type = ("medium" if _s["shot_type"] == "tracking"
+                         else _s["shot_type"])
+            _staging_sig = (
+                _s["scene"], _sig_type,
+                tuple(_s.get("visible") or ()), _loc_key)
+            if _s["scene"] != _az_scene:
+                _az_scene, _az_flip = _s["scene"], 0
+                _az_used = {}
+            _base = 1 if _az_flip % 2 == 0 else -1
+            _az_flip += 1
+            _used = _az_used.setdefault(_staging_sig, set())
+            _side = _base
+            if _side in _used:
+                for _cand in (_base, -_base, 2, -2):
+                    if _cand not in _used:
+                        _side = _cand
+                        break
+            _used.add(_side)
+            _s["viewpoint_azimuth_side"] = _side
         _prev_sig, _prev_type = _sig, _s["shot_type"]
     return shots
 def _font(size: int, bold: bool = False):
@@ -3259,6 +3690,16 @@ def _draw_geometry_prop(draw, x, y, kind, w=76, h=50):
     x0, y0, x1, y1 = spec["bbox"]
     bw, bh = max(x1 - x0, 1.0), max(y1 - y0, 1.0)
     scale = min(float(w) / bw, float(h) / bh)
+    _paint_geometry_spec(draw, spec, x, y, scale)
+
+
+def _paint_geometry_spec(draw, spec, x, y, scale):
+    """Paint a geometry spec with its grip contact point on (x, y).
+
+    Shared by the footprint-scaled draw and the articulated draws
+    (a held hammer built at screen size paints at scale 1.0, so its
+    strike face lands exactly on the computed head position).
+    """
     gx, gy = spec["contact_points"]["grip"]
     # Outline width scales with the footprint (the polyline branch
     # below already does this): a fixed 3px outline at a 0.25x scale
@@ -3294,14 +3735,15 @@ def _draw_geometry_prop(draw, x, y, kind, w=76, h=50):
             raise ValueError(f"unknown geometry part op {op!r}")
 
 
-def _draw_prop(draw, x, y, kind="wallet", w=76, h=50, open_u=0.0,
+def _draw_prop(draw, x, y, kind="wallet", w=None, h=None, open_u=0.0,
                tip=None):
     """Draw one prop at (x, y) in the character line language (INK
     outline, flat fill). F7: one distinct simple shape per PROP_KINDS
     entry; unknown kinds render as "generic". The wallet shape is the
     original one, unchanged, so existing wallet shots are identical.
-    ``w``/``h`` are the wallet-scale footprint; other kinds scale
-    from the same footprint so every prop reads at the same size.
+    ``w``/``h`` default to the kind's footprint (geometry_footprint:
+    long-handled props draw tall, everything else 76x50); explicit
+    values (the insert card) always win.
     ``open_u`` (W4, wallet only): 0 = closed (pixel-identical to the
     original), 1 = fully open — an inner flap panel extends to the
     right, so OPEN_WALLET reads on screen. ``tip`` (W4, pen only):
@@ -3310,6 +3752,33 @@ def _draw_prop(draw, x, y, kind="wallet", w=76, h=50, open_u=0.0,
     kind = str(kind or "wallet").strip().lower()
     if kind not in PROP_KINDS:
         kind = "generic"
+    if w is None or h is None:
+        _fw, _fh = geometry_footprint(kind)
+        if w is None:
+            w = _fw
+        if h is None:
+            h = _fh
+    if kind == "hammer" and tip is not None:
+        # Round-5 hammer contact: a held hammer draws articulated
+        # -- the handle runs from the grip (x, y) to the striking
+        # face (tip), built at screen size from the grip vector
+        # itself, so the drawn head lands ON the computed head
+        # position (the point the primitive aims at and the audit
+        # measures). The tip already encodes the character's
+        # facing, so the spec builds with facing=1 and the vector
+        # angle; the head polygon is symmetric about the handle
+        # axis. A degenerate tip falls through to the footprint
+        # draw. Mirrors the pen's tip draw.
+        _tx, _ty = float(tip[0]), float(tip[1])
+        _dx, _dy = _tx - float(x), _ty - float(y)
+        _length = math.hypot(_dx, _dy)
+        if _length >= 1.0:
+            _angle = math.atan2(_dy, _dx)
+            _spec = geometry_for_prop(
+                {"kind": "hammer", "length_px": _length},
+                grip_angle_rad=_angle, facing=1)
+            _paint_geometry_spec(draw, _spec, x, y, 1.0)
+            return
     if kind in _GEOMETRY_PROP_KINDS:
         _draw_geometry_prop(draw, x, y, kind, w, h)
         return
@@ -3395,13 +3864,20 @@ def _draw_prop(draw, x, y, kind="wallet", w=76, h=50, open_u=0.0,
         draw.line([(x - w / 4, y - h / 3), (x - w / 4, y + h / 2)],
                   fill=ink, width=2)
     elif kind == "key":
+        # Round 15 (L02-D10): a brass key, not an ink outline.
+        # The unfilled dark shape read as a facial smudge near
+        # pale faces (L02-D4). Brass fill + ink outline; the
+        # shaft and teeth get a brass core with an ink edge.
+        brass = (203, 160, 72)
         draw.ellipse([x - w / 2, y - 12, x - w / 2 + 26, y + 12],
-                     outline=ink, width=3)
-        draw.line([(x - w / 2 + 24, y), (x + w / 2, y)], fill=ink, width=4)
-        draw.line([(x + w / 2 - 12, y), (x + w / 2 - 12, y + 12)],
-                  fill=ink, width=3)
-        draw.line([(x + w / 2 - 4, y), (x + w / 2 - 4, y + 9)],
-                  fill=ink, width=3)
+                     fill=brass, outline=ink, width=3)
+        for _ln, _wd in ((((x - w / 2 + 24, y), (x + w / 2, y)), 4),
+                         (((x + w / 2 - 12, y),
+                           (x + w / 2 - 12, y + 12)), 3),
+                         (((x + w / 2 - 4, y),
+                           (x + w / 2 - 4, y + 9)), 3)):
+            draw.line(_ln, fill=ink, width=_wd + 2)
+            draw.line(_ln, fill=brass, width=_wd)
     elif kind == "book":
         draw.rectangle([x - w / 2, y - h / 2, x + w / 2, y + h / 2],
                        fill=(140, 50, 50), outline=ink, width=3)
@@ -3457,6 +3933,54 @@ def _draw_prop(draw, x, y, kind="wallet", w=76, h=50, open_u=0.0,
                   fill=ink, width=2)
         draw.line([(x + w / 3, y - h / 3), (x - w / 3, y + h / 3)],
                   fill=ink, width=2)
+
+
+# Distance from a simple (legacy-shape) prop's transform origin to
+# its lowest drawn pixel, as a fraction of the footprint height --
+# read off the _draw_prop branches above. "key" is a fixed 12 px
+# (teeth); "umbrella" is the shaft + crook below the origin.
+_SIMPLE_PROP_BOTTOM = {
+    "wallet": 0.5, "newspaper": 0.5, "letter": 0.5, "cup": 0.5,
+    "bag": 0.5, "book": 0.5, "flower": 0.5,
+    "ticket": 1.0 / 3.0, "generic": 1.0 / 3.0, "pen": 1.0 / 3.0,
+}
+
+
+def prop_bottom_offset(kind, w=None, h=None):
+    """Pixels from a prop's transform origin down to its lowest
+    drawn pixel at the (w, h) footprint (defaults: the kind's
+    footprint). Simple kinds draw centred on the origin (table
+    above); geometry kinds draw with the spec's grip contact
+    point on the origin, so the offset is the scaled
+    grip-to-bottom distance -- the same construction
+    ``_draw_geometry_prop`` uses. ``test_prop_support_rest``
+    measures every kind's drawn bottom against this function, so
+    the two can never drift apart silently. Outline/line width
+    (~1-3 px) is not included: the snap puts the fill bottom on
+    the support top and the outline overlap reads as contact.
+    """
+    kind = str(kind or "wallet").strip().lower()
+    if kind not in PROP_KINDS:
+        kind = "generic"
+    if w is None or h is None:
+        _fw, _fh = geometry_footprint(kind)
+        if w is None:
+            w = _fw
+        if h is None:
+            h = _fh
+    if kind in _GEOMETRY_PROP_KINDS:
+        spec = geometry_for_prop(
+            {"kind": kind, "length_px": 200.0, "size_px": 170.0})
+        x0, y0, x1, y1 = spec["bbox"]
+        bw, bh = max(x1 - x0, 1.0), max(y1 - y0, 1.0)
+        scale = min(float(w) / bw, float(h) / bh)
+        _gx, gy = spec["contact_points"]["grip"]
+        return (y1 - gy) * scale
+    if kind == "umbrella":
+        return 0.9 * float(h) + 10.0
+    if kind == "key":
+        return 12.0
+    return _SIMPLE_PROP_BOTTOM.get(kind, 0.5) * float(h)
 
 
 def _draw_puddle(draw, x, ground_y):
@@ -3772,15 +4296,42 @@ def _character_shadow_footprint(ch):
     return half_w, half_d
 
 
-def _draw_character_shadow(img, ch, cam, ground_pos, light):
+def _draw_character_shadow(img, ch, cam, ground_pos, light,
+                           cast=False):
     """Ratio-capped contact shadow under one character (W1).
 
     Geometry comes from lighting.shadow_ellipse_spec: the shadow can
     never outgrow the feet, stays a thin strip (depth-capped), and
     follows the light offset. No-op when the character is behind the
     camera (spec is None).
+
+    Round 13: with ``cast`` (outdoor shots only -- the caller
+    gates on the archetype), a tapered cast quad stretches from
+    the feet along the light's ground direction, drawn under the
+    contact ellipse. Indoors the sun is not the light, so no
+    cast shadow is drawn.
     """
     half_w, half_d = _character_shadow_footprint(ch)
+    if cast:
+        _, _, pscale, vis = cam.project(ground_pos, *img.size)
+        if vis and pscale > 0:
+            spec = cast_shadow_spec(
+                ground_pos, ch.H / pscale, half_w / pscale,
+                light, cam, img.size)
+            if spec is not None:
+                pts = spec["polygon_px"]
+                xs = [p[0] for p in pts]
+                ys = [p[1] for p in pts]
+                pad = 10
+                x0, y0 = int(min(xs)) - pad, int(min(ys)) - pad
+                x1, y1 = int(max(xs)) + pad, int(max(ys)) + pad
+                layer = Image.new(
+                    "RGBA", (x1 - x0, y1 - y0), (0, 0, 0, 0))
+                ImageDraw.Draw(layer).polygon(
+                    [(x - x0, y - y0) for x, y in pts],
+                    fill=(0, 0, 0, int(255 * spec["alpha"])))
+                layer = layer.filter(ImageFilter.GaussianBlur(6))
+                img.paste(layer, (x0, y0), layer)
     spec = shadow_ellipse_spec(ground_pos, 0.0, 0.35, light, cam,
                                img.size, half_w,
                                footprint_half_depth_px=half_d)
@@ -3808,17 +4359,19 @@ def _draw_character_shadow(img, ch, cam, ground_pos, light):
 
 def _furniture_anchors(env_pkg, cam, size, staging_x, ground_y, char_h,
                        facing):
-    """Pixel-space desk/paper/chair anchors for sit/write/sign.
+    """Pixel-space desk/paper/chair/anvil anchors for sit/write/sign/
+    strike.
 
     From the environment package's furniture elements (projected with
     the shot camera) when present; staging-derived fallbacks otherwise
     (legacy scenes without an environment package). Returns
     {"desk": {"x", "top_y"} | None, "paper": {"x","y","w","h"},
-    "chair": {"x", "seat_y"}, "source": "environment"|"fallback"}.
+    "chair": {"x", "seat_y"}, "anvil": {"x", "top_y"},
+    "source": "environment"|"fallback"}.
     The paper rect's "y" is its TOP edge (the hold_pen/write_on_paper
     contract)."""
     anchors = {"desk": None, "paper": None, "chair": None,
-               "source": "fallback"}
+               "anvil": None, "source": "fallback"}
     if env_pkg is not None:
         elements = {e.get("kind"): e for e in
                     (env_pkg.get("elements") or [])
@@ -3864,6 +4417,10 @@ def _furniture_anchors(env_pkg, cam, size, staging_x, ground_y, char_h,
         paper_el = by_id.get("desk_paper") \
             or elements.get("paper_stack")
         chair_el = by_id.get("chair_seat") or elements.get("chair")
+        # The strike surface: the anvil top (ID-preferred; the kind
+        # map collapses base/body/top). hammer_strike anchors here.
+        anvil_el = by_id.get("anvil_top") or elements.get("anvil")
+        anvil_xy = _project_top(anvil_el)
         desk_xy = _project_top(desk_el)
         paper_xy = _project(paper_el)
         chair_xy = _project_top(chair_el)
@@ -3880,6 +4437,10 @@ def _furniture_anchors(env_pkg, cam, size, staging_x, ground_y, char_h,
             anchors["chair"] = {"x": chair_xy[0],
                                 "seat_y": chair_xy[1]}
             anchors["source"] = "environment"
+        if anvil_xy is not None:
+            anchors["anvil"] = {"x": anvil_xy[0],
+                                "top_y": anvil_xy[1]}
+            anchors["source"] = "environment"
     if anchors["chair"] is None:
         anchors["chair"] = {"x": staging_x,
                             "seat_y": ground_y - 0.42 * char_h}
@@ -3893,9 +4454,104 @@ def _furniture_anchors(env_pkg, cam, size, staging_x, ground_y, char_h,
         paper = anchors["paper"]
         anchors["desk"] = {"x": paper["x"] + paper["w"] / 2.0,
                            "top_y": paper["y"] + paper["h"] / 2.0}
+    if anchors["anvil"] is None:
+        # No staged anvil: a strike surface in front of the striker
+        # at anvil height. The strike still reads; it never invents
+        # an anvil drawing, only the contact point.
+        anchors["anvil"] = {
+            "x": staging_x + facing * 0.30 * char_h,
+            "top_y": ground_y - 0.45 * char_h}
     # Sanity: the desk top must sit above the seat in screen coords.
     if anchors["desk"]["top_y"] >= anchors["chair"]["seat_y"]:
         anchors["desk"]["top_y"] = anchors["chair"]["seat_y"] - 0.15 * char_h
+    return anchors
+
+
+def _reactive_element_anchors(env_pkg, cam, size):
+    """Screen anchors for the set-piece reaction (round-2 system 5).
+
+    The furnace mouth (projected element centre -- the glow wash
+    centre) and the sparks element (drawn per-frame by the
+    reaction overlay with a boosted count/frame). Elements that
+    are absent or off-camera yield None: the reaction paints
+    nothing it cannot anchor, and never invents a set-piece.
+    """
+    anchors = {"furnace": None, "sparks_el": None, "sparks_xy": None}
+    if env_pkg is None:
+        return anchors
+    elements = [e for e in (env_pkg.get("elements") or [])
+                if isinstance(e, dict)]
+    furnace_el = next(
+        (e for e in elements if e.get("id") == "furnace"), None)
+    if furnace_el is None:
+        furnace_el = next(
+            (e for e in elements if e.get("kind") == "furnace"), None)
+    sparks_el = next(
+        (e for e in elements if e.get("kind") == "sparks"), None)
+    w, h = size
+
+    def _project(element):
+        px, py, _s, vis = cam.project(element["center"], w, h)
+        return (px, py) if vis else None
+
+    if furnace_el is not None:
+        anchors["furnace"] = _project(furnace_el)
+    if sparks_el is not None:
+        anchors["sparks_el"] = sparks_el
+        anchors["sparks_xy"] = _project(sparks_el)
+    return anchors
+
+
+def _support_anchors(env_pkg, cam, size):
+    """Pixel-space top surfaces a prop can rest on, projected with
+    the shot camera (the same top-face-centre contract as
+    ``_furniture_anchors._project_top``). Returns a list of
+    {\"id\", \"kind\", \"support\", \"x\", \"top_y\", \"width\"} where
+    \"support\" is the ``destination_support`` name that selects
+    the element. Selection is structural, never positional:
+    \"top\" elements (desk_top, bench_top, anvil_top) are picked
+    by kind + the \"on_top\" attachment relation -- their legs
+    share the kind and must never be selected; freestanding
+    bodies (statue_pedestal, altar, cabinet) offer their own top
+    face whatever they stand on. Elements whose top projects
+    invisible are skipped: a prop must never rest on an
+    off-screen support. No support is ever invented -- an empty
+    list means the environment has no rest surface.
+    """
+    if env_pkg is None or cam is None:
+        return []
+    w, h = size
+    anchors = []
+    for el in (env_pkg.get("elements") or []):
+        if not isinstance(el, dict):
+            continue
+        kind = el.get("kind")
+        rel = (el.get("attachment") or {}).get("relation")
+        support = None
+        if kind in ("desk", "workbench", "anvil") and rel == "on_top":
+            support = "anvil" if kind == "anvil" else "table"
+        elif kind == "statue_pedestal":
+            support = "pedestal"
+        elif kind == "altar":
+            support = "altar"
+        elif kind == "cabinet":
+            support = "cabinet"
+        if support is None:
+            continue
+        try:
+            cx, cy, cz = (float(v) for v in el["center"])
+            sx, sy, _sz = (float(v) for v in el["size"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        px, py, _s, vis = cam.project((cx, cy + sy / 2.0, cz), w, h)
+        if not vis:
+            continue
+        ax, _ay, _s2, vis_a = cam.project((cx - sx / 2.0, cy, cz), w, h)
+        bx, _by, _s3, vis_b = cam.project((cx + sx / 2.0, cy, cz), w, h)
+        width = abs(bx - ax) if (vis_a and vis_b) else 0.0
+        anchors.append({"id": el.get("id"), "kind": kind,
+                        "support": support, "x": float(px),
+                        "top_y": float(py), "width": float(width)})
     return anchors
 
 
@@ -3921,10 +4577,41 @@ def _shot_action_events(package, shot, duration):
         if name and cid:
             id_to_name[str(cid)] = name
             name_to_id[name] = str(cid)
-    empty = ({}, [], {}, {}, id_to_name, name_to_id)
+    # Round-4 "hon" (ambient life, 2026-11-14): every declared
+    # character blinks on a deterministic ambient schedule whether
+    # or not the script writes a BLINK sentence. Before this, blinks
+    # came ONLY from scripted BLINK events, so ordinary scripts
+    # rendered zero blinks and every character stared -- the NPC
+    # look. Scripted blinks are kept verbatim; ambient blinks that
+    # would land within 0.4 s of a scripted one are suppressed so
+    # the two never stack into one long dip.
+    def _ambient_blinks(scripted):
+        # Round-5 fix (R4-L1): the seed must distinguish RENDERED
+        # shots, not just directive ids -- segmentation-split shots
+        # share a directive id and blinked in lockstep. start_sec is
+        # unique per rendered shot; the shot index disambiguates
+        # further when present.
+        seed_base = "{}:{}:{}".format(
+            did, shot.get("index", ""), shot.get("start_sec", 0.0))
+        out = {}
+        for _c in package.get("characters") or []:
+            _nm = str(_c.get("name") or "")
+            if not _nm:
+                continue
+            _seed = zlib.crc32(
+                f"{seed_base}:{_nm}".encode("utf-8")) & 0x7FFFFFFF
+            _times = blink_times_for(float(duration), seed=_seed)
+            _kept = sorted(scripted.get(_nm) or [])
+            for _t in _times:
+                if all(abs(_t - _s) > 0.4 for _s in _kept):
+                    _kept.append(_t)
+            out[_nm] = sorted(_kept)
+        return out
+
     did = shot.get("directive_shot_id")
     if not did or not all_events:
-        return empty
+        return ({}, [], {}, _ambient_blinks({}),
+                id_to_name, name_to_id)
     t0 = float(shot.get("start_sec", 0.0))
     t1 = t0 + float(duration)
     per_actor: dict[str, list] = {}
@@ -3959,6 +4646,7 @@ def _shot_action_events(package, shot, duration):
         per_actor.setdefault(name, []).append(local)
     for windows in per_actor.values():
         windows.sort(key=lambda w: (w[0], w[1]))
+    blink_times = _ambient_blinks(blink_times)
     return (per_actor, shot_events, face_keyframes, blink_times,
             id_to_name, name_to_id)
 
@@ -4035,26 +4723,102 @@ def _effective_cues(shot: dict, package: dict) -> list:
 def _assign_prop_rests(pids, prop_dicts, first_actor_for_pid,
                        default_actor, anchors, joints0, ground_ys,
                        staging, name_to_id, tracker=None,
-                       fallback_ground_y=0.0, events=None):
+                       fallback_ground_y=0.0, events=None,
+                       support_anchors=None, support_records=None):
     """Per-shot prop rest positions + rest kinds.
 
     Rest kinds: "surface" (desk paper), "pocket" (hidden until
-    manipulated), "ground" (visible on the ground line). The ground
-    rule (directive §7): a prop rests on the ground when its
-    semantic initial location is ON_GROUND -- the tracker's
-    transition-table resolution from the compiled events, never a
-    keyword guess -- OR when the shot drops it (a RELEASE event
-    with semantic type RELEASE_PROP): the prop's WORLD_STATIC spans
-    in that shot are on the ground, wherever it started. Everything
-    else keeps the kind-based rule (desk props on the paper, the
-    rest in pockets), so inferred IN_POCKET locations never
-    override deliberate surface staging.
+    manipulated), "ground" (visible on the ground line),
+    "support" (bottom on a support surface's top edge -- a
+    pedestal, desk, workbench, anvil, altar, or cabinet the
+    environment actually contains). A placement event naming a
+    support (``destination_support``) or a take event naming the
+    support it lifts from (``source_support`` -- the prop's home)
+    rests the prop on the nearest matching support anchor; when
+    one shot names both, the placement wins (the prop's end
+    state). Precedence: a drop in the shot (RELEASE_PROP) always
+    rests the prop on the ground; a support-naming event
+    overrides an ON_GROUND initial location (the prop was picked
+    up and staged); otherwise the ground rule (directive §7)
+    applies -- a prop rests on the ground when its semantic
+    initial location is ON_GROUND, the tracker's
+    transition-table resolution from the compiled events, never
+    a keyword guess. The snap is geometric: the rest point is
+    the support's projected top edge minus the prop's drawn
+    bottom offset, so the prop's bottom pixels sit ON the
+    surface, never floating above it or sunk into it. A named
+    support the environment does not have is recorded in
+    ``support_records`` as "missing:<name>" and falls through to
+    the ground/kind rules -- the engine never invents a support.
     Returns (rests, rest_kinds, pocket_anchors).
     """
     dropped = {str(e.get("prop_id")) for e in (events or [])
                if isinstance(e, dict)
                and e.get("action_type") == "RELEASE"
                and e.get("semantic_action_type") == "RELEASE_PROP"}
+    # Support assignment (before the per-prop loop: props sharing
+    # one support spread across its width instead of stacking).
+    # Naming runs even with no anchors, so a named-but-absent
+    # support is always recorded as missing.
+    support_positions: dict[str, tuple] = {}
+    support_for_pid: dict[str, dict] = {}
+    named: dict[str, str] = {}
+    for e in (events or []):
+        if not isinstance(e, dict):
+            continue
+        pid = e.get("prop_id")
+        if pid is None:
+            continue
+        if e.get("source_support"):
+            named[str(pid)] = e["source_support"]
+    for e in (events or []):
+        if not isinstance(e, dict):
+            continue
+        pid = e.get("prop_id")
+        if pid is None:
+            continue
+        if e.get("destination_support"):
+            named[str(pid)] = e["destination_support"]
+    for pid in pids:
+        name = named.get(str(pid))
+        if not name:
+            continue
+        cands = [a for a in (support_anchors or [])
+                 if a.get("support") == name]
+        if not cands:
+            if support_records is not None:
+                support_records[str(pid)] = f"missing:{name}"
+            continue
+        actor_name = first_actor_for_pid.get(pid) or default_actor
+        ax = staging.get(actor_name, W // 2)
+        if not isinstance(ax, (int, float)):
+            ax = W // 2
+        support_for_pid[str(pid)] = min(
+            cands, key=lambda a: abs(float(a["x"]) - float(ax)))
+    groups: dict[str, list] = {}
+    for key, anchor in support_for_pid.items():
+        groups.setdefault(str(anchor.get("id")), []).append(key)
+    for members in groups.values():
+        members.sort()
+        anchor = support_for_pid[members[0]]
+        n = len(members)
+        width = float(anchor.get("width") or 0.0)
+        for i, key in enumerate(members):
+            pid = next(p for p in pids if str(p) == key)
+            kind = infer_prop_kind(prop_dicts[pid])
+            fw, _fh = geometry_footprint(kind)
+            if n == 1:
+                x = float(anchor["x"])
+            else:
+                step = min(float(fw) + 16.0,
+                           0.6 * width / (n - 1)) if width > 0 \
+                    else float(fw) + 16.0
+                x = float(anchor["x"]) + (i - (n - 1) / 2.0) * step
+                if width > 0:
+                    x = max(float(anchor["x"]) - 0.3 * width,
+                            min(float(anchor["x"]) + 0.3 * width, x))
+            support_positions[key] = (
+                x, float(anchor["top_y"]) - prop_bottom_offset(kind))
     rests: dict[str, tuple] = {}
     rest_kinds: dict[str, str] = {}
     pocket_anchors: dict[str, str | None] = {}
@@ -4068,7 +4832,8 @@ def _assign_prop_rests(pids, prop_dicts, first_actor_for_pid,
             except KeyError:
                 initial = None
         initial = getattr(initial, "value", initial)
-        if initial == PropLocation.ON_GROUND.value or pid in dropped:
+        if pid in dropped or (initial == PropLocation.ON_GROUND.value
+                              and str(pid) not in support_positions):
             rest_kinds[pid] = "ground"
             if actor_name in staging and actor_name in ground_ys:
                 rests[pid] = (staging[actor_name] + 220.0,
@@ -4076,6 +4841,13 @@ def _assign_prop_rests(pids, prop_dicts, first_actor_for_pid,
             else:
                 rests[pid] = (W // 2, fallback_ground_y)
             pocket_anchors[pid] = None
+        elif str(pid) in support_positions:
+            rest_kinds[pid] = "support"
+            rests[pid] = support_positions[str(pid)]
+            pocket_anchors[pid] = None
+            if support_records is not None:
+                support_records[str(pid)] = str(
+                    support_for_pid[str(pid)].get("id"))
         elif kind in ("letter", "pen", "newspaper", "book", "ticket") \
                 and actor_name in anchors:
             rest_kinds[pid] = "surface"
@@ -4107,9 +4879,13 @@ def _build_shot_prop_machine(package, shot, shot_events, rests,
     id -> owner character id for pocket rests. Incoming holds (from
     the full event history, or plan_shots holder tracking when there
     is no history) seed a HOLD event at the shot start so a prop
-    grasped earlier stays in hand. Returns (machine, pids,
-    prop_kinds, rest_kinds, diagnostics) or (None, [], {}, {}, [])
-    when the shot has no compiled events or no props.
+    grasped earlier stays in hand. An adapter-declared OWNER (ID
+    form) seeds a HOLD only for a declared SIGNATURE_PROP that no
+    compiled event ever stages: owner-held signature props must be
+    visible, while a pocket prop must never appear in hand before
+    its take-out shot. Returns (machine, pids, prop_kinds,
+    rest_kinds, diagnostics) or (None, [], {}, {}, []) when the shot
+    has no compiled events or no props.
     """
     compiled = package.get("compiled_actions") or {}
     all_events = compiled.get("events") or []
@@ -4137,10 +4913,32 @@ def _build_shot_prop_machine(package, shot, shot_events, rests,
     grasped_in_shot = {str(e.get("prop_id")) for e in shot_events
                        if e.get("action_type") in (
                            "PICK_UP", "TAKE_OUT", "HOLD", "HOLD_PEN")}
+    # A shot event naming the prop's home rest -- a resting
+    # sentence ("Viên đá nằm trên đe") or a take from a support
+    # -- overrides the incoming hold for this shot: the script
+    # places the prop ON the support, so it rests there until
+    # taken, instead of staying in hand from the shot start
+    # (round-7 insert discipline: the R6 insert showed the
+    # stone held against a leg because the seeded HOLD won
+    # over the anvil rest).
+    resting_pids = {str(e.get("prop_id")) for e in shot_events
+                    if e.get("source_support")}
     machine_events = list(shot_events)
     holders = shot.get("prop_holders") or {}
+    # Declared signature props (adapter: SIGNATURE_PROP field) by
+    # character id, and every prop id any compiled event stages.
+    signature_by_char: dict[str, str] = {}
+    for _c in package.get("characters") or []:
+        if not isinstance(_c, dict):
+            continue
+        _sig = str(_c.get("signature_prop") or "").strip()
+        _cid = _c.get("id") or _c.get("identity_id")
+        if _sig and _cid:
+            signature_by_char[str(_cid)] = _sig
+    event_pids = {str(e.get("prop_id")) for e in all_events
+                  if isinstance(e, dict) and e.get("prop_id")}
     for pid in pids:
-        if pid in grasped_in_shot:
+        if pid in grasped_in_shot or pid in resting_pids:
             continue
         holder_id = _incoming_holder(all_events, pid, t0)
         if holder_id is None:
@@ -4148,8 +4946,24 @@ def _build_shot_prop_machine(package, shot, shot_events, rests,
             if holder_name is None and shot.get("props") \
                     and pid == str(shot["props"][0]):
                 holder_name = shot.get("prop_holder")
-            holder_id = name_to_id.get(str(holder_name)) \
-                if holder_name else None
+            if holder_name:
+                holder_str = str(holder_name)
+                if holder_str in id_to_name:
+                    # Adapter-declared owner (ID form). The old code
+                    # looked the ID up in name_to_id and always got
+                    # None, so owner-held signature props were never
+                    # seeded and never drawn. Seed ONLY a declared
+                    # signature prop that no compiled event stages.
+                    if pid in event_pids:
+                        continue
+                    _sig = signature_by_char.get(holder_str)
+                    _pname = str(prop_dicts[pid].get("name") or "")
+                    if _sig is None or _sig.strip().lower() not in (
+                            pid.lower(), _pname.lower()):
+                        continue
+                    holder_id = holder_str
+                else:
+                    holder_id = name_to_id.get(holder_str)
         if holder_id is None:
             continue
         if id_to_name.get(str(holder_id)) not in visible_names:
@@ -4217,6 +5031,73 @@ def _sequence_fns(windows, overlays, idle_fn, blocks=()):
     return fn
 
 
+# Primitives that accept hand="both" (both hands converge on the
+# target, flanking it): the grasp/transfer/carry family. Every other
+# primitive collapses "both" to "r" in _event_fn.
+_BOTH_HAND_PRIMITIVES = frozenset({
+    "pick_up", "bend_pick", "kneel_pick", "put_away", "carry_bag",
+    "receive_prop", "present_prop"})
+
+
+def _walk_direction(ctx, event):
+    """Walk direction for a locomotion event: the shot's direction
+    (toward the other character), flipped when the compiler marked
+    the event a retreat ("lùi lại một bước" steps AWAY). The facing
+    is untouched: a retreating character backs away while still
+    facing the other character, which is the astonished step-back.
+    """
+    direction = ctx["direction"]
+    params = (event.get("required_pose") or {}).get("params") or {}
+    if params.get("retreat"):
+        return -direction
+    return direction
+
+
+def _grasp_target(ctx, target, flank_px):
+    """Grasp point for pick_up/bend_pick/kneel_pick, pulled inside
+    the actor's arm reach when the prop's rest is beyond it.
+
+    A two-hand grasp at an unreachable rest collapses: both flanked
+    targets clamp to the reach circle along nearly the same ray, so
+    the hands land ~11 px apart and the lift reads one-handed for
+    its whole span (R6 shot #7: the stone rested on the anvil ~320
+    px from the shoulder, arm reach ~155 px). Pulling the grasp
+    point in along the same ray keeps the flanked targets
+    reachable, so both hands arrive at the prop's edges; the prop
+    state machine's APPROACHING state already glides the prop from
+    its rest to the hands, so no pop appears. Reachable targets
+    return unchanged (pixel-identical for ordinary pickups).
+    """
+    try:
+        char = ctx["char"]
+        joints = (ctx.get("joints0") or {}).get(ctx["name"]) or {}
+        head = joints.get("head")
+        hip = joints.get("hip")
+        if head is None or hip is None:
+            return target
+        dx, dy = float(hip[0]) - float(head[0]), float(hip[1]) - float(head[1])
+        spine = math.hypot(dx, dy)
+        if spine <= 0:
+            return target
+        head_r = float(getattr(char, "head_r", 0.0) or 0.0)
+        sh_x = float(head[0]) + dx / spine * head_r
+        sh_y = float(head[1]) + dy / spine * head_r
+        reach = float(char.u_arm) + float(char.l_arm)
+        if reach <= 0:
+            return target
+        tx, ty = float(target[0]), float(target[1])
+        rx, ry = tx - sh_x, ty - sh_y
+        dist = math.hypot(rx, ry)
+        flank = abs(float(flank_px)) if flank_px is not None else 0.0
+        limit = 0.95 * reach - flank
+        if dist <= max(limit, 0.45 * reach):
+            return target
+        pull = max(0.45 * reach, limit)
+        return (sh_x + rx / dist * pull, sh_y + ry / dist * pull)
+    except (KeyError, TypeError, ValueError, AttributeError):
+        return target
+
+
 def _event_fn(primitive, params, event, ctx, window_dur):
     """One compiled event -> a primitive closure (W4).
 
@@ -4231,7 +5112,7 @@ def _event_fn(primitive, params, event, ctx, window_dur):
     """
     char = ctx["char"]
     hand = params.get("hand", "r")
-    if hand == "both":
+    if hand == "both" and primitive not in _BOTH_HAND_PRIMITIVES:
         hand = "r"
     ground_y = ctx["ground_y"]
     dur = max(0.05, float(window_dur))
@@ -4263,21 +5144,22 @@ def _event_fn(primitive, params, event, ctx, window_dur):
 
     if primitive == "walk_to":
         from_x = ctx["pos"]["x"]
-        to_x = from_x + 320.0 * ctx["direction"]
+        to_x = from_x + 320.0 * _walk_direction(ctx, event)
         ctx["pos"]["x"] = to_x
         return walk_to(char, from_x, to_x, dur, ground_y)
     if primitive == "run_to":
         from_x = ctx["pos"]["x"]
-        to_x = from_x + 380.0 * ctx["direction"]
+        to_x = from_x + 380.0 * _walk_direction(ctx, event)
         ctx["pos"]["x"] = to_x
         return run_to(char, from_x, to_x, dur, ground_y)
     if primitive == "walk_mud":
         from_x = ctx["pos"]["x"]
-        to_x = from_x + 300.0 * ctx["direction"]
+        to_x = from_x + 300.0 * _walk_direction(ctx, event)
         ctx["pos"]["x"] = to_x
         return walk_mud(char, from_x, to_x, dur, ground_y)
     if primitive == "idle":
-        return idle(char, dur, ground_y)
+        return idle(char, dur, ground_y,
+                    gaze_seed=ctx.get("gaze_seed"))
     if primitive == "turn_to":
         if ctx["other_name"] in ctx["joints0"]:
             other_x = ctx["joints0"][ctx["other_name"]]["hip"][0]
@@ -4296,19 +5178,78 @@ def _event_fn(primitive, params, event, ctx, window_dur):
     if primitive == "stand_from_chair":
         return stand_from_chair(char, dur, ground_y,
                                 chair_x=ctx["pos"]["x"])
+    # Round-6 grip readability: the compiler's flank_px (half the
+    # prop's drawn footprint + margin) reaches the flank-aware
+    # primitives; absent, they keep the legacy +-12 px flank.
+    _flank = params.get("flank_px")
     if primitive == "bend_pick":
-        return bend_pick(char, _target(), dur, ground_y, hand=hand)
+        return bend_pick(char, _grasp_target(ctx, _target(), _flank),
+                         dur, ground_y, hand=hand,
+                         flank_px=_flank)
     if primitive == "kneel_pick":
-        return kneel_pick(char, _target(), dur, ground_y, hand=hand)
+        return kneel_pick(char, _grasp_target(ctx, _target(), _flank),
+                          dur, ground_y, hand=hand,
+                          flank_px=_flank)
     if primitive == "pick_up":
         if params.get("pocket"):
             target, source = _hip(), "pocket"
         else:
-            target, source = _target(), "ground"
+            target, source = _grasp_target(
+                ctx, _target(), _flank), "ground"
         return pick_up(char, target, dur, ground_y, hand=hand,
-                       source=source)
+                       source=source, flank_px=_flank)
     if primitive == "put_away":
+        # Round-8 (R2-V1): a RELEASE onto a named surface is a
+        # placement, not a pocketing -- the hand reaches to the
+        # support top instead of the hip (delivered R7 shot #10:
+        # Linh's hand went to her hip while the stone flew 700 px
+        # to the pedestal). PUT_AWAY (pocket) keeps the hip; a
+        # RELEASE whose support is not in the shot's anchors
+        # falls back to the hip rather than inventing a target.
+        if str(event.get("action_type", "")).upper() == "RELEASE":
+            _sup = event.get("destination_support")
+            _tops = ctx.get("supports") or {}
+            if _sup and str(_sup) in _tops:
+                _t = _tops[str(_sup)]
+                return place_on_surface(
+                    char, (float(_t["x"]), float(_t["top_y"])), dur,
+                    hand=hand, prop=ctx["prop"])
         return put_away(char, _hip(), dur, hand=hand, prop=ctx["prop"])
+    if primitive == "receive_prop":
+        # The pair animation (hand_over) placed the hand at the
+        # meeting point; target=None tells receive_prop the hand is
+        # already there, so only the securing pull-in moves. (This
+        # primitive was dead in the product path before: RECEIVE_PROP
+        # windows fell back to idle and the receiver's hand froze at
+        # the meeting point for the rest of the shot.)
+        return receive_prop(char, None, dur, hand=hand)
+    if primitive == "shield":
+        # Was dead in the product path (no branch -> idle fallback):
+        # SHIELD events rendered as standing still. The guard pose
+        # is a held pose; the threat/target stays the script's.
+        return shield(char, dur)
+    if primitive == "crouch":
+        # Was dead in the product path (no branch -> idle fallback).
+        return crouch(char, dur, ground_y)
+    if primitive == "hammer_strike":
+        # Was dead in the product path (no branch -> idle fallback):
+        # every forging strike rendered as standing still. The strike
+        # point is the anvil surface from staging (environment-
+        # projected top, or the in-front fallback); the primitive
+        # guarantees hammer-head contact up to IK reach and misses
+        # honestly outside it.
+        _anvil = ctx.get("anvil") or {}
+        _hip0 = _hip()
+        _sx = _anvil.get("x", _hip0[0] + ctx["facing"] * 0.30 * char.H)
+        _sy = _anvil.get("top_y", ground_y - 0.45 * char.H)
+        return hammer_strike(char, (_sx, _sy), dur, ground_y,
+                             hand=hand)
+    if primitive == "present_prop":
+        # Light-payoff pose: the prop is presented steady at chest
+        # height while the renderer paints the burst on it. hand
+        # "both" passes through (flanked hold); single hands present
+        # one-handed.
+        return present_prop(char, dur, hand=hand, flank_px=_flank)
     if primitive == "open_wallet":
         return open_wallet(char, dur, prop=ctx["prop"])
     if primitive == "close_wallet":
@@ -4375,6 +5316,66 @@ def _shot_has_bus(shot: dict, package: dict) -> bool:
     return False
 
 
+# Hero prop insert grammar (RicksClips loop round 2): an
+# object_insert frames the PROP, with the holder hand(s) as
+# context — never the face. The subject box is sized from the
+# prop's own footprint (geometry_footprint: the size _draw_prop
+# actually draws), not from a fixed +-170/+-90 box that drowned
+# small props and ballooned when the hand median split from the
+# prop median. Hands join only inside a bounded expansion toward
+# the hand median (at most one prop-box half-extent per edge), so
+# a far hand can never shrink the prop by dragging the crop
+# wide. The box floor keeps tiny props framing cleanly.
+_INSERT_PROP_MARGIN = 1.5
+_INSERT_MIN_BOX_W = 180.0
+_INSERT_MIN_BOX_H = 110.0
+_INSERT_HAND_HALF = 60.0
+
+
+def _insert_subject_box(cx, cy, kind, hand_xy=None,
+                        frame_w=1920.0, frame_h=1080.0):
+    """(pseudo standing box, record fields) for one insert subject.
+
+    The box is centred on the prop position, sized from the
+    prop footprint x _INSERT_PROP_MARGIN with a floor, and
+    expanded toward ``hand_xy`` by at most one prop-box
+    half-extent per edge. The face is never part of this box:
+    callers pass prop + hand positions only. A centre outside
+    the frame (a prop staged half off-frame) is clamped to the
+    frame edge: the crop can only show the visible part, and
+    the record reports the clamped centre in ``cx``/``cy``.
+    """
+    cx = min(max(float(cx), 0.0), float(frame_w))
+    cy = min(max(float(cy), 0.0), float(frame_h))
+    if hand_xy is not None:
+        hand_xy = (min(max(float(hand_xy[0]), 0.0), float(frame_w)),
+                   min(max(float(hand_xy[1]), 0.0), float(frame_h)))
+    _fw, _fh = geometry_footprint(kind)
+    _bw = max(float(_fw) * _INSERT_PROP_MARGIN, _INSERT_MIN_BOX_W)
+    _bh = max(float(_fh) * _INSERT_PROP_MARGIN, _INSERT_MIN_BOX_H)
+    _x0, _x1 = float(cx) - _bw / 2.0, float(cx) + _bw / 2.0
+    _y0, _y1 = float(cy) - _bh / 2.0, float(cy) + _bh / 2.0
+    _hand_included = False
+    if hand_xy is not None:
+        _hx, _hy = float(hand_xy[0]), float(hand_xy[1])
+        _x0 = max(min(_x0, _hx - _INSERT_HAND_HALF),
+                  float(cx) - _bw)
+        _x1 = min(max(_x1, _hx + _INSERT_HAND_HALF),
+                  float(cx) + _bw)
+        _y0 = max(min(_y0, _hy - _INSERT_HAND_HALF),
+                  float(cy) - _bh)
+        _y1 = min(max(_y1, _hy + _INSERT_HAND_HALF),
+                  float(cy) + _bh)
+        _hand_included = True
+    _box = {"cx": (_x0 + _x1) / 2.0, "head_y": _y0,
+            "foot_y": _y1, "half_w": (_x1 - _x0) / 2.0}
+    _fields = {"prop_w": float(_fw), "prop_h": float(_fh),
+               "box_w": _x1 - _x0, "box_h": _y1 - _y0,
+               "hands_included": _hand_included,
+               "cx": float(cx), "cy": float(cy)}
+    return _box, _fields
+
+
 def _insert_anchor_from_telemetry(telemetry: list[dict]):
     """Median staging-plane position of the dominant prop's draws.
 
@@ -4410,20 +5411,138 @@ def _insert_anchor_from_telemetry(telemetry: list[dict]):
 
 
 def _insert_anchor_subjects(telemetry: list[dict],
-                            standing_boxes: list[dict]):
+                            standing_boxes: list[dict],
+                            frame_w=1920.0, frame_h=1080.0):
     """(subjects, anchor record) for the insert pass-2 freeze.
 
     Telemetry median when a prop was drawn; the full-body
     standing boxes (the frame-0 path's no-prop fallback) when no
     prop draw carries coordinates.
+
+    Hero prop grammar (RicksClips loop round 2): the anchor is
+    PROP-LED. The subject box comes from _insert_subject_box
+    (prop footprint, bounded hand expansion) -- never from a
+    standing box, so the face can never define an insert frame.
+    The anchor centre comes from prop/hand PAIRS: frames where
+    the dominant prop is held (a draw with a holder + hand).
+    Pair medians sit at the hold/interaction phase for
+    travelling props, where the old independent medians split
+    (prop low, hand high) and ballooned the union box until
+    safe_frame stepped the scale down and the prop shrank.
+    Holderless props (resting, no hand) fall back to the median
+    of all draws of the dominant kind.
     """
     _median = _insert_anchor_from_telemetry(telemetry)
     if _median is not None:
         _ax, _ay, _akind, _an = _median
-        return ([{"cx": _ax, "head_y": _ay - 90,
-                  "foot_y": _ay + 90, "half_w": 170}],
-                {"source": "telemetry_median", "kind": _akind,
-                 "x": _ax, "y": _ay, "n_draws": _an})
+        _pairs: list[tuple[tuple[float, float],
+                           tuple[float, float]]] = []
+        _heads: list[tuple[float, float]] = []
+        _head_rs: list[float] = []
+        for _entry in telemetry or []:
+            _h = _entry.get("hands") or {}
+            for _draw in _entry.get("draws") or []:
+                if _draw.get("kind") != _akind:
+                    continue
+                _dx, _dy = _draw.get("x"), _draw.get("y")
+                if not isinstance(_dx, (int, float)):
+                    continue
+                if not isinstance(_dy, (int, float)):
+                    continue
+                _holder = _draw.get("holder")
+                _hand = _draw.get("hand")
+                _joints = _h.get(_holder) if _holder else None
+                if not _joints or _hand not in ("l", "r", "both"):
+                    continue
+                if _hand == "both":
+                    _pl = _joints.get("hand_l")
+                    _pr = _joints.get("hand_r")
+                    if _pl is None or _pr is None:
+                        continue
+                    _pt = ((_pl[0] + _pr[0]) / 2.0,
+                           (_pl[1] + _pr[1]) / 2.0)
+                else:
+                    _pt = _joints.get("hand_" + _hand)
+                if _pt is not None:
+                    _pairs.append(((float(_dx), float(_dy)),
+                                   (float(_pt[0]), float(_pt[1]))))
+                    _hp = _joints.get("head")
+                    if _hp is not None:
+                        _heads.append((float(_hp[0]),
+                                       float(_hp[1])))
+                    _hr = _joints.get("head_r")
+                    if isinstance(_hr, (int, float)) and _hr > 0:
+                        _head_rs.append(float(_hr))
+
+        def _median_pt(_pts):
+            _xs = sorted(p[0] for p in _pts)
+            _ys = sorted(p[1] for p in _pts)
+            _n = len(_pts)
+            return ((_xs[_n // 2] if _n % 2
+                     else (_xs[_n // 2 - 1] + _xs[_n // 2]) / 2.0),
+                    (_ys[_n // 2] if _n % 2
+                     else (_ys[_n // 2 - 1] + _ys[_n // 2]) / 2.0))
+
+        _hand_xy = None
+        _pair_anchored = False
+        if _pairs:
+            _ax, _ay = _median_pt([p[0] for p in _pairs])
+            _hand_xy = _median_pt([p[1] for p in _pairs])
+            _pair_anchored = True
+        _raw_x, _raw_y = _ax, _ay
+        _box, _fields = _insert_subject_box(
+            _ax, _ay, _akind, _hand_xy, frame_w, frame_h)
+        # Head lean: when the holder's head sits close to the
+        # prop (a bowed writing pose), a prop-centred crop is
+        # dominated by the face -- the exact defect Mai flagged.
+        # Translate the framing box AWAY from the head so the
+        # crop leans toward the prop + hands and the head slides
+        # toward (or out of) the frame edge. The shift is capped
+        # per axis so the prop always stays inside the box with
+        # margin; the anchor point (the prop) does not move.
+        _lean = None
+        if _heads and _pair_anchored:
+            _hx, _hy = _median_pt(_heads)
+            _hr = (sorted(_head_rs)[len(_head_rs) // 2]
+                   if _head_rs else 120.0)
+            _dxh, _dyh = _ax - _hx, _ay - _hy
+            _dist = math.hypot(_dxh, _dyh)
+            if 0.0 < _dist < 2.0 * _hr:
+                _hw = _fields["box_w"] / 2.0
+                _hh = _fields["box_h"] / 2.0
+                _mag = 0.75 * min(_hw, _hh)
+                _cap_x = max(0.0, _hw
+                             - _fields["prop_w"] / 2.0 - 8.0)
+                _cap_y = max(0.0, _hh
+                             - _fields["prop_h"] / 2.0 - 8.0)
+                _sx = max(-_cap_x, min(
+                    _cap_x, _dxh / _dist * _mag))
+                _sy = max(-_cap_y, min(
+                    _cap_y, _dyh / _dist * _mag))
+                if _sx != 0.0 or _sy != 0.0:
+                    _box = {"cx": _box["cx"] + _sx,
+                            "head_y": _box["head_y"] + _sy,
+                            "foot_y": _box["foot_y"] + _sy,
+                            "half_w": _box["half_w"]}
+                    _lean = {"head_x": _hx, "head_y": _hy,
+                             "head_r": _hr,
+                             "shift_x": _sx, "shift_y": _sy}
+        _record = {"source": "telemetry_median", "kind": _akind,
+                   "x": _fields["cx"], "y": _fields["cy"],
+                   "n_draws": _an,
+                   "n_hands": len(_pairs),
+                   "pair_anchored": _pair_anchored,
+                   "n_pairs": len(_pairs)}
+        if (_fields["cx"], _fields["cy"]) != (_raw_x, _raw_y):
+            _record.update({"clamped_to_frame": True,
+                            "raw_x": _raw_x, "raw_y": _raw_y})
+        if _lean is not None:
+            _record["lean"] = _lean
+        _record.update(_fields)
+        if _hand_xy is not None:
+            _record.update({"hand_x": _hand_xy[0],
+                            "hand_y": _hand_xy[1]})
+        return ([_box], _record)
     return (list(standing_boxes),
             {"source": "standing_boxes_fallback", "kind": None,
              "x": None, "y": None, "n_draws": 0})
@@ -4456,6 +5575,178 @@ def _screen_glow_record(record: dict, crop_rect, frame_size):
     out["radius"] = min(float(record["radius"]) * zx,
                         GLOW_SCREEN_RADIUS_CAP)
     return out
+
+
+# Radius (staging px) around a glow source that stays lit even
+# where a character's limbs pass: the glowing prop itself must
+# read, and the flesh touching it catches the light. Beyond the
+# hole the limb-segment exclusions keep the cast unwashed.
+GLOW_SOURCE_HOLE_STAGING_PX = 46.0
+
+
+def _glow_exclusion_boxes(joints_by_name, names, crop_rect,
+                          frame_size):
+    """Screen-space rects covering the cast's posed limbs.
+
+    Round-7: the static standing box (round 6, R2-F1) covered
+    the whole insert crop whenever the holder stood AT the prop,
+    erasing the prop's own halo. The posed joints follow the
+    actual limbs, so the glow spills around the cast instead of
+    over them -- and the prop between the limbs stays lit.
+    Segments: torso (head->hip, shirt half-width), arms
+    (shoulder->elbow->hand), legs (hip->knee->foot), plus the
+    head disc. Margins derive from the body scale in the
+    telemetry (limb width 0.026*H, shirt half-width ~0.05*H).
+    Joints missing from a frame's telemetry skip that segment.
+    """
+    x0, y0, _x1, _y1 = (float(v) for v in crop_rect)
+    fw, fh = (float(v) for v in frame_size)
+    zx = fw / max(_x1 - x0, 1.0)
+    zy = fh / max(_y1 - y0, 1.0)
+    boxes = []
+    for name in names:
+        joints = joints_by_name.get(name)
+        if not isinstance(joints, dict):
+            continue
+        h = float(joints.get("H") or 0.0)
+        limb_m = 0.013 * h + 4.0
+        torso_m = 0.05 * h + 4.0
+        segments = [
+            ("head", "hip", torso_m),
+            ("shoulder", "elbow_l", limb_m),
+            ("elbow_l", "hand_l", limb_m),
+            ("shoulder", "elbow_r", limb_m),
+            ("elbow_r", "hand_r", limb_m),
+            ("hip", "knee_l", limb_m),
+            ("knee_l", "foot_l", limb_m),
+            ("hip", "knee_r", limb_m),
+            ("knee_r", "foot_r", limb_m),
+        ]
+        for a_key, b_key, margin in segments:
+            a = joints.get(a_key)
+            b = joints.get(b_key)
+            if a is None or b is None:
+                continue
+            ax, ay = float(a[0]), float(a[1])
+            bx, by = float(b[0]), float(b[1])
+            boxes.append((
+                (min(ax, bx) - margin - x0) * zx,
+                (min(ay, by) - margin - y0) * zy,
+                (max(ax, bx) + margin - x0) * zx,
+                (max(ay, by) + margin - y0) * zy))
+        head = joints.get("head")
+        head_r = float(joints.get("head_r") or 0.0)
+        if head is not None and head_r > 0:
+            hx, hy = float(head[0]), float(head[1])
+            boxes.append((
+                (hx - head_r - x0) * zx,
+                (hy - head_r - y0) * zy,
+                (hx + head_r - x0) * zx,
+                (hy + head_r - y0) * zy))
+    return boxes
+
+
+def _anchor_tier_for_shot(shot_events, shot) -> str:
+    """Framing anchor tier: "head" (face only), "head_hands"
+    (head -> waist, hand-level interactions stay in frame), or
+    "full" (ground-level actions: the whole body + ground contact
+    stay in frame). Ground wins over hand. Compiled verbs are
+    authoritative; cue names are consulted only when the shot has
+    no compiled events in its span (a discarded cue stages nothing
+    and must not widen the frame)."""
+    verbs = {str(e.get("action_type", "")).upper()
+             for e in shot_events or []}
+    if verbs & _ANCHOR_GROUND_VERBS:
+        return "full"
+    if verbs & _ANCHOR_HAND_VERBS:
+        return "head_hands"
+    if verbs:
+        return "head"
+    cues = {str(c).lower() for c in (shot.get("action_cues") or [])}
+    if cues & _ANCHOR_GROUND_CUES:
+        return "full"
+    if cues & _ANCHOR_HAND_CUES:
+        return "head_hands"
+    return "head"
+
+
+def _shot_has_locomotion(shot_events, shot) -> bool:
+    """True when the shot stages horizontal travel (walk/run/march/
+    board/climb). Compiled verbs decide; cue names are consulted
+    only when the shot has no compiled events in its span."""
+    verbs = {str(e.get("action_type", "")).upper()
+             for e in shot_events or []}
+    if verbs:
+        return bool(verbs & _LOCOMOTION_VERBS)
+    cues = {str(c).lower() for c in (shot.get("action_cues") or [])}
+    return bool(cues & _LOCOMOTION_CUES)
+
+
+# Top-accessory extents above the head circle, as fractions of the
+# head radius, measured from the draw code (character_art): the hat
+# dome tops at hy-1.75r, the tied bun at hy-1.34r, a crown at
+# top-0.34r, antlers at top-0.24r, a tuft at hy-1.22r, small/curved
+# horns at top-0.18r/0.14r. The hair cap follows the head circle
+# exactly (0). A character's margin is the max of what they wear.
+_TOP_ACCESSORY_FRAC = {
+    "hat": 0.75,
+    "tied": 0.34,
+    "crown": 0.34,
+    "antlers": 0.24,
+    "tuft": 0.22,
+    "horns_small": 0.18,
+    "horns_curved": 0.14,
+}
+
+
+def _trait_value(char, key):
+    """One trait value from a character dict OR a Stickman: dicts
+    read ``.get`` (falling back to ``visual_profile`` for horns /
+    ears / tails, the way ``map_character`` resolves them),
+    objects read ``getattr`` with the same fallback."""
+    if isinstance(char, dict):
+        value = char.get(key)
+        if value is None:
+            profile = char.get("visual_profile")
+            if isinstance(profile, dict):
+                value = profile.get(key)
+        return value
+    value = getattr(char, key, None)
+    if value is None:
+        profile = getattr(char, "visual_profile", None)
+        if isinstance(profile, dict):
+            value = profile.get(key)
+    return value
+
+
+def _top_accessory_frac(char) -> float:
+    """Fraction of the head radius a character's top accessories
+    extend above the head circle (0 when nothing sticks up).
+
+    Round 9 (R8 residual): the standing box topped exactly at the
+    head circle, so Linh's bun (~0.34r) nearly touched the frame
+    top in shot #3 (~5 px headroom) and Bé Nam's hat dome (0.75r)
+    could clip in tight framings. The framing box must cover the
+    drawn silhouette, not just the head circle. Accepts a package
+    character dict or a Stickman (the camera fit runs before the
+    Stickmen are built)."""
+    frac = 0.0
+    hat = _trait_value(char, "hat")
+    if hat and hat != "none":
+        frac = max(frac, _TOP_ACCESSORY_FRAC["hat"])
+    hair = _trait_value(char, "hair_style")
+    if hair in ("tied", "tuft"):
+        frac = max(frac, _TOP_ACCESSORY_FRAC[hair])
+    horns = _trait_value(char, "horns") or "none"
+    if horns == "crown":
+        frac = max(frac, _TOP_ACCESSORY_FRAC["crown"])
+    elif horns == "antlers":
+        frac = max(frac, _TOP_ACCESSORY_FRAC["antlers"])
+    elif horns == "small":
+        frac = max(frac, _TOP_ACCESSORY_FRAC["horns_small"])
+    elif horns == "curved":
+        frac = max(frac, _TOP_ACCESSORY_FRAC["horns_curved"])
+    return frac
 
 
 def _render_shot(args: dict) -> dict:
@@ -4557,6 +5848,16 @@ def _render_shot(args: dict) -> dict:
     # ---- visible cast (names first: characters are built AFTER the
     # shot camera resolves, because their drawn height comes from
     # the camera's perspective scale — see char_metrics) ------------
+    # D2 (RicksClips loop round 1): a full-frame map background
+    # has no ground plane -- no character is staged on it. The
+    # predicate calls the same selection build_environment uses
+    # (select_archetype -> _select_archetype_detail), so it agrees
+    # with the scene build's _is_map by construction. The map shot
+    # is a graphic insert; the character-free scene-2 behaviour
+    # becomes the rule for every map shot.
+    _v1_loc = shot.get("v1_location")
+    _shot_is_map = (isinstance(_v1_loc, dict)
+                    and select_archetype(_v1_loc)[0] == "MAP")
     _visible = shot.get("visible")
     if _visible is None:
         _visible = [str(c["name"]) for c in package["characters"]]
@@ -4564,7 +5865,35 @@ def _render_shot(args: dict) -> dict:
     _char_by_name = {str(c["name"]): (i, c)
                      for i, c in enumerate(package["characters"])}
     names = [n for n in _char_by_name if n in _visible]
+    _map_suppressed = _shot_is_map and len(names) > 0
+    if _shot_is_map:
+        names = []
+    # Resting faces (V1 DEFAULT_EXPRESSION, verbatim script text):
+    # a character with no shot expression or keyframe renders their
+    # declared default instead of "neutral" for everyone. The whole
+    # string interprets position-ordered, so "Caring, worried,
+    # determined" resolves to the first mappable emotion (worried);
+    # an unmappable default stays None -> neutral. Legacy packages
+    # without the field are unaffected.
+    _default_expr: dict[str, str | None] = {}
+    for _n in names:
+        _dflt = str(_char_by_name[_n][1].get("default_expression")
+                    or "")
+        _default_expr[_n] = interpret_expression(_dflt) \
+            if _dflt else None
     speaker = shot.get("speaker")
+    # Round-7 listener mirroring: the speaker's resolved
+    # expression name, computed once per shot. Listeners with
+    # no declared resting face mirror it at half strength (see
+    # the per-frame listener branch); a neutral speaker mirrors
+    # to neutral, so neutral shots render unchanged.
+    _speaker_expr_name = None
+    if speaker and speaker in names:
+        _slabel = shot.get("expression")
+        _sinterp = interpret_expression(_slabel) if _slabel else None
+        _speaker_expr_name = (
+            _sinterp if _sinterp in EXPRESSION_NAMES
+            else resolve_expression(_slabel, shot.get("text", "")))
     actor = None
     if shot["kind"] == "action" and shot.get("actor") in names:
         # The action lead's actor comes from the scene's action text
@@ -4626,6 +5955,22 @@ def _render_shot(args: dict) -> dict:
      _id_to_name, _name_to_id) = _shot_action_events(
          package, shot, duration)
     _t0 = float(shot.get("start_sec", 0.0))
+    # Round 8 (R4-A5): micro-saccade seeds, one per character per
+    # RENDERED shot -- the same seed-base scheme as the ambient
+    # blink schedules (directive + index + start_sec), with a
+    # distinct domain tag so gaze phases never correlate with
+    # blink times. Gaze wander is a pure function of (t, seed),
+    # so the seeds are computed once here and read per frame.
+    _gaze_seed_base = "{}:{}:{}".format(
+        shot.get("directive_shot_id"), shot.get("index", ""),
+        shot.get("start_sec", 0.0))
+    _gaze_seeds = {}
+    for _c in package.get("characters") or []:
+        _nm = str(_c.get("name") or "")
+        if _nm:
+            _gaze_seeds[_nm] = zlib.crc32(
+                f"gaze:{_gaze_seed_base}:{_nm}".encode("utf-8")) \
+                & 0x7FFFFFFF
     _furniture_staging: dict[str, tuple] = {}
     _seated_at_start: dict[str, bool] = {}
     _compiled_all = (package.get("compiled_actions") or {}).get(
@@ -4714,6 +6059,123 @@ def _render_shot(args: dict) -> dict:
                     world_xs[actor] = float(_cx)
                     world_zs[actor] = float(_cz)
                     _furniture_staging[actor] = (float(_cx), float(_cz))
+    # ---- Round-5 striker staging: HAMMER_STRIKE actors stand AT
+    # the anvil. Before this, the striker stayed on the character
+    # plane while the anvil sat ~3 units behind it, so every strike
+    # hit air ~2 m from the anvil in screen space while the
+    # contact audit passed (the primitive clamps to arm reach and
+    # "misses honestly"). Same pattern as the furniture staging
+    # above: the anvil element's world position comes from the
+    # deterministic environment package; the striker stages beside
+    # it (0.9 units, staying on their current side) at the anvil's
+    # depth, facing the anvil. No anvil element -> no staging
+    # change, never an invented anvil. The strike point itself
+    # (ctx["anvil"]) is unchanged -- it already anchors to the
+    # environment anvil; only the striker's position was wrong.
+    _anvil_staging: dict[str, tuple] = {}
+    _striker_names = [
+        _n for _n in names
+        if any(((e.get("required_pose") or {}).get("primitive")
+                == "hammer_strike")
+               for _s, _e, e in _per_actor.get(_n, []))]
+    if _striker_names and isinstance(shot.get("v1_location"), dict):
+        _anvil_pkg = None
+        try:
+            _anvil_pkg = build_environment(
+                shot["v1_location"],
+                time_of_day=shot.get("time_of_day", "day"),
+                style={"mood": shot.get("mood", "warm")})
+        except Exception:
+            _anvil_pkg = None
+        if _anvil_pkg is not None:
+            _anvil_el = None
+            for _el in _anvil_pkg.get("elements") or []:
+                if _el.get("id") == "anvil_top":
+                    _anvil_el = _el
+                    break
+                if _anvil_el is None and _el.get("kind") == "anvil":
+                    _anvil_el = _el
+            if _anvil_el is not None:
+                _ax, _ay, _az = _anvil_el["center"]
+                for _n in _striker_names:
+                    _side = -1.0 if world_xs[_n] <= float(_ax) else 1.0
+                    _sx = float(_ax) + _side * 0.9
+                    world_xs[_n] = _sx
+                    world_zs[_n] = float(_az)
+                    _anvil_staging[_n] = (_sx, float(_az), _side)
+    # ---- pick staging (round 8, R2-A3 lift half) --------------------
+    # Same defect family as the striker staging: an actor who picks
+    # a prop off a support must stand AT that support, or the grasp
+    # point is pulled inside arm reach (face height) and the stone
+    # glides 245 px across the screen and sinks to the waist instead
+    # of rising off the surface. The support is the one the shot's
+    # own events name for the picked prop (the take's source_support,
+    # or a same-shot placement's destination_support -- the same
+    # precedence _assign_prop_rests uses), matched against an
+    # environment element; no named support or no matching element
+    # -> no staging change, never an invented support. Ground and
+    # pocket pickups stage nothing. Pickers are anchored like
+    # strikers (staging fit, clearance and head clearance never
+    # move them) and face the support.
+    _pick_staging: dict[str, tuple] = {}
+    _PICK_PRIMITIVES = ("pick_up", "bend_pick", "kneel_pick")
+    _pick_events: list[tuple[str, dict]] = []
+    for _n in names:
+        for _s, _e, _ev in _per_actor.get(_n, []):
+            _pose = _ev.get("required_pose") or {}
+            if _pose.get("primitive") in _PICK_PRIMITIVES \
+                    and not (_pose.get("params") or {}).get("pocket"):
+                _pick_events.append((_n, _ev))
+    if _pick_events and isinstance(shot.get("v1_location"), dict):
+        _pick_pkg = None
+        try:
+            _pick_pkg = build_environment(
+                shot["v1_location"],
+                time_of_day=shot.get("time_of_day", "day"),
+                style={"mood": shot.get("mood", "warm")})
+        except Exception:
+            _pick_pkg = None
+        if _pick_pkg is not None:
+            _named_support: dict[str, str] = {}
+            for _e in _shot_events:
+                _pid = _e.get("prop_id")
+                if _pid and _e.get("source_support"):
+                    _named_support[str(_pid)] = _e["source_support"]
+            for _e in _shot_events:
+                _pid = _e.get("prop_id")
+                if _pid and _e.get("destination_support"):
+                    _named_support[str(_pid)] = \
+                        _e["destination_support"]
+            for _n, _ev in _pick_events:
+                _pid = _ev.get("prop_id")
+                _sup = _named_support.get(str(_pid)) if _pid else None
+                if not _sup or _n in _pick_staging:
+                    continue
+                _sup_el = None
+                for _el in _pick_pkg.get("elements") or []:
+                    _eid = str(_el.get("id") or "")
+                    _ekind = str(_el.get("kind") or "")
+                    if _eid == _sup or _ekind == _sup \
+                            or _eid == f"{_sup}_top" \
+                            or _ekind == f"statue_{_sup}" \
+                            or (_sup == "table" and _ekind in (
+                                "desk", "workbench", "table")):
+                        _sup_el = _el
+                        break
+                if _sup_el is None:
+                    continue
+                _ax, _ay, _az = _sup_el["center"]
+                _side = -1.0 if world_xs[_n] <= float(_ax) else 1.0
+                _sx = float(_ax) + _side * 0.9
+                world_xs[_n] = _sx
+                world_zs[_n] = float(_az)
+                _pick_staging[_n] = (_sx, float(_az), _side)
+    # NOTE (Round-8): place staging lives AFTER the viewpoint
+    # resolution (below, next to the shield pass): staging the
+    # placer beside a support needs the shot camera -- a
+    # world-space offset breaks across the depth gap between the
+    # placer and a far support (the pedestal at z -8.5 staged
+    # Linh as a giant at the frame top).
     # ---- shot viewpoint (Stage 3 / F9, P0 camera redirect) --------
     # Every shot resolves its OWN PerspectiveCamera from shot_type +
     # camera_angle + subject/staging, and that camera — not the
@@ -4740,6 +6202,38 @@ def _render_shot(args: dict) -> dict:
             and _angle != "eye_level":
         _angle = "eye_level"
         _map_frontal = True
+    # Round-11 establishing elevation cap (R10-D1): a steep
+    # requested angle on an establishing shot pitches the whole
+    # frustum below the horizon -- Loop-01 #1/#5 rendered 0 px of
+    # sky (high_angle 32 deg against the 46 deg fov). An
+    # establishing shot must show the place and the sky, so the
+    # EXECUTED elevation is capped at ESTABLISHING_MAX_ELEV_DEG
+    # (15 deg: ~260 px sky band, clouds fully in frame, still
+    # elevated). Only the elevation is capped; azimuth and radius
+    # still apply, and the requested angle is recorded on the
+    # report (camera_angle_requested), never silently dropped.
+    # The map frontal rule above takes precedence (it already
+    # forces eye_level). Other shot types are untouched: a steep
+    # angle on a reaction or close-up frames a subject, not a
+    # place. The fit calls below receive the same executed
+    # elevation so they measure the camera that will render.
+    _exec_elev = None
+    _elev_capped = False
+    _requested_elev = None
+    if shot["shot_type"] == "establishing" and not _map_frontal:
+        _requested_elev = elevation_for_angle(_angle)
+        # Round 14 (Loop-02 pre-render catch): an explicitly
+        # requested birds_eye is EXEMPT. No shot type defaults
+        # to birds_eye, so a resolved birds_eye is always the
+        # script asking for a top-down view -- and the cap's
+        # rationale (an establishing shot must show the place
+        # AND the sky) does not apply to a view that deliberately
+        # looks down. Capping it to 15 deg flattened Loop-02's
+        # flagship diversity angle into a mildly elevated wide.
+        if _requested_elev > ESTABLISHING_MAX_ELEV_DEG \
+                and _angle != "birds_eye":
+            _exec_elev = ESTABLISHING_MAX_ELEV_DEG
+            _elev_capped = True
     if shot["shot_type"] == "over_the_shoulder" \
             and _ots_subject in names:
         _subject_name = _ots_subject
@@ -4779,12 +6273,17 @@ def _render_shot(args: dict) -> dict:
         shot["shot_type"], _angle, _target_x, _target_z,
         _counterpart_x, shot.get("srs_side", 0),
         [(world_xs[n], world_zs[n]) for n in names],
-        [char_scales[n] for n in names])
+        [char_scales[n] for n in names],
+        top_fracs=[_top_accessory_frac(_char_by_name[n][1])
+                   if _char_by_name.get(n) else 0.0 for n in names],
+        elevation_deg=_exec_elev)
     shot_cam = viewpoint_for_shot(
         shot["shot_type"], _angle,
         subject_pos=(_target_x, 1.2, _target_z),
         counterpart_x=_counterpart_x, srs_side=shot.get("srs_side", 0),
-        radius_scale=_radius_scale)
+        radius_scale=_radius_scale,
+        azimuth_side=shot.get("viewpoint_azimuth_side"),
+        elevation_deg=_exec_elev)
     # OTS foreground fit (Stage 3 / F9): the shoulder azimuth swings
     # the listener toward the frame edge, and the unadjusted staging
     # slot put their head ~60% out of frame (F9 probe). Pull the
@@ -4813,6 +6312,534 @@ def _render_shot(args: dict) -> dict:
                 break
             _lx = _next
         world_xs[_ots_listener] = _lx
+    # ---- Round-7 shield staging: the protected character hides
+    # behind the shielder. "Behind" is measured along the shot
+    # camera's view axis (a bare world-z push lands sideways under
+    # an azimuth camera -- the first version put Bé Nam at the
+    # frame edge). The protected figure stages 0.8 units behind
+    # the shielder along the camera forward and 0.45 units to the
+    # side toward frame centre, so they peek from behind the
+    # shielder's shoulder with the shield between them and the
+    # threat instead of being fully occluded. This runs AFTER the
+    # OTS fit (the shielder's final x) and BEFORE the staging fit.
+    # Shield-staged characters are anchored (exempt from the
+    # staging fit and the clearance push): the overlap IS the
+    # staging, not a collision to resolve.
+    _shield_staging: dict[str, tuple] = {}
+    _shield_disc_align: dict[str, dict] = {}
+    _fwd_x = shot_cam.target[0] - shot_cam.position[0]
+    _fwd_z = shot_cam.target[2] - shot_cam.position[2]
+    _fwd_len = math.hypot(_fwd_x, _fwd_z) or 1.0
+    _fwd_x, _fwd_z = _fwd_x / _fwd_len, _fwd_z / _fwd_len
+    _right_x, _right_z = -_fwd_z, _fwd_x
+    for _e in _shot_events:
+        if str(_e.get("action_type", "")).upper() != "SHIELD":
+            continue
+        _actor = _id_to_name.get(str(_e.get("actor_id") or ""))
+        _prot = _id_to_name.get(str(_e.get("target_id") or ""))
+        if (_actor not in world_xs or _prot not in world_xs
+                or _prot == _actor):
+            continue
+        _ax, _az = world_xs[_actor], world_zs[_actor]
+        # Round-8 (R7-D3): align the protected figure with the
+        # SHIELD DISC from the camera's view, not just with the
+        # shielder's body. The disc sits at the guard hand: the
+        # primitive's guard target is chest_x + facing * 110
+        # (scaled), both hands stacked at that x. The R7 staging
+        # (fwd 0.8 + side 0.45) left Be Nam 82 px left of the disc
+        # centre in the delivered OTS shot -- beside the disc,
+        # tucking behind the shoulder. Binary-search the lateral
+        # offset along the camera-right axis for the protected
+        # figure's projected cx == the guard x (depth unchanged:
+        # the figure stays behind the shielder). The search is
+        # bounded to 1.2 m about the shielder and keeps the
+        # closest candidate when the disc x is unreachable.
+        _acx, _, _agh = char_metrics(
+            shot_cam, _ax, _az, base_scale=char_scales[_actor])
+        _other_n = next(
+            (n for n in names if n != _actor and n != _prot), None)
+        if _other_n is not None:
+            _ocx, _, _ = char_metrics(
+                shot_cam, world_xs[_other_n], world_zs[_other_n],
+                base_scale=char_scales[_other_n])
+            _sfacing = 1.0 if _ocx > _acx else -1.0
+        else:
+            _sfacing = 1.0 if W / 2.0 > _acx else -1.0
+        _guard_x = _acx + _sfacing * 110.0 * _agh / 560.0
+        _lo, _hi = -1.2, 1.2
+        _best_lat = None
+        for _ in range(14):
+            _mid = (_lo + _hi) / 2.0
+            _tx = _ax + _fwd_x * 0.8 + _right_x * _mid
+            _tz = _az + _fwd_z * 0.8 + _right_z * _mid
+            _gx, _, _ = char_metrics(
+                shot_cam, _tx, _tz,
+                base_scale=char_scales[_prot])
+            if _best_lat is None or abs(_gx - _guard_x) < _best_lat[0]:
+                _best_lat = (abs(_gx - _guard_x), _tx, _tz, _mid, _gx)
+            if _gx < _guard_x:
+                _lo = _mid
+            else:
+                _hi = _mid
+        _, _px, _pz, _plat, _pgx = _best_lat
+        _pside = 1.0 if _plat >= 0.0 else -1.0
+        world_xs[_prot] = _px
+        world_zs[_prot] = _pz
+        _shield_staging[_prot] = (_px, _pz, _pside)
+        _shield_disc_align[_prot] = {
+            "disc_x": round(_guard_x, 1),
+            "protected_cx": round(_pgx, 1),
+            "residual_px": round(abs(_pgx - _guard_x), 1)}
+    # Round-8 (R2-V1): place staging, in SCREEN space. The mirror
+    # of pick staging for RELEASE (PLACE_ON_SURFACE) beats: the
+    # placing actor stages beside the NAMED destination support
+    # so the hand travels to the surface and the release glide is
+    # a short set-down, not a 700 px teleport (delivered R7 shot
+    # #10). A world-space offset breaks across the depth gap: the
+    # pedestal at z -8.5 staged Linh as a giant (copying its z)
+    # or 600 px away (keeping her z with a 0.9 world offset).
+    # Instead the placer's projected cx is solved onto a target
+    # beside the support's projected box, moving along the
+    # camera-right axis (depth preserved, screen-x monotonic).
+    # Only RELEASE events with a destination_support stage;
+    # PUT_AWAY (pocket) stages nothing; a character who also
+    # picks in this shot keeps the pick staging. The support must
+    # match a real environment element. Placers are anchored like
+    # pickers and face the support. The projected support boxes
+    # are shared with the sightline pass below.
+    _place_staging: dict[str, tuple] = {}
+    _place_supports: dict[str, dict] = {}
+    _place_events: list[tuple[str, dict]] = []
+    for _n in names:
+        for _s, _e, _ev in _per_actor.get(_n, []):
+            if str(_ev.get("action_type", "")).upper() == "RELEASE" \
+                    and _ev.get("destination_support"):
+                _place_events.append((_n, _ev))
+    if _place_events and isinstance(shot.get("v1_location"), dict):
+        _place_pkg = None
+        try:
+            _place_pkg = build_environment(
+                shot["v1_location"],
+                time_of_day=shot.get("time_of_day", "day"),
+                style={"mood": shot.get("mood", "warm")})
+        except Exception:
+            _place_pkg = None
+        if _place_pkg is not None:
+            for _n, _ev in _place_events:
+                _sup = str(_ev.get("destination_support"))
+                if _sup in _place_supports:
+                    continue
+                _sup_el = None
+                for _el in _place_pkg.get("elements") or []:
+                    _eid = str(_el.get("id") or "")
+                    _ekind = str(_el.get("kind") or "")
+                    if _eid == _sup or _ekind == _sup \
+                            or _eid == f"{_sup}_top" \
+                            or _ekind == f"statue_{_sup}" \
+                            or (_sup == "table" and _ekind in (
+                                "desk", "workbench", "table")):
+                        _sup_el = _el
+                        break
+                if _sup_el is None:
+                    continue
+                _scx, _scy, _scz = (float(v)
+                                    for v in _sup_el["center"])
+                _ssx, _ssy, _ssz = (float(v)
+                                    for v in _sup_el["size"])
+                _corners = []
+                for _dx in (-_ssx / 2.0, _ssx / 2.0):
+                    for _dy in (-_ssy / 2.0, _ssy / 2.0):
+                        for _dz in (-_ssz / 2.0, _ssz / 2.0):
+                            _px, _py, _, _vis = shot_cam.project(
+                                (_scx + _dx, _scy + _dy, _scz + _dz),
+                                W, H)
+                            if _vis:
+                                _corners.append((_px, _py))
+                if len(_corners) < 4:
+                    continue
+                _l = min(c[0] for c in _corners)
+                _r = max(c[0] for c in _corners)
+                _place_supports[_sup] = {
+                    "l": _l, "r": _r,
+                    "t": min(c[1] for c in _corners),
+                    "b": max(c[1] for c in _corners),
+                    "cx": (_l + _r) / 2.0,
+                    "depth": ((_scx - shot_cam.position[0]) * _fwd_x
+                              + (_scz - shot_cam.position[2])
+                              * _fwd_z)}
+            for _n, _ev in _place_events:
+                if _n in _place_staging or _n in _pick_staging:
+                    continue
+                _box = _place_supports.get(
+                    str(_ev.get("destination_support")))
+                if _box is None:
+                    continue
+                _wx, _wz = world_xs[_n], world_zs[_n]
+                _cx0, _, _gh0 = char_metrics(
+                    shot_cam, _wx, _wz,
+                    base_scale=char_scales[_n])
+                _hw0 = max(0.17 * _gh0 + 20.0, 0.15 * _gh0)
+                _side = -1.0 if _cx0 <= _box["cx"] else 1.0
+                _target = _box["cx"] + _side * (
+                    (_box["r"] - _box["l"]) / 2.0 + _hw0 + 30.0)
+                _lo, _hi = -3.0, 3.0
+                _best = None
+                for _ in range(14):
+                    _mid = (_lo + _hi) / 2.0
+                    _tx = _wx + _right_x * _mid
+                    _tz = _wz + _right_z * _mid
+                    _gx, _, _ = char_metrics(
+                        shot_cam, _tx, _tz,
+                        base_scale=char_scales[_n])
+                    if _best is None \
+                            or abs(_gx - _target) < _best[0]:
+                        _best = (abs(_gx - _target), _tx, _tz)
+                    if _gx < _target:
+                        _lo = _mid
+                    else:
+                        _hi = _mid
+                _, _px, _pz = _best
+                world_xs[_n] = _px
+                world_zs[_n] = _pz
+                _place_staging[_n] = (_px, _pz, _side)
+    # Round-8 (R2-V1): support sightline clearance. In a
+    # placement shot the support (pedestal, table, anvil) is the
+    # visual target; a bystander standing between the camera and
+    # the support hides the placement (delivered R7 shot #10:
+    # Ong Ba covered the pedestal, so the stone's arrival was
+    # invisible). Bystanders whose projected standing box
+    # overlaps the support's projected box -- and who stand in
+    # front of the support -- are pushed laterally away from the
+    # support's screen centre until clear. The placing actor is
+    # exempt (staged beside the support), as are all set-piece
+    # anchors and shield-staged figures. The support itself never
+    # moves (continuity: it is world-anchored across shots). OTS
+    # shots skip: the foreground listener IS the composition.
+    _sightline_moved: dict[str, dict] = {}
+    _sightline_skipped = None
+    if _place_staging and _place_supports \
+            and shot.get("shot_type") != "over_the_shoulder":
+        for _sup in sorted(_place_supports):
+            _box = _place_supports[_sup]
+            _sup_l = _box["l"]
+            _sup_r = _box["r"]
+            _sup_t = _box["t"]
+            _sup_b = _box["b"]
+            _sup_cx = _box["cx"]
+            _sup_depth = _box["depth"]
+            # Round-8: the obstacle is the support UNION the
+            # placers' boxes. Clearing only the support left the
+            # bystander standing on top of the placer (probe: Ong
+            # Ba's head covered Linh's face -- both exempt from
+            # the head-clearance pass, so nothing separated
+            # them). The bystander must clear the whole
+            # placement group.
+            _ob_l, _ob_r = _sup_l, _sup_r
+            _ob_t, _ob_b = _sup_t, _sup_b
+            for _pn in _place_staging:
+                _pgx, _pgy, _pgh = char_metrics(
+                    shot_cam, world_xs[_pn], world_zs[_pn],
+                    base_scale=char_scales[_pn])
+                _phw = max(0.17 * _pgh + 20.0, 0.15 * _pgh)
+                _ob_l = min(_ob_l, _pgx - _phw)
+                _ob_r = max(_ob_r, _pgx + _phw)
+                _ob_t = min(_ob_t, _pgy - _pgh)
+                _ob_b = max(_ob_b, _pgy)
+            _ob_cx = (_ob_l + _ob_r) / 2.0
+            _exempt = (set(_anvil_staging)
+                       | set(_furniture_staging)
+                       | set(_shield_staging)
+                       | set(_pick_staging)
+                       | set(_place_staging))
+            for _n in names:
+                if _n in _exempt or _n in _sightline_moved:
+                    continue
+                _depth = ((world_xs[_n] - shot_cam.position[0])
+                          * _fwd_x
+                          + (world_zs[_n] - shot_cam.position[2])
+                          * _fwd_z)
+                if _depth >= _sup_depth - 0.3:
+                    continue  # behind the support: no occlusion
+                _gx, _gy, _gh = char_metrics(
+                    shot_cam, world_xs[_n], world_zs[_n],
+                    base_scale=char_scales[_n])
+                _hw = max(0.17 * _gh + 20.0, 0.15 * _gh)
+                if _gx + _hw < _ob_l or _gx - _hw > _ob_r \
+                        or _gy - _gh > _ob_b or _gy < _ob_t:
+                    continue  # no box overlap: sightline clear
+                _dir = 1.0 if _gx >= _ob_cx else -1.0
+                _ox = world_xs[_n]
+                _steps = 0
+                _blocked = False
+                for _step in range(40):
+                    _nx = world_xs[_n] + _dir * 0.1
+                    _ngx, _ngy, _ngh = char_metrics(
+                        shot_cam, _nx, world_zs[_n],
+                        base_scale=char_scales[_n])
+                    _nhw = max(0.17 * _ngh + 20.0, 0.15 * _ngh)
+                    if _ngx - _nhw < 40.0 \
+                            or _ngx + _nhw > W - 40.0:
+                        _blocked = True
+                        break
+                    world_xs[_n] = _nx
+                    _steps += 1
+                    if _ngx + _nhw < _ob_l \
+                            or _ngx - _nhw > _ob_r:
+                        break
+                _sightline_moved[_n] = {
+                    "steps": _steps,
+                    "moved_world": round(
+                        abs(world_xs[_n] - _ox), 3),
+                    "cleared": _steps > 0 and not _blocked,
+                    "margin_blocked": _blocked,
+                    "support": _sup}
+    elif _place_staging:
+        _sightline_skipped = "over_the_shoulder"
+    # Round-6 staging fit: the fixed STAGING_X slots can project
+    # a character fully outside the frame under an azimuth camera
+    # (the 3rd slot at 2.6 m landed at cx 2473 in a 1920 frame, so
+    # a SHIELD beat's protected figure never appeared even though
+    # the planner staged them -- staging, not the crop, was the
+    # defect: the crop was already the full frame). Compress every
+    # staged offset from the camera target's x by 0.9 per step
+    # until all projected standing boxes fit horizontally (40 px
+    # margin). Scaling about the target preserves left-right
+    # order and keeps the subject fixed; shots that already fit
+    # take 0 steps and are pixel-identical. Set-piece-anchored
+    # characters (anvil strikers, furniture-seated) are exempt:
+    # their x is bound to a visible set piece, and moving them
+    # would break the contact the anchor exists for.
+    _staging_fit_steps = 0
+    _anchored = (set(_anvil_staging) | set(_furniture_staging)
+                 | set(_shield_staging) | set(_pick_staging)
+                 | set(_place_staging) | set(_sightline_moved))
+    _fittable = [n for n in names if n not in _anchored]
+    for _step in range(24):
+        _all_fit = True
+        for _n in _fittable:
+            _gx, _gy, _gh = char_metrics(
+                shot_cam, world_xs[_n], world_zs[_n],
+                base_scale=char_scales[_n])
+            if _gh <= 0:
+                continue
+            _hw = max(0.34 * _gh / 2.0 + 20.0, 0.15 * _gh)
+            if not (40.0 + _hw <= _gx <= W - 40.0 - _hw):
+                _all_fit = False
+                break
+        if _all_fit:
+            break
+        for _n in _fittable:
+            world_xs[_n] = _target_x + (world_xs[_n] - _target_x) \
+                * 0.9
+        _staging_fit_steps += 1
+    # ---- bystander clearance (round 7 / R6-D1) -------------------
+    # After the fit, before the metrics assignment: a bystander whose
+    # head sits inside an acting character's sweep disc gets pushed
+    # laterally (in world x, re-projecting each step) until clear of
+    # every sweep disc, or the 40 px frame margin blocks the push.
+    # Actors never move; anchored characters never move; co-participants
+    # of a sweep action never move. Over-the-shoulder shots skip the
+    # pass: the foreground listener's head is the framing, and pushing
+    # it would break the shot (intrusions there stay visible to the
+    # head-intrusion audit below). The push is minimal: it stops at
+    # the first clear step, and the record says what moved, how far,
+    # and what stayed intruding.
+    _bystander_clearance: dict = {"moved": {}, "exempt": [],
+                                  "skipped": None}
+    _id_to_name = {str(_c.get("id")): _nm
+                   for _nm, (_i, _c) in _char_by_name.items()
+                   if _c.get("id")}
+    _sweep_actors: dict[str, set] = {}
+    for _n in names:
+        for (_ls, _le, _ev) in _per_actor.get(_n, []):
+            _prim = (_ev.get("required_pose") or {}).get("primitive")
+            if _prim in _HAND_SWEEP_PRIMITIVES:
+                _parts = _sweep_actors.setdefault(_n, set())
+                _tname = _id_to_name.get(str(_ev.get("target_id")))
+                if _tname is not None and _tname != _n:
+                    _parts.add(_tname)
+    if shot.get("shot_type") == "over_the_shoulder":
+        _bystander_clearance["skipped"] = "over_the_shoulder"
+    elif _sweep_actors:
+        _clear_anchored = (set(_anvil_staging)
+                           | set(_furniture_staging)
+                           | set(_shield_staging)
+                           | set(_pick_staging)
+                           | set(_place_staging)
+                           | set(_sightline_moved))
+        _sweep_discs = {}
+        for _n in _sweep_actors:
+            _agx, _agy, _agh = char_metrics(
+                shot_cam, world_xs[_n], world_zs[_n],
+                base_scale=char_scales[_n])
+            if _agh > 0:
+                _sweep_discs[_n] = (_sweep_disc(_agx, _agy, _agh),
+                                    _agx, _agh)
+        _co_parts = set()
+        for _parts in _sweep_actors.values():
+            _co_parts |= _parts
+        for _b in names:
+            if _b in _sweep_actors:
+                continue
+            if _b in _clear_anchored or _b in _co_parts:
+                _bystander_clearance["exempt"].append(_b)
+                continue
+            _bx0 = world_xs[_b]
+            _steps = 0
+            _blocked = False
+            _cleared = True
+            while _steps < 40:
+                _bgx, _bgy, _bgh = char_metrics(
+                    shot_cam, world_xs[_b], world_zs[_b],
+                    base_scale=char_scales[_b])
+                if _bgh <= 0:
+                    break
+                _bhead = _head_disc(_bgx, _bgy, _bgh)
+                _intruder = None
+                for _an, (_disc, _agx, _agh) in _sweep_discs.items():
+                    if not _discs_clear(
+                            _disc, _bhead,
+                            _SWEEP_MARGIN_FRAC * _agh):
+                        _intruder = _an
+                        break
+                if _intruder is None:
+                    _cleared = True
+                    break
+                _cleared = False
+                _dir = 1.0 if _bgx >= _sweep_discs[_intruder][1] else -1.0
+                world_xs[_b] += _dir * 0.1
+                _ngx, _ngy, _ngh = char_metrics(
+                    shot_cam, world_xs[_b], world_zs[_b],
+                    base_scale=char_scales[_b])
+                _nhw = max(0.34 * _ngh / 2.0 + 20.0, 0.15 * _ngh)
+                if not (40.0 + _nhw <= _ngx <= W - 40.0 - _nhw):
+                    world_xs[_b] -= _dir * 0.1
+                    _blocked = True
+                    break
+                _steps += 1
+            else:
+                _cleared = False
+            if _steps or not _cleared:
+                _bystander_clearance["moved"][_b] = {
+                    "steps": _steps,
+                    "moved_world": round(world_xs[_b] - _bx0, 3),
+                    "cleared": bool(_cleared),
+                    "margin_blocked": bool(_blocked),
+                    "actors": sorted(_sweep_discs)}
+    # ---- head-clearance separation (round 7 / R6-D4) ----
+    # Adjacent standing boxes must not overlap: a neighbour's
+    # hat brim (which extends to 1.15r, inside the standing
+    # box) crossing a head edge reads as a layering defect.
+    # Pairs are pushed apart in 0.1 world steps until the gap
+    # reaches 0.2x the smaller head radius. Anchored characters
+    # (anvil/furniture/shield staging) and the OTS foreground
+    # listener never move; interaction pairs (one character's
+    # event targets the other: give/hand-over/shield) are
+    # supposed to stand close and are exempt. A push blocked
+    # by the 40 px frame margin reverts and the pair is
+    # recorded unresolved -- never silently left overlapping.
+    _head_clearance: dict = {"moved": {}, "exempt": [],
+                             "unresolved": []}
+    if shot.get("shot_type") != "over_the_shoulder":
+        _hc_anchored = (set(_anvil_staging)
+                        | set(_furniture_staging)
+                        | set(_shield_staging)
+                        | set(_pick_staging)
+                        | set(_place_staging)
+                        | set(_sightline_moved))
+        if _ots_listener is not None:
+            _hc_anchored.add(_ots_listener)
+        _interact_pairs: set = set()
+        for _n in names:
+            for (_ls, _le, _ev) in _per_actor.get(_n, []):
+                _tname = _id_to_name.get(str(_ev.get("target_id")))
+                if _tname is not None and _tname != _n:
+                    _interact_pairs.add(frozenset((_n, _tname)))
+        _hc_blocked: set = set()
+        _hc_start = dict(world_xs)
+        for _round in range(40):
+            _boxes = {}
+            for _n in names:
+                _gx, _gy, _gh = char_metrics(
+                    shot_cam, world_xs[_n], world_zs[_n],
+                    base_scale=char_scales[_n])
+                if _gh > 0:
+                    _hw = max(0.34 * _gh / 2.0 + 20.0, 0.15 * _gh)
+                    _boxes[_n] = (_gx, _gh, _hw)
+            _ordered = sorted(_boxes, key=lambda _n: _boxes[_n][0])
+            _pushed = False
+            for _a, _b in zip(_ordered, _ordered[1:]):
+                if frozenset((_a, _b)) in _interact_pairs:
+                    continue
+                _ax, _ah, _ahw = _boxes[_a]
+                _bx, _bh, _bhw = _boxes[_b]
+                _gap = (_bx - _bhw) - (_ax + _ahw)
+                _need = 0.2 * min(0.34 * _ah / 2.0,
+                                  0.34 * _bh / 2.0)
+                if _gap >= _need:
+                    continue
+                _movable = [x for x in (_a, _b)
+                            if x not in _hc_anchored
+                            and x not in _hc_blocked]
+                if not _movable:
+                    _pair = sorted((_a, _b))
+                    if _pair not in _head_clearance["unresolved"]:
+                        _head_clearance["unresolved"].append(_pair)
+                    continue
+                for _m in _movable:
+                    _dir = -1.0 if _m == _a else 1.0
+                    world_xs[_m] += _dir * 0.1
+                    _ngx, _ngy, _ngh = char_metrics(
+                        shot_cam, world_xs[_m], world_zs[_m],
+                        base_scale=char_scales[_m])
+                    _nhw = max(0.34 * _ngh / 2.0 + 20.0,
+                               0.15 * _ngh)
+                    if not (40.0 + _nhw <= _ngx
+                            <= W - 40.0 - _nhw):
+                        world_xs[_m] -= _dir * 0.1
+                        _hc_blocked.add(_m)
+                        continue
+                    _pushed = True
+                    _rec = _head_clearance["moved"].setdefault(
+                        _m, {"steps": 0, "moved_world": 0.0})
+                    _rec["steps"] += 1
+                    _rec["moved_world"] = round(
+                        world_xs[_m] - _hc_start[_m], 3)
+            if not _pushed:
+                break
+        _head_clearance["exempt"] = sorted(
+            _hc_anchored | set(_hc_blocked))
+    # ---- post-staging headroom re-fit (round 7 / framing guard) --
+    # The radius fit above ran on pre-fit positions; the staging fit
+    # and the bystander clearance move characters after it, and a
+    # moved character can push their head above the frame (R6 shot
+    # #5: Linh's head cut for the whole shot). Re-fit on the FINAL
+    # staging. Pulling the camera back only shrinks characters
+    # toward the frame centre, so the fit and clearance guarantees
+    # above can only improve; the radius never decreases here, so a
+    # re-fit can never invalidate them. Every downstream consumer
+    # (metrics, anchors, environment, freeze) reads shot_cam after
+    # this point, so the rebuilt camera stays consistent.
+    _camera_pullback = 1.0
+    _radius_scale_final = _fit_radius_scale(
+        shot["shot_type"], _angle, _target_x, _target_z,
+        _counterpart_x, shot.get("srs_side", 0),
+        [(world_xs[n], world_zs[n]) for n in names],
+        [char_scales[n] for n in names],
+        top_fracs=[_top_accessory_frac(_char_by_name[n][1])
+                   if _char_by_name.get(n) else 0.0 for n in names],
+        elevation_deg=_exec_elev)
+    if _radius_scale_final > _radius_scale:
+        _camera_pullback = _radius_scale_final / _radius_scale
+        _radius_scale = _radius_scale_final
+        shot_cam = viewpoint_for_shot(
+            shot["shot_type"], _angle,
+            subject_pos=(_target_x, 1.2, _target_z),
+            counterpart_x=_counterpart_x,
+            srs_side=shot.get("srs_side", 0),
+            radius_scale=_radius_scale,
+            azimuth_side=shot.get("viewpoint_azimuth_side"),
+            elevation_deg=_exec_elev)
     metrics = {n: char_metrics(shot_cam, world_xs[n], world_zs[n],
                               base_scale=char_scales[n])
                for n in names}
@@ -4841,6 +6868,254 @@ def _render_shot(args: dict) -> dict:
          extra_elements=_bus_extra_elements() if _has_bus else None)
     _map_report = None
     _env_archetype = None
+    # ---- D2 frozen crop anchor (Phase C checkpoint) ---
+    # ONE crop per shot, computed HERE from STANDING boxes
+    # and frozen for every frame (directive D2). It runs
+    # BEFORE the environment build (round 6): the FG
+    # fit/clearance must target the VISIBLE window (the
+    # frozen crop rect), not the full frame, or a fitted
+    # occluder lands mid-frame after the crop zoom. The
+    # frame loop below reuses this one computation — the
+    # crop is never recomputed from live state.
+    # ONE crop per shot, computed here from STANDING boxes and frozen
+    # for every frame (directive D2: head-tracking crop OFF by
+    # default; framing anchored to the scene). Standing boxes use
+    # the final staging x, the standing vertical extent (ground_y /
+    # char_height) and head_r — pose-independent by construction,
+    # so a kneel, bend or turn can never move the crop mid-shot.
+    # Box proportions match the old per-frame helpers exactly; only
+    # the sampling moment changes (standing pose instead of the
+    # live frame). object_insert defers to the first built frame:
+    # the prop position is only known once a frame exists. KNOWN
+    # LIMITATION (proven 2026-11-13): the frozen crop anchors on
+    # the prop's frame-0 rest position, so a prop that travels
+    # during the shot (ground -> hand, handover) leaves the crop
+    # by mid-shot and the frame fills with legs. A mid-shot probe
+    # frame was tried and REVERTED: frame construction is
+    # stateful -- give_to latches hand starts on its first call,
+    # so the probe read GRASPED at (1640, 622) while the
+    # sequential loop read ATTACHED_TO_HAND at (948, 540) at the
+    # same clock time, and the probe perturbs the latch. The real
+    # fix is a two-pass render (build, anchor from telemetry,
+    # re-crop) or a standing-hand anchor; both are RicksClips-loop
+    # work, not a silent skip.
+    # Round 8 (R7-D2): kneeled-head union. A kneel/bend drops the
+    # head far below its standing position -- kneel_pick's head top
+    # falls to 56% of standing height -- and the frozen crop,
+    # fitted to the STANDING box, sliced the kneeled head (shot #0
+    # f14-19: head below the frame bottom). Head-framing boxes
+    # extend their foot_y down to the kneeled head bottom
+    # (standing head top + head diameter + head drop), and no
+    # further: the box is exactly the union window, so safe_frame
+    # keeps the tightest scale that holds both the standing head
+    # and the kneeled head, and steps down honestly when the union
+    # cannot fit a tight crop (a deep bend_pick in an MCU becomes
+    # a medium -- correct, not a silent cut). A plain downward
+    # expansion overshoots (the R7-D2 first attempt zoomed shot #0
+    # to full frame) and shifting the box down double-counts with
+    # safe_frame's fit logic and cuts the standing head top; the
+    # union bound is the minimal correct window. Full-body boxes
+    # already span to the ground and need nothing.
+    _HEAD_DROP_FRAC = {"kneel_pick": 0.44, "bend_pick": 0.70}
+    _union_bottom: dict[str, float] = {}
+    for _n in names:
+        for _s, _e, _ev in _per_actor.get(_n, []):
+            _prim = ((_ev.get("required_pose") or {}).get("primitive"))
+            if _prim in _HEAD_DROP_FRAC:
+                _hr_n = float(getattr(chars[_n], "head_r", 133.0))
+                _top_n = float(ground_ys[_n] - char_heights[_n])
+                _union_bottom[_n] = max(
+                    _union_bottom.get(_n, 0.0),
+                    _top_n + 2.0 * _hr_n
+                    + _HEAD_DROP_FRAC[_prim] * float(char_heights[_n]))
+
+    def _standing_box(_n, _kind):
+        _hr = float(getattr(chars[_n], "head_r", 133.0))
+        _cx = float(staging[_n])
+        _top = float(ground_ys[_n] - char_heights[_n])
+        _hc = _top + _hr  # standing head centre (B §5.1 formula)
+        # Round 9: the box top covers top accessories (bun/hat/
+        # crown/horns), not just the head circle -- otherwise a
+        # bun nearly touches the frame top in MCU framings (R8
+        # shot #3: ~5 px). "tight" deliberately crops into the
+        # head and "head_hands" already carries 1.9r; both keep
+        # their tops.
+        _acc = _top_accessory_frac(chars[_n]) * _hr
+        _ub = _union_bottom.get(_n)
+        if _kind == "full":
+            return {"cx": _cx, "head_y": _top - _acc,
+                    "foot_y": float(ground_ys[_n]),
+                    "half_w": max(_hr + 20,
+                                  0.15 * float(char_heights[_n]))}
+        if _kind == "tight":
+            _foot = _hc + 1.1 * _hr
+        elif _kind == "mcu":
+            _foot = _hc + 2.8 * _hr
+        elif _kind == "head_hands":
+            # D1: head -> waist, plus headroom for a raised hand
+            # (a full overhead reach peaks ~0.8 head-radii above
+            # the head top). Chest/pocket-level props and raised
+            # hands stay inside the anchor.
+            _foot = float(ground_ys[_n]
+                          - 0.45 * float(char_heights[_n]))
+        else:
+            _foot = _hc + 1.8 * _hr
+        if _ub is not None:
+            _foot = max(_foot, _ub)
+        if _kind == "tight":
+            return {"cx": _cx, "head_y": _hc - 0.7 * _hr,
+                    "foot_y": _foot, "half_w": 0.8 * _hr + 15}
+        if _kind == "mcu":
+            return {"cx": _cx, "head_y": _hc - _hr - _acc,
+                    "foot_y": _foot, "half_w": _hr + 40}
+        if _kind == "head_hands":
+            return {"cx": _cx, "head_y": _hc - 1.9 * _hr,
+                    "foot_y": _foot,
+                    "half_w": max(_hr + 30,
+                                  0.15 * float(char_heights[_n]))}
+        return {"cx": _cx, "head_y": _hc - _hr - _acc,
+                "foot_y": _foot, "half_w": _hr + 30}
+
+    _anchor_st = shot["shot_type"]
+    _anchor_lead = (actor if actor in names else
+                    (names[0] if names else None))
+    _anchor_max_scale = None
+    # D1: the anchor tier follows the shot's staged actions.
+    _anchor_tier = _anchor_tier_for_shot(_shot_events, shot)
+    # Round 7: a head framing is a head framing. A ground-level verb
+    # (bend_pick, kneel, drop) used to widen close_ups and reactions
+    # to the full body, so a scripted close-up rendered as a wide
+    # two-shot (R6 shot #0). Head framings cap the tier at
+    # head_hands: the head, shoulders and waist stay in frame, the
+    # bend reads through the upper body, and the hand exits the crop
+    # bottom the way a close-up cutaway does in the reference. A
+    # travelling lead keeps the head framing with a path-widened
+    # box (Round 8, R2-C2) instead of the old full-frame widening.
+    _tier_capped = False
+    if _anchor_tier == "full" and _anchor_st in HEAD_FRAMING_TYPES:
+        _anchor_tier = "head_hands"
+        _tier_capped = True
+    _head_kind = {"head": "head", "head_hands": "head_hands",
+                  "full": "full"}[_anchor_tier]
+    # Round 8 (R2-C2): path-aware locomotion framing. The old rule
+    # widened ANY head-framing shot containing ANY cast member's
+    # walk to full-body at full frame -- one bystander's 320px
+    # retreat destroyed the striker's MCU in the delivered R7
+    # (shot #3: 148px heads). A short walk fits inside a head
+    # framing: the walking character's subject box widens to cover
+    # the walk PATH (start..end union) at the head-framing kind,
+    # and safe_frame steps down honestly only when the path truly
+    # cannot fit. A walking bystander no longer widens the shot
+    # (he may exit the frozen crop -- natural for a retreat).
+    # Step sizes match _event_fn (walk_to 320, run_to 380,
+    # walk_mud 300); the retreat flip matches _walk_direction.
+    # The cue fallback (no compiled events) keeps the old
+    # full-body behaviour for legacy shots.
+    _WALK_STEP_PX = {"walk_to": 320.0, "run_to": 380.0,
+                     "walk_mud": 300.0}
+    _shot_dir = 1
+    if actor is not None and other is not None:
+        _shot_dir = 1 if staging[other] > staging[actor] else -1
+
+    def _walk_path_box(_box, _n):
+        _pos = float(staging[_n])
+        _lo = _hi = _pos
+        for _s, _e, _ev in _per_actor.get(_n, []):
+            _rp = _ev.get("required_pose") or {}
+            _step = _WALK_STEP_PX.get(_rp.get("primitive"))
+            if _step is None:
+                continue
+            _d = _shot_dir
+            if ((_rp.get("params") or {}).get("retreat")):
+                _d = -_d
+            _pos += _step * _d
+            _lo = min(_lo, _pos)
+            _hi = max(_hi, _pos)
+        if _hi <= _lo:
+            return _box
+        _box = dict(_box)
+        _box["cx"] = (_lo + _hi) / 2.0
+        _box["half_w"] = float(_box["half_w"]) + (_hi - _lo) / 2.0
+        return _box
+
+    _locomotion_widened = (
+        not _shot_events
+        and _shot_has_locomotion(_shot_events, shot)
+        and _anchor_st in _LOCOMOTION_WIDENED_TYPES)
+    if not names:
+        # Empty-cast shot: nothing to frame — the full frame.
+        _anchor_subjects, _anchor_others = [], []
+        _anchor_max_scale = 1.0
+    elif _locomotion_widened:
+        # Cue fallback only (no compiled events): frame the full
+        # body at full frame so the travelling subject cannot walk
+        # out of the frozen crop (ECU-exit).
+        _anchor_subjects = [_standing_box(n, "full") for n in names]
+        _anchor_others = []
+        _anchor_max_scale = 1.0
+    elif _anchor_st == "close_up":
+        _anchor_subjects = [_walk_path_box(
+            _standing_box(_anchor_lead, _head_kind), _anchor_lead)]
+        _anchor_others = [_standing_box(n, "full")
+                          for n in names if n != _anchor_lead]
+    elif _anchor_st == "medium_close_up":
+        _anchor_subjects = [_walk_path_box(_standing_box(
+            _anchor_lead, "full" if _anchor_tier == "full" else "mcu"),
+            _anchor_lead)]
+        _anchor_others = [_standing_box(n, "head")
+                          for n in names if n != _anchor_lead]
+    elif _anchor_st == "extreme_close_up":
+        _anchor_subjects = [_walk_path_box(
+            _standing_box(_anchor_lead, "tight"), _anchor_lead)]
+        _anchor_others = [_standing_box(n, "head")
+                          for n in names if n != _anchor_lead]
+    elif _anchor_st == "shot_reverse_shot":
+        _anchor_subjects = [_walk_path_box(
+            _standing_box(_anchor_lead, _head_kind), _anchor_lead)]
+        _anchor_others = [_standing_box(n, "head")
+                          for n in names if n != _anchor_lead]
+    elif _anchor_st == "over_the_shoulder":
+        _anchor_subjects = [_standing_box(n, "full") for n in names]
+        _anchor_others = []
+        _anchor_max_scale = 1.0
+    elif _anchor_st == "reaction":
+        _anchor_subjects = [_walk_path_box(
+            _standing_box(n, _head_kind), n) for n in names]
+        _anchor_others = []
+    elif _anchor_st == "object_insert":
+        # Deferred: multi-frame inserts freeze in pass 2 from
+        # telemetry (see _defer_framing below); stills and
+        # split-screen freeze from the first frame in the loop.
+        _anchor_subjects = None
+        _anchor_others = [_standing_box(n, "head") for n in names]
+    else:
+        _anchor_subjects = [_standing_box(n, "full") for n in names]
+        _anchor_others = []
+        _anchor_max_scale = 1.0
+
+    def _freeze_anchor(_subjects, _others):
+        _shot_dict = {"shot_type": shot["shot_type"],
+                      "camera": {"scale": CAMERA_SHOT_SCALE.get(
+                          shot["shot_type"],
+                          SHOT_SCALE.get(shot["shot_type"], 1.6))},
+                      "focus_target": actor}
+        return anchor_focus_for_shot(_shot_dict, _subjects, _others,
+                                     W, H, max_scale=_anchor_max_scale)
+
+    _frozen = None
+    _crop_notes: list = []
+    if _anchor_subjects is not None:
+        (_safe_shot_a, _safe_focus_a, _crop_notes,
+         _frozen_crop_a) = _freeze_anchor(_anchor_subjects,
+                                          _anchor_others)
+        _frozen = (_safe_shot_a, _safe_focus_a, _frozen_crop_a)
+    # The frozen crop rect the FG passes target (None for
+    # object_insert: the crop defers to telemetry in pass 2,
+    # so no early estimate is trusted — FG keeps full-frame
+    # behaviour there, recorded in provenance).
+    _frozen_crop_rect = (
+        list(_frozen[2]["crop_rect"]) if _frozen is not None
+        else None)
     # ---- static background, rendered ONCE per shot --------------------
     # render_frame() runs a full-frame GaussianBlur contact shadow for
     # EVERY box (~30) and character on EVERY call — ~10-15 s per frame
@@ -4851,6 +7126,12 @@ def _render_shot(args: dict) -> dict:
     # background too (static). This is a renderer-side optimisation
     # only — the frames are pixel-identical in content to the
     # per-frame render.
+    _fg_clearance: dict = {}
+    # Round 7: _env_fitted is read by _build_frame's ground_kind
+    # lookup; it must be bound on EVERY path (map shots and
+    # env-less shots never assign it in the elif below).
+    _env_fitted = None
+    _flame_els: list = []
     if _is_map:
         # W2b: the map IS the background (real polygons, never a
         # rectangular card). Fails loudly without a usable dataset.
@@ -4864,24 +7145,84 @@ def _render_shot(args: dict) -> dict:
     elif _env_pkg is not None:
         # W2: semantic environment, two passes — BG+MG behind the
         # characters, FG occluders composited over them. Foreground
-        # elements are frustum-fitted against the widest shot
-        # camera so staging is stable across shots of the location.
+        # elements are frustum-fitted against the SHOT camera (the
+        # camera the FG layer renders with): fitting against the
+        # establishing camera left every non-establishing shot's FG
+        # off-frame, because the standard viewpoint radius is much
+        # closer than the establishing radius (round 2, scene
+        # richness -- the fitted x for the wide camera projects
+        # outside the standard camera's frustum at the FG plane).
         _env_archetype = _env_pkg.get("archetype")
         bg_scene = Scene25D(boxes=boxes, characters=[], camera=shot_cam,
                             sky_top=sky_top, sky_bottom=sky_bottom,
                             ground_color=ground_color,
                             ground_extent=30.0)
-        _ref_cam = viewpoint_for_shot(
-            "establishing", "eye_level", subject_pos=(0.0, 1.2, 0.0))
         _env_fitted = fit_foreground_to_frustum(
-            _env_pkg, _ref_cam, (W, H))
+            _env_pkg, shot_cam, (W, H),
+            visible_rect=_frozen_crop_rect)
+        # Round 3: the frustum fit is azimuth-blind -- under an OTS
+        # camera a fitted FG rock projects center-frame and covers
+        # the cast (Loop 01 cave shots). Clear FG elements off the
+        # subjects' standing boxes (same "full" box definition as
+        # the parity telemetry) before rendering the layers.
+        _subject_boxes = []
+        _head_boxes = []
+        for _n in names:
+            _hr = float(getattr(chars[_n], "head_r", 133.0))
+            _hw = max(_hr + 20.0,
+                      0.15 * float(char_heights[_n]))
+            _subject_boxes.append(
+                (float(staging[_n]) - _hw,
+                 float(ground_ys[_n] - char_heights[_n]),
+                 float(staging[_n]) + _hw,
+                 float(ground_ys[_n])))
+            # Round 15 (L02-D6): head boxes for sun/moon
+            # placement -- the disc must not sit behind a head.
+            # The top margin covers hats/hair above the head
+            # circle. Staging positions: a walking character
+            # can still pass under the disc mid-shot.
+            _head_boxes.append(
+                (float(staging[_n]) - _hr * 1.4,
+                 float(ground_ys[_n] - char_heights[_n] - 12.0),
+                 float(staging[_n]) + _hr * 1.4,
+                 float(ground_ys[_n] - char_heights[_n]
+                       + 2.4 * _hr)))
+        _env_fitted = clear_foreground_from_subjects(
+            _env_fitted, shot_cam, (W, H), _subject_boxes,
+            visible_rect=_frozen_crop_rect)
+        _fg_clearance = (_env_fitted.get("provenance") or {}).get(
+            "fg_clearance", {})
+        # Round 8 (R7-D4): sparks elements animate per frame (the
+        # set-piece block in _build_frame draws them live at the
+        # real frame index). Baking them into a static layer froze
+        # the streaks at frame 0 for the whole shot, so they are
+        # excluded from both static renders. They cast no shadow
+        # (shadows are box-geometry only), so the exclusion
+        # removes nothing but the frozen streaks. Round 14:
+        # fire/flame elements join the animated set (flame
+        # flicker): they are drawn per frame by _draw_flames
+        # in _build_frame, never baked into the background.
+        _animated_ids = [e["id"] for e in
+                         _env_fitted.get("elements", [])
+                         if isinstance(e, dict)
+                         and (e.get("kind") == "sparks"
+                              or e.get("geometry") == "sparks"
+                              or e.get("kind") in _FLICKER_KINDS)]
+        _flame_els = [e for e in _env_fitted.get("elements", [])
+                      if isinstance(e, dict)
+                      and e.get("kind") in _FLICKER_KINDS]
         bg_img = render_environment(
-            _env_fitted, shot_cam, (W, H), draw_layers=("BG", "MG"))
+            _env_fitted, shot_cam, (W, H), draw_layers=("BG", "MG"),
+            exclude_ids=_animated_ids,
+            visible_rect=_frozen_crop_rect,
+            avoid_boxes=_head_boxes)
         fg_layer = None
         if _env_fitted.get("layers", {}).get("FG"):
             _fg = render_environment(
                 _env_fitted, shot_cam, (W, H), draw_layers=("FG",),
-                transparent=True)
+                transparent=True,
+                exclude_ids=_animated_ids,
+                fg_blur_radius=6.0 * (W / 1920.0))
             fg_layer = _fg if _fg.getbbox() else None
         if rainy:
             _lx, _ly, _, _ = shot_cam.project((4.0, 0.0, -1.5), W, H)
@@ -4972,6 +7313,10 @@ def _render_shot(args: dict) -> dict:
     # shots of its scene even without a manipulation cue).
     has_prop = any(c in cues for c in ("bend_pick", "give", "take")) \
         or bool(shot.get("props")) and bool(shot.get("prop_holder"))
+    if _shot_is_map:
+        # D2: no staged props on a full-frame map either (map
+        # annotations come from the map spec, not the prop system).
+        has_prop = False
     # A kneel lunges ~250 px behind the root: keep the actor far
     # enough from the frame edge that the whole body (jacket, back
     # leg) stays in frame. v11: Minh knelt at the left staging slot
@@ -4987,6 +7332,18 @@ def _render_shot(args: dict) -> dict:
             facing = 1 if staging[other] > staging[n] else -1
         elif n != actor and actor is not None:
             facing = 1 if staging[actor] > staging[n] else -1
+        if n in _anvil_staging:
+            # Round-5: the striker faces the anvil, not the scene
+            # partner -- staged at anvil_x + side*0.9, the anvil is
+            # in the -side direction. World-x order maps to
+            # screen-x order under every camera we use.
+            facing = -int(_anvil_staging[n][2])
+        if n in _pick_staging:
+            # Round 8: the picker faces the support, same geometry.
+            facing = -int(_pick_staging[n][2])
+        if n in _place_staging:
+            # Round 8: the placer faces the support, same geometry.
+            facing = -int(_place_staging[n][2])
         facings[n] = facing
         standing(ch, staging[n], ground_ys[n], facing=facing)
     # ---- W4: compiled action events + prop machine -------------------
@@ -5002,6 +7359,12 @@ def _render_shot(args: dict) -> dict:
     _anchors = {n: _furniture_anchors(
         _env_pkg, shot_cam, (W, H), staging[n], ground_ys[n],
         chars[n].H, facings[n]) for n in names}
+    # Round-8 (R2-V1): named support tops for surface placements
+    # (the place_on_surface primitive reaches to the support the
+    # script names). Same structural selection as the prop-rest
+    # anchors -- never an invented surface.
+    _support_tops = {a["support"]: a for a in _support_anchors(
+        _env_pkg, shot_cam, (W, H))}
     # Prop rest positions: surface props (letter/pen/...) rest on the
     # paper; everything else rests in its owner's pocket (hidden
     # until manipulated — never on the ground by default, P2). A
@@ -5028,14 +7391,73 @@ def _render_shot(args: dict) -> dict:
     _tracker = SemanticPropTracker(
         [_prop_dicts[_pid] for _pid in _pids_all], _shot_events) \
         if _pids_all else None
+    _support_anchor_list = _support_anchors(_env_pkg, shot_cam, (W, H))
+    # Light payoff (round-2 system 5): burst events, set-piece
+    # reaction anchors, strike contact moments, and set-piece
+    # activations, computed once per shot.
+    _reactive_anchors = _reactive_element_anchors(
+        _env_pkg, shot_cam, (W, H))
+    _burst_events = [e for e in _shot_events
+                     if e.get("action_type") in BURST_TYPES
+                     and e.get("prop_id")]
+    # Round-5 hammer contact: the strike spans (actor name +
+    # global span) drive the held hammer's grip angle per frame,
+    # so the DRAWN hammer head tracks hammer_head_position --
+    # the same point the primitive aims at and the contact audit
+    # measures. Before this the hammer drew at the footprint
+    # scale with a fixed orientation, ~70 px short of the
+    # computed head, while the audit passed (R2-A2).
+    _strike_spans: list[tuple] = []
+    for _nm, _evs in _per_actor.items():
+        for (_ls, _le, _ev) in _evs:
+            if (_ev.get("required_pose") or {}).get("primitive") \
+                    == "hammer_strike":
+                # _per_actor windows are CLIPPED to this shot
+                # (local times); _shot_events carries the
+                # unclipped span, which would lag the grip-angle
+                # phase behind the primitive's own cycle.
+                _strike_spans.append((
+                    _nm, _t0 + float(_ls), _t0 + float(_le)))
+    _strike_moments: list[float] = []
+    for _ev in _shot_events:
+        if _ev.get("action_type") == "HAMMER_STRIKE":
+            _dur = max(0.05, float(_ev.get("end_time", 0.0))
+                       - float(_ev.get("start_time", 0.0)))
+            for _rel in hammer_strike_times(
+                    _dur, hammer_cycles(_dur)):
+                _strike_moments.append(
+                    float(_ev.get("start_time", 0.0)) + _rel)
+    # Round-7 contact snaps (R5-A2): frames where the drawn hammer
+    # head was extended to the anvil top at the contact instant.
+    # Closure-appended by _build_frame; reported on the shot result.
+    _contact_snaps: list[dict] = []
+    _activate_events = [
+        e for e in _shot_events
+        if e.get("action_type") == "ACTIVATE"
+        and names_set_piece(e.get("directive_text", ""))]
+    _support_records: dict[str, str] = {}
     (_rests, _rest_kinds, _pocket_anchors) = _assign_prop_rests(
         _pids_all, _prop_dicts, _first_actor_for_pid, actor, _anchors,
         joints0, ground_ys, staging, _name_to_id, tracker=_tracker,
-        fallback_ground_y=shot_ground_y, events=_shot_events)
+        fallback_ground_y=shot_ground_y, events=_shot_events,
+        support_anchors=_support_anchor_list,
+        support_records=_support_records)
     (_prop_machine, _machine_pids, _machine_kinds,
      _machine_rest_kinds, _prop_diagnostics) = _build_shot_prop_machine(
          package, shot, _shot_events, _rests, _rest_kinds,
          _pocket_anchors, _id_to_name, _name_to_id, set(names), _t0)
+    for _pid, _sup in _support_records.items():
+        if _sup.startswith("missing:"):
+            _prop_diagnostics.append(
+                f"{_pid}: placement names support {_sup[8:]!r} but "
+                "the shot environment has no such support; fell back "
+                "to the kind rule")
+    if _shot_is_map:
+        # D2: the machine is built (diagnostics stay honest) but
+        # draws nothing -- a holderless prop must not float on the
+        # map. The machine object is nulled; diagnostics are kept.
+        _prop_machine, _machine_pids, _machine_kinds = None, [], {}
+        _machine_rest_kinds = {}
     # ---- pose functions for this shot -------------------------------
     fns: dict[str, object] = {}
     prop = {"x": 0, "y": 0}
@@ -5047,14 +7469,25 @@ def _render_shot(args: dict) -> dict:
         direction = 1
         if other is not None:
             direction = 1 if staging[other] > ax else -1
-        if "board" in cues:
+        # Round 7: when the shot's motion is compiled (V1), a cue
+        # that no compiled event covers in this span stages NOTHING.
+        # The cue list is shot-wide while compiled events are clipped
+        # per split shot, so a "walk" cue fired the legacy walk for
+        # the WHOLE span of a shot whose walk event belongs to a
+        # later split shot (R6-D1 residue: the watcher drifted into
+        # the hammer's arc during the strike). Free-form shots have
+        # no compiled events, so the legacy path runs unchanged
+        # there.
+        _compiled_motion = bool(_shot_events)
+        if "board" in cues and not _compiled_motion:
             # Lan boards: walk to the bus door.
             fns[actor] = walk_to(chars[actor], ax, sx(BUS_DOOR_X, shot_cam),
                                  duration, ground_ys[actor])
-        elif "run" in cues:
+        elif "run" in cues and not _compiled_motion:
             fns[actor] = run_to(chars[actor], ax, ax + 380 * direction,
                                 duration, ground_ys[actor])
-        elif any(c in cues for c in ("walk", "walk_fast")):
+        elif (any(c in cues for c in ("walk", "walk_fast"))
+              and not _compiled_motion):
             fns[actor] = walk_to(chars[actor], ax, ax + 320 * direction,
                                  duration, ground_ys[actor])
         elif "bend_pick" in cues:
@@ -5071,7 +7504,8 @@ def _render_shot(args: dict) -> dict:
         elif "wave" in cues:
             fns[actor] = wave(chars[actor], duration)
         else:
-            fns[actor] = idle(chars[actor], duration, ground_ys[actor])
+            fns[actor] = idle(chars[actor], duration, ground_ys[actor],
+                              gaze_seed=_gaze_seeds.get(actor, 0))
     # ---- pre-warm every closure at its start pose -------------------
     for n, fn in list(fns.items()):
         try:
@@ -5082,7 +7516,8 @@ def _render_shot(args: dict) -> dict:
         give_fn(0.0)
     for n, ch in chars.items():
         if n not in fns:
-            fns[n] = idle(ch, 99.0, ground_ys[n])
+            fns[n] = idle(ch, 99.0, ground_ys[n],
+                          gaze_seed=_gaze_seeds.get(n, 0))
             fns[n](0.0)
     # ---- W4: compiled events override cue/idle fns ------------------
     # Each actor with events gets a sequenced fn (windows in time
@@ -5091,6 +7526,7 @@ def _render_shot(args: dict) -> dict:
     # cannot be built fall back to idle AND are recorded loudly in
     # the shot report (never a silent substitution).
     _dispatch_fallback: list[str] = []
+    _insert_idle_windows: list[str] = []
     _pair_blocks: dict[str, list] = {}
     _pair_windows: dict[str, list] = {}
     if _per_actor:
@@ -5099,6 +7535,7 @@ def _render_shot(args: dict) -> dict:
                 continue
             _ctx = {
                 "name": _name, "char": chars[_name],
+                "gaze_seed": _gaze_seeds.get(_name, 0),
                 "other_name": other,
                 "other_char": chars.get(other) if other else None,
                 "staging_x": staging[_name],
@@ -5106,6 +7543,8 @@ def _render_shot(args: dict) -> dict:
                 "direction": _direction, "facing": facings[_name],
                 "prop": prop, "paper": _anchors[_name]["paper"],
                 "desk": _anchors[_name]["desk"],
+                "anvil": _anchors[_name]["anvil"],
+                "supports": _support_tops,
                 "chair_x": _anchors[_name]["chair"]["x"],
                 "seat_y": _anchors[_name]["chair"]["seat_y"],
                 "rests": _rests, "pos": {"x": staging[_name]},
@@ -5139,6 +7578,23 @@ def _render_shot(args: dict) -> dict:
                 _prim = _pose.get("primitive")
                 _params = _pose.get("params") or {}
                 _dur = max(0.05, _end - _start)
+                if shot.get("shot_type") in _INSERT_SHOT_TYPES \
+                        and _prim in _INSERT_IDLE_PRIMITIVES:
+                    # Round 9 (R2-C4): an insert shows the OBJECT.
+                    # A reach-without-grasp gesture is amputated by
+                    # the frozen crop into a disembodied frozen
+                    # claw. The body holds idle; the face stays
+                    # alive (expression/blink/gaze) and the event
+                    # still fires effects -- bursts read events,
+                    # not primitives. Recorded loudly, like the
+                    # dispatch fallback, never silently.
+                    _insert_idle_windows.append(
+                        str(_event.get("action_id")))
+                    _base_windows.append((
+                        _start, _end,
+                        idle(chars[_name], _dur, ground_ys[_name],
+                             gaze_seed=_gaze_seeds.get(_name, 0))))
+                    continue
                 if _prim == "hand_over":
                     _recv = _id_to_name.get(str(_event.get("target_id"))) \
                         if _event.get("target_id") else None
@@ -5149,10 +7605,15 @@ def _render_shot(args: dict) -> dict:
                             str(_event.get("action_id")))
                         _base_windows.append((
                             _start, _end,
-                            idle(chars[_name], _dur, ground_ys[_name])))
+                            idle(chars[_name], _dur, ground_ys[_name],
+                                 gaze_seed=_gaze_seeds.get(_name, 0))))
                         continue
+                    _recv_hand = _params.get("receive_hand", "l")
+                    if _recv_hand not in ("l", "r", "both"):
+                        _recv_hand = "l"
                     _pair_fn = hand_over(chars[_name], chars[_recv],
-                                         prop, _dur)
+                                         prop, _dur,
+                                         receive_hand=_recv_hand)
                     _base_windows.append((_start, _end, _pair_fn))
                     _pair_blocks.setdefault(_recv, []).append(
                         (_start, _end))
@@ -5161,7 +7622,8 @@ def _render_shot(args: dict) -> dict:
                 if _fn is None:
                     _dispatch_fallback.append(
                         str(_event.get("action_id")))
-                    _fn = idle(chars[_name], _dur, ground_ys[_name])
+                    _fn = idle(chars[_name], _dur, ground_ys[_name],
+                                 gaze_seed=_gaze_seeds.get(_name, 0))
                     _base_windows.append((_start, _end, _fn))
                 elif _prim == "carry_bag":
                     _overlays.append((_start, _end, _fn))
@@ -5187,9 +7649,23 @@ def _render_shot(args: dict) -> dict:
             # override it in the frame loop.
             give_fn = None
     talk_nod = None
+    # Round-4 "hon": listeners react while someone else speaks --
+    # a slow nod each, phase-offset per character (deterministic
+    # crc32 seed) so two listeners never nod in sync. Same
+    # head_look-overlay mechanism as the speaker's talk_nod.
+    listen_nods: dict[str, tuple] = {}
     if shot["kind"] in ("narration", "dialogue") and actor is not None:
         talk_nod = nod(chars[actor], duration, freq=1.1, amp=0.08)
         talk_nod(0.0)
+        for _ln in names:
+            if _ln == actor or _ln not in chars:
+                continue
+            _phase = (zlib.crc32(
+                f"{shot.get('directive_shot_id')}:{_ln}".encode(
+                    "utf-8")) % 1000) / 1000.0 * 3.0
+            _lfn = nod(chars[_ln], duration, freq=0.33, amp=0.05)
+            _lfn(_phase)
+            listen_nods[_ln] = (_lfn, _phase)
     # ---- subtitles for this shot ------------------------------------
     phrases = split_subtitle(shot.get("text", "")) if shot.get("text") else []
     # Windows span the VOICE only, not the 0.35 s beat after it.
@@ -5238,6 +7714,64 @@ def _render_shot(args: dict) -> dict:
     # Last built frame's prop draws, for the shot report (P9/tests).
     _prop_draws_last: list = []
 
+    def _burst_records(t_abs, joints_by_key):
+        """(event_id, action_type, glow record) live at ``t_abs``.
+
+        One producer for the three burst consumers: the in-frame
+        glow paint, the crack lines (CRACK entries), and the
+        deferred insert pass (which maps the staging-space record
+        through the crop). Pocket-hidden props burst nothing: an
+        invisible prop cannot light the frame. A prop at rest on
+        a surface DOES burst -- the cracking core on its pedestal
+        is the payoff case.
+        """
+        out = []
+        if _prop_machine is None:
+            return out
+        for _ev in _burst_events:
+            _start = float(_ev.get("start_time", 0.0))
+            _end = float(_ev.get("end_time", _start))
+            _u = (t_abs - _start) / max(_end - _start, 1e-6)
+            _inten = burst_envelope(_ev.get("action_type"), _u)
+            if _inten <= 0.0:
+                continue
+            _pid = str(_ev.get("prop_id"))
+            if _pid not in _machine_pids:
+                continue
+            (_bx, _by, _bang, _bstate, _bhand) = \
+                _prop_machine.transform_at(_pid, t_abs,
+                                           joints_by_key)
+            if _bstate == "WORLD_STATIC" and \
+                    _machine_rest_kinds.get(_pid) == "pocket":
+                continue
+            _color, _radius = burst_color_radius(
+                _prop_dicts.get(_pid))
+            out.append((str(_ev.get("action_id")),
+                        _ev.get("action_type"),
+                        burst_record(_pid, _bx, _by, _inten,
+                                     _color, _radius)))
+        return out
+
+    # Effect telemetry accumulators (mutation only -- the frame
+    # closures append without rebinding).
+    _effect_peak: dict[str, float] = {}
+    _effect_frames: dict[str, int] = {}
+    _reaction_acc = {"peak": 0.0, "frames": 0}
+
+    # Round 14 (R13-D1 root cause): the shadow key. _build_frame
+    # used to pass bg_scene.lights.key to the shadow drawer, but
+    # Scene25D is built WITHOUT lights here, so that was the
+    # DEFAULT rig key (0.35,-1.0,-0.3) -- elevation 0.92, spread
+    # 0.087 -- and every character cast spec returned None
+    # (154/154 logged calls on the #1 probe). The key is now the
+    # palette rig's key -- the same rig render_environment uses
+    # -- so contact offsets and cast quads follow the scene's
+    # actual sun. Legacy/map shots without an env package keep
+    # the scene key (the previous behaviour there).
+    _env_light = _env_pkg.get("light") if _env_pkg else None
+    _shadow_key = (rig_for(_env_light).key if _env_light
+                   else bg_scene.lights.key)
+
     def _build_frame(t, fi, expr_overrides, *, paint_glow=True):
         # paint_glow=False defers the energy halo to the pass-2
         # re-frame (deferred inserts): a halo painted pre-crop is
@@ -5254,10 +7788,20 @@ def _render_shot(args: dict) -> dict:
         _grip_matches: list[dict] = []
         for n in names:
             # W1: ratio-capped contact shadow from the live feet.
+            # Round 13: cast shadows outdoors only (the sun is
+            # not the light indoors).
             _draw_character_shadow(
                 img, chars[n], shot_cam,
-                (world_xs[n], 0.0, world_zs[n]), bg_scene.lights.key)
+                (world_xs[n], 0.0, world_zs[n]), _shadow_key,
+                cast=_env_archetype not in _ENCLOSED_ARCHETYPES)
         d = ImageDraw.Draw(img, "RGBA")
+        # Round 14: flame flicker -- fire/flame elements draw
+        # per frame on the background copy, BEFORE the
+        # characters, so a character in front of the furnace
+        # correctly occludes the flame. The floor glow pools
+        # with the same flicker value (see _draw_flames).
+        for _fel in _flame_els:
+            _draw_flames(img, d, _fel, shot_cam, W, H, frame=fi)
         # Poses are set: the live joints give heads (gaze targets),
         # hips (pocket rests) and hands (prop attachment) for this
         # exact frame.
@@ -5272,6 +7816,88 @@ def _render_shot(args: dict) -> dict:
             _cid = _name_to_id.get(_n)
             if _cid:
                 _joints_by_key[_cid] = _j
+        # Set-piece reaction (round-2 system 5) + live sparks
+        # (round 8, R7-D4): the furnace flares and the anvil sparks
+        # accelerate when a hammer strike lands or a set-piece
+        # activation runs. Painted BEFORE the characters (the MG
+        # layer the sparks live in). The furnace wash stays gated
+        # on paint_glow like the energy halo: a pre-crop wash
+        # would be magnified by an insert zoom. The sparks draw
+        # EVERY frame at the real frame index -- the ambient field
+        # is forge activity that must animate, and baking it into
+        # the static background froze the streaks at frame 0 (the
+        # R7-D4 defect). Inside the gated reaction window the
+        # count boosts and the field accelerates, exactly as
+        # before; outside it the base field rises and dies on its
+        # per-spark lifetimes (round 9: no exact repeat). The burst
+        # gating (decay 0.10 s, paint
+        # floor 0.15) is unchanged: only the ambient field is
+        # always visible, never the burst.
+        _sparks_el = _reactive_anchors["sparks_el"]
+        if _sparks_el is not None \
+                or _reactive_anchors["furnace"] is not None:
+            _reaction = strike_reaction(_t0 + t, _strike_moments)
+            for _ev in _activate_events:
+                _as = float(_ev.get("start_time", 0.0))
+                _ae = float(_ev.get("end_time", _as))
+                _reaction = max(
+                    _reaction,
+                    burst_envelope(
+                        "ACTIVATE",
+                        (_t0 + t - _as) / max(_ae - _as, 1e-6)))
+            _bursting = paint_glow \
+                and _reaction > REACTION_PAINT_FLOOR
+            if _bursting:
+                _furn = _reactive_anchors["furnace"]
+                if _furn is not None:
+                    paint_energy_glow(
+                        img, burst_record(
+                            "furnace", _furn[0], _furn[1], _reaction,
+                            REACTION_GLOW_COLOR,
+                            REACTION_GLOW_RADIUS_PX))
+                _reaction_acc["peak"] = max(_reaction_acc["peak"],
+                                            _reaction)
+                _reaction_acc["frames"] += 1
+            if _sparks_el is not None:
+                _extra = dict(_sparks_el.get("extra") or {})
+                if _bursting:
+                    _extra["spark_count"] = int(
+                        _extra.get("spark_count", 14)
+                        * (1.0 + 2.0 * _reaction))
+                    _spark_frame = int(fi * (1.0 + 2.0 * _reaction))
+                else:
+                    _spark_frame = fi
+                # Round 9 (R7-D4 residual): the contact burst. The
+                # age window (12 frames from the latest strike
+                # moment) is its own gate -- it outlives the glow
+                # flash so the flying sparks arc and fade after
+                # contact, and it never fires without a strike.
+                # paint_glow does not gate it: a strike inside an
+                # insert IS the insert's subject. Scan newest-first
+                # so the freshest in-window strike owns the burst.
+                for _si in range(len(_strike_moments) - 1, -1, -1):
+                    _sm = _strike_moments[_si]
+                    _age = int((_t0 + t - _sm) * FPS)
+                    if 0 <= _age < _SPARK_BURST_LIFETIME:
+                        _extra["burst_age_frames"] = _age
+                        _extra["burst_strike_index"] = _si
+                        break
+                # Round 11 (R11-4): debris has its own, longer age
+                # window (44 frames): the fragments land and cool
+                # on the floor long after the streaks are gone. A
+                # second strike re-fires debris with its own seed
+                # while the first strike's debris is still cooling.
+                for _si in range(len(_strike_moments) - 1, -1, -1):
+                    _sm = _strike_moments[_si]
+                    _age = int((_t0 + t - _sm) * FPS)
+                    if 0 <= _age < _DEBRIS_LIFETIME:
+                        _extra["debris_age_frames"] = _age
+                        _extra["debris_strike_index"] = _si
+                        break
+                _draw_sparks(
+                    img, d, dict(_sparks_el, extra=_extra),
+                    shot_cam, None, W, H,
+                    spark_frame=_spark_frame)
         # W4: prop transforms from the state machine (global time),
         # computed once per frame and reused for grips + drawing.
         _machine_draws: list[tuple] = []
@@ -5302,24 +7928,85 @@ def _render_shot(args: dict) -> dict:
                         and _holder_name in chars:
                     # A carried bag hangs below the holding hand.
                     _my += 68.0 * chars[_holder_name].H / 560.0
+                _tip = None
+                if _holder_name in chars and _mstate in (
+                        "GRASPED", "ATTACHED_TO_HAND", "IN_USE"):
+                    _facing = chars[_holder_name].pose.get(
+                        "facing", facings.get(_holder_name, 1))
+                    _ch_h = chars[_holder_name].H
+                    if _machine_kinds[_pid] == "pen":
+                        _tip = pen_tip_position((_mx, _my), _facing,
+                                                _ch_h)
+                    elif _machine_kinds[_pid] == "hammer":
+                        # Round-5: the hammer's striking face, at
+                        # the grip angle in force this frame. The
+                        # phase comes from the active strike span;
+                        # a carried (non-striking) hammer rests at
+                        # the strike angle, per hammer_grip_angle.
+                        _angle = None
+                        _strike_u = None
+                        for (_an, _ss, _se) in _strike_spans:
+                            if _an == _holder_name and _ss <= _t0 + t <= _se:
+                                _sd = max(0.05, _se - _ss)
+                                _cyc = hammer_cycles(_sd)
+                                _strike_u = ((_t0 + t - _ss) / _sd * _cyc) % 1.0
+                                _angle = hammer_grip_angle(_strike_u)
+                                break
+                        _tip = hammer_head_position(
+                            (_mx, _my), _facing, _ch_h, _angle)
+                        # Round-7 contact snap (R5-A2): at the
+                        # contact instant the drawn striking face is
+                        # extended along the handle axis down to the
+                        # anvil top the primitive aimed at, so the
+                        # contact frame shows contact. Only at the
+                        # contact instant, only downward, only when
+                        # a real environment anvil anchors the
+                        # strike, and only by a small extension. The
+                        # hand's own shortfall (IK reach) is
+                        # unchanged and stays visible to the contact
+                        # audit; only the drawn head is snapped.
+                        if (_strike_u is not None and _angle is not None
+                                and abs(_strike_u
+                                        - HAMMER_CYCLE_STRIKE_U) <= 0.03):
+                            _anv = ((_anchors.get(_holder_name) or {})
+                                    .get("anvil"))
+                            if _anv is not None:
+                                _top_y = float(_anv["top_y"])
+                                _dir_y = math.sin(_angle)
+                                if _tip[1] < _top_y and _dir_y > 0.1:
+                                    _ext = (_top_y - _tip[1]) / _dir_y
+                                    if 0.0 < _ext <= 0.08 * _ch_h:
+                                        _tip = (
+                                            _tip[0] + _facing
+                                            * math.cos(_angle) * _ext,
+                                            _tip[1] + _dir_y * _ext)
+                                        _contact_snaps.append({
+                                            "time": round(_t0 + t, 3),
+                                            "extension_px": round(_ext, 1),
+                                            "anvil_top_y": round(_top_y, 1)})
                 _machine_draws.append(
                     (_pid, _mx, _my, _machine_kinds[_pid],
                      float(_detail.get("open_u", 0.0)), _mstate,
-                     pen_tip_position(
-                         (_mx, _my),
-                         chars[_holder_name].pose.get(
-                             "facing", facings.get(_holder_name, 1)),
-                         chars[_holder_name].H)
-                     if _machine_kinds[_pid] == "pen" and _mstate in (
-                         "GRASPED", "ATTACHED_TO_HAND", "IN_USE")
-                     and _holder_name in chars else None))
+                     _tip))
                 if _holder_name in names and _mstate in (
-                        "GRASPED", "ATTACHED_TO_HAND", "IN_USE") \
-                        and _mhand in ("l", "r"):
-                    _grips.setdefault(_holder_name, {})[_mhand] = "grip"
+                        "GRASPED", "ATTACHED_TO_HAND", "IN_USE"):
+                    if _mhand == "both":
+                        _grips.setdefault(_holder_name, {})["l"] = "grip"
+                        _grips.setdefault(_holder_name, {})["r"] = "grip"
+                    elif _mhand in ("l", "r"):
+                        _grips.setdefault(
+                            _holder_name, {})[_mhand] = "grip"
                 _machine_meta[_pid] = {
                     "holder": _holder_name, "hand": _mhand,
                     "angle": float(_mang)}
+        # Burst records for this frame (shared by the glow paint
+        # and the crack lines in both draw passes). Computed once
+        # per frame; the crack intensities are the CRACK entries.
+        _burst_now = _burst_records(_t0 + t, _joints_by_key) \
+            if _prop_machine is not None and joints_pre else []
+        _crack_now = {rec["prop_id"]: rec["intensity"]
+                      for _eid, _atype, rec in _burst_now
+                      if _atype == "CRACK"}
         # W4 depth order: props at rest on a surface (the desk, the
         # paper) sit BEHIND the characters; held/moving props draw
         # in front. A letter on the desk must not paint over the
@@ -5333,6 +8020,78 @@ def _render_shot(args: dict) -> dict:
                 in _behind_draws:
             _draw_prop(d, _dx, _dy, kind=_dkind, open_u=_open_u,
                        tip=_tip)
+            if _pid in _crack_now:
+                _fw, _fh = geometry_footprint(_dkind)
+                _alpha = int(220 * _crack_now[_pid])
+                for _line in crack_lines(
+                        (_dx - _fw / 2.0, _dy - _fh / 2.0,
+                         _dx + _fw / 2.0, _dy + _fh / 2.0), _pid):
+                    d.line(_line, fill=(30, 25, 20, _alpha), width=3,
+                           joint="curve")
+        # Energy glow (item 10): held energy-carrying props
+        # emit a halo from the lighting stage, painted
+        # BEFORE the characters (round 6, R2-F1): the halo
+        # lights the environment around the prop — the
+        # anvil, the ground, the walls — while the cast
+        # draws over it, so a glowing stone resting
+        # against a leg no longer washes the leg out.
+        # Held props draw after the characters, crisp on
+        # top of their own light. No record (not held, no
+        # energy spec) means no glow; radius 0 paints
+        # nothing. The record's positions are
+        # staging-plane pixels, the space this frame is
+        # built in, so no bridge is needed here.
+        # a halo from the lighting stage, painted after the
+        # characters and before the props themselves, so the prop
+        # stays crisp on top of its own light and the halo tints
+        # the surroundings. No record (not held, no energy spec)
+        # means no glow; radius 0 paints nothing. The record's
+        # positions are staging-plane pixels, the space this
+        # frame is built in, so no bridge is needed here.
+        # Round 10 (R10-6): the light pool's ground line is the
+        # floor under the glow source -- the ground line of the
+        # character nearest the source in x (usually the holder
+        # or the actor at the pedestal). A soft pool tolerates a
+        # small depth error; the wrong character's floor would
+        # float it visibly.
+        def _pool_ground_y(sx):
+            _best = None
+            _best_dx = None
+            for _n in names:
+                _j = joints_pre.get(_n)
+                if _j is None or _n not in ground_ys:
+                    continue
+                _dx = abs(float(_j["head"][0]) - float(sx))
+                if _best_dx is None or _dx < _best_dx:
+                    _best_dx = _dx
+                    _best = _n
+            return ground_ys.get(_best) if _best else None
+
+        if paint_glow and _prop_machine is not None and joints_pre:
+            for _pid in _machine_pids:
+                _glow = _prop_machine.energy_glow_at(
+                    _pid, _t0 + t, _joints_by_key)
+                if _glow is not None and _glow["radius"] > 0:
+                    paint_energy_glow(img, _glow)
+                    _pool_gy = _pool_ground_y(
+                        _glow["source_position"][0])
+                    if _pool_gy is not None:
+                        paint_light_pool(img, _glow, _pool_gy)
+            # Event-driven burst (round-2 system 5): the payoff
+            # halo paints at the same stage as the held glow --
+            # halo paints at the same stage as the held glow
+            # -- before the characters -- so the payoff
+            # lights the scene without washing the cast.
+            # The prop stays crisp on top of its own light.
+            for _eid, _atype, _rec in _burst_now:
+                paint_energy_glow(img, _rec)
+                _pool_gy = _pool_ground_y(
+                    _rec["source_position"][0])
+                if _pool_gy is not None:
+                    paint_light_pool(img, _rec, _pool_gy)
+                _effect_peak[_eid] = max(
+                    _effect_peak.get(_eid, 0.0), _rec["intensity"])
+                _effect_frames[_eid] = _effect_frames.get(_eid, 0) + 1
         joints_now: dict[str, dict] = {}
         for n in names:
             ch = chars[n]
@@ -5353,6 +8112,7 @@ def _render_shot(args: dict) -> dict:
             if expr is None:
                 # W4: face_only keyframes win within their windows.
                 _kf = None
+                _mirror = False
                 for (_s, _e, _face) in _face_keyframes.get(n, []):
                     if _s <= t < _e:
                         _kf = _face
@@ -5372,7 +8132,24 @@ def _render_shot(args: dict) -> dict:
                         expr = resolve_expression(
                             _label, shot.get("text", ""))
                 else:
-                    expr = "neutral"
+                    # No keyframe and not the speaker: the
+                    # character's declared resting face wins;
+                    # otherwise mirror the speaker's expression
+                    # at half strength (round 7: a listener with
+                    # a flat neutral face while the speaker
+                    # worries reads as an NPC -- the child's brow
+                    # stayed 0.0 deg in R6 while the adults'
+                    # slanted 11-15 deg). A neutral speaker
+                    # mirrors to neutral: no change.
+                    _rest = _default_expr.get(n)
+                    if _rest:
+                        expr = _rest
+                    elif (_speaker_expr_name
+                            and _speaker_expr_name != "neutral"):
+                        expr = "neutral"
+                        _mirror = True
+                    else:
+                        expr = "neutral"
                 # Param-dict path ONLY when W4 adds information
                 # (extended-label blend, an active blink, or
                 # lip-sync above the base mouth): otherwise the
@@ -5380,6 +8157,12 @@ def _render_shot(args: dict) -> dict:
                 _base_params = dict(
                     EXPRESSIONS.get(expr) or EXPRESSIONS["neutral"])
                 _params = None
+                if _mirror:
+                    # The mirror blend rides the param-dict
+                    # path; blinks and lip-sync apply onto it
+                    # in the branch below.
+                    _params = dict(blend_expressions_lib(
+                        "neutral", _speaker_expr_name, 0.5))
                 if _kf is None and n == shot.get("speaker") \
                         and shot.get("expression"):
                     _cand = interpret_expression_params(
@@ -5406,9 +8189,23 @@ def _render_shot(args: dict) -> dict:
                     if _mouth > _params.get("mouth_open", 0.0):
                         _params["mouth_open"] = _mouth
                     _expr_params = _params
-            # W4 gaze: LOOK_AT events aim the eyes at their target;
-            # in dialogue the speaker and listener look at each
-            # other. The OTS listener (back view) has no face.
+            # W4 gaze: LOOK_AT events aim the eyes at their target.
+            # Round-4 "hon": conversational attention is MUTUAL and
+            # covers narration too. Before this, only the actor
+            # looked at `other`, only in dialogue -- so in narration
+            # shots (most of a first-person script) every listener
+            # stared forward and the speaker stared forward: the NPC
+            # look. Now the actor looks at the scene partner and
+            # every other on-screen character looks at the actor,
+            # in dialogue AND narration. Action shots keep
+            # LOOK_AT-only gaze (actors watch what they do). The OTS
+            # listener (back view) has no face.
+            # Round 8 (R4-A5): micro-saccades. The look direction
+            # alone is locked within a shot (gaze_for_target
+            # saturates at its clamp for distant targets), so a
+            # small seeded wander rides on top of it -- the eyes
+            # drift around the look target instead of freezing on
+            # it, and a targetless stare wanders around centre.
             _gaze = None
             if n != _ots_listener:
                 _head = joints_pre[n]["head"]
@@ -5419,12 +8216,19 @@ def _render_shot(args: dict) -> dict:
                         _target = _gaze_target_for(
                             _event, joints_pre)
                         break
-                if _target is None and shot["kind"] == "dialogue" \
-                        and other is not None and other in joints_pre \
-                        and n != other:
-                    _target = joints_pre[other]["head"]
+                if _target is None and shot["kind"] in (
+                        "dialogue", "narration"):
+                    if n == actor and other is not None \
+                            and other in joints_pre:
+                        _target = joints_pre[other]["head"]
+                    elif n != actor and actor in joints_pre:
+                        _target = joints_pre[actor]["head"]
+                _base_gaze = (0.0, 0.0)
                 if _target is not None:
-                    _gaze = gaze_for_target(_head, _target)
+                    _base_gaze = gaze_for_target(_head, _target)
+                _wander = gaze_wander(t, _gaze_seeds.get(n, 0))
+                _gaze = (_base_gaze[0] + _wander[0],
+                         _base_gaze[1] + _wander[1])
             # F9: the over-the-shoulder foreground listener is drawn
             # from behind (back of the head, no face — the art system
             # renders view "back" with hair, never a face); everyone
@@ -5436,7 +8240,9 @@ def _render_shot(args: dict) -> dict:
                 expression=(_expr_params
                             if _expr_params is not None else expr),
                 view=_view, gaze=_gaze,
-                hand_grips=_grips.get(n))
+                hand_grips=_grips.get(n),
+                ground_kind=((_env_fitted or {}).get("ground")
+                            or {}).get("kind"))
         if fg_layer is not None:
             # Foreground boxes occlude the characters behind them.
             img.paste(fg_layer, (0, 0), fg_layer)
@@ -5457,20 +8263,6 @@ def _render_shot(args: dict) -> dict:
         # Empty-cast shots have no hands: the prop is skipped.
         wx, wy = None, None
         _home_x = staging[actor] + 220 if actor in staging else W // 2
-        # Energy glow (item 10): held energy-carrying props emit
-        # a halo from the lighting stage, painted after the
-        # characters and before the props themselves, so the prop
-        # stays crisp on top of its own light and the halo tints
-        # the surroundings. No record (not held, no energy spec)
-        # means no glow; radius 0 paints nothing. The record's
-        # positions are staging-plane pixels, the space this
-        # frame is built in, so no bridge is needed here.
-        if paint_glow and _prop_machine is not None and joints_pre:
-            for _pid in _machine_pids:
-                _glow = _prop_machine.energy_glow_at(
-                    _pid, _t0 + t, _joints_by_key)
-                if _glow is not None and _glow["radius"] > 0:
-                    paint_energy_glow(img, _glow)
         if _prop_machine is not None:
             # W4: held/moving props draw at their state-machine
             # transform (hand-attached, in use, or in transfer).
@@ -5480,8 +8272,53 @@ def _render_shot(args: dict) -> dict:
                 d = ImageDraw.Draw(img, "RGBA")
                 for (_pid, _dx, _dy, _dkind, _open_u, _st, _tip) \
                         in _front_draws:
+                    _pw, _ph = None, None
+                    if _dkind == "shield":
+                        # Round-7: a held shield draws at the
+                        # holder's head scale (a guard shield covers
+                        # the torso), not the 76 px footprint -- the
+                        # R6 shield read as a small grey tag. The
+                        # diameter is the holder's head diameter
+                        # (head ratio 0.34 of the drawn height); a
+                        # holderless shield keeps the footprint.
+                        # Round-8 (R7-D3): detail_at reports no
+                        # holder until GRASPED, so an APPROACHING
+                        # shield drew at the footprint and popped
+                        # 4x at the grasp instant (72 -> 296 px in
+                        # 6 frames). The shield is the same physical
+                        # object from the moment it starts moving:
+                        # size it by the actor of the event moving
+                        # it, so the raise reads as a position move
+                        # (the disc travelling up with the hands),
+                        # not a growth.
+                        _holder = (_machine_meta.get(_pid) or {}).get(
+                            "holder")
+                        if _holder is None:
+                            _now = _t0 + t
+                            for _ev in _shot_events:
+                                if _ev.get("prop_id") != _pid:
+                                    continue
+                                if float(_ev.get("start_time", 0.0)) \
+                                        <= _now <= float(_ev.get(
+                                            "end_time", 0.0)):
+                                    _holder = _id_to_name.get(str(
+                                        _ev.get("actor_id") or ""))
+                                    break
+                        _m = metrics.get(_holder) \
+                            if _holder else None
+                        if _m is not None and _m[2] > 0:
+                            _pw = _ph = 0.34 * float(_m[2])
                     _draw_prop(d, _dx, _dy, kind=_dkind, open_u=_open_u,
-                               tip=_tip)
+                               tip=_tip, w=_pw, h=_ph)
+                    if _pid in _crack_now:
+                        _fw, _fh = geometry_footprint(_dkind)
+                        _alpha = int(220 * _crack_now[_pid])
+                        for _line in crack_lines(
+                                (_dx - _fw / 2.0, _dy - _fh / 2.0,
+                                 _dx + _fw / 2.0, _dy + _fh / 2.0),
+                                _pid):
+                            d.line(_line, fill=(30, 25, 20, _alpha),
+                                   width=3, joint="curve")
                 # Hands over props (finger wrap): the prop painted
                 # over the gripping fingers; repaint the grip fan
                 # from the prop's grip point along the forearm
@@ -5507,12 +8344,22 @@ def _render_shot(args: dict) -> dict:
                                     or _elbow_key not in _jn:
                                 continue
                             _hx, _hy = _jn[_hand_key]
-                            if abs(_hx - _dx) > 30 \
-                                    or abs(_hy - _dy) > 30:
+                            # Round-6 grip readability: the gate is
+                            # footprint-aware (a two-hand grip puts
+                            # each hand at the prop's edge, ~44 px
+                            # from its centre for a 76 px footprint
+                            # -- the old fixed 30 px gate dropped
+                            # both repaints), and each fan repaints
+                            # from its OWN hand position: both fans
+                            # used to originate at the prop centre
+                            # and collapse into one blob.
+                            _gfw, _gfh = geometry_footprint(_dkind)
+                            if abs(_hx - _dx) > _gfw / 2.0 + 30 \
+                                    or abs(_hy - _dy) > _gfh / 2.0 + 30:
                                 continue
                             _ex, _ey = _jn[_elbow_key]
                             draw_grip_fingers(
-                                d, (_dx, _dy), (_hx - _ex, _hy - _ey),
+                                d, (_hx, _hy), (_hx - _ex, _hy - _ey),
                                 chars[_holder], INK_RGB)
                             _grip_matches.append({
                                 "pid": _pid, "holder": _holder,
@@ -5557,6 +8404,8 @@ def _render_shot(args: dict) -> dict:
                     "holder": _meta.get("holder"),
                     "hand": _meta.get("hand"),
                     "x": float(_dx), "y": float(_dy),
+                    "tip": ([float(_tip[0]), float(_tip[1])]
+                            if _tip is not None else None),
                     "angle": _meta.get("angle"),
                     "open_u": float(_open_u),
                     "grip_repaint": any(
@@ -5575,6 +8424,12 @@ def _render_shot(args: dict) -> dict:
         return img, joints_now, _prop_xy, _telemetry_draws
 
     violations: list[str] = []
+    # Round-7 head-intrusion audit (R6-D1): frames where a HELD
+    # prop's drawn point (striking tip when present, else the draw
+    # position) lands inside another character's head disc. Sparse
+    # by design: the list caps at 200 entries, the count is exact.
+    _head_intrusions: list[dict] = []
+    _head_intrusion_count = 0
     max_jump = 0.0
     prev_joints = None
     foot_slide = 0.0
@@ -5607,107 +8462,11 @@ def _render_shot(args: dict) -> dict:
                     fn(_st)
             if talk_nod is not None:
                 talk_nod(_st)
-    # ---- D2 frozen crop anchor (Phase C checkpoint) ------------------
-    # ONE crop per shot, computed here from STANDING boxes and frozen
-    # for every frame (directive D2: head-tracking crop OFF by
-    # default; framing anchored to the scene). Standing boxes use
-    # the final staging x, the standing vertical extent (ground_y /
-    # char_height) and head_r — pose-independent by construction,
-    # so a kneel, bend or turn can never move the crop mid-shot.
-    # Box proportions match the old per-frame helpers exactly; only
-    # the sampling moment changes (standing pose instead of the
-    # live frame). object_insert defers to the first built frame:
-    # the prop position is only known once a frame exists. KNOWN
-    # LIMITATION (proven 2026-11-13): the frozen crop anchors on
-    # the prop's frame-0 rest position, so a prop that travels
-    # during the shot (ground -> hand, handover) leaves the crop
-    # by mid-shot and the frame fills with legs. A mid-shot probe
-    # frame was tried and REVERTED: frame construction is
-    # stateful -- give_to latches hand starts on its first call,
-    # so the probe read GRASPED at (1640, 622) while the
-    # sequential loop read ATTACHED_TO_HAND at (948, 540) at the
-    # same clock time, and the probe perturbs the latch. The real
-    # fix is a two-pass render (build, anchor from telemetry,
-    # re-crop) or a standing-hand anchor; both are RicksClips-loop
-    # work, not a silent skip.
-    def _standing_box(_n, _kind):
-        _hr = float(getattr(chars[_n], "head_r", 133.0))
-        _cx = float(staging[_n])
-        _top = float(ground_ys[_n] - char_heights[_n])
-        _hc = _top + _hr  # standing head centre (B §5.1 formula)
-        if _kind == "full":
-            return {"cx": _cx, "head_y": _top,
-                    "foot_y": float(ground_ys[_n]),
-                    "half_w": max(_hr + 20,
-                                  0.15 * float(char_heights[_n]))}
-        if _kind == "tight":
-            return {"cx": _cx, "head_y": _hc - 0.7 * _hr,
-                    "foot_y": _hc + 1.1 * _hr,
-                    "half_w": 0.8 * _hr + 15}
-        if _kind == "mcu":
-            return {"cx": _cx, "head_y": _hc - _hr,
-                    "foot_y": _hc + 2.8 * _hr, "half_w": _hr + 40}
-        return {"cx": _cx, "head_y": _hc - _hr,
-                "foot_y": _hc + 1.8 * _hr, "half_w": _hr + 30}
-
-    _anchor_st = shot["shot_type"]
-    _anchor_lead = (actor if actor in names else
-                    (names[0] if names else None))
-    _anchor_max_scale = None
-    if not names:
-        # Empty-cast shot: nothing to frame — the full frame.
-        _anchor_subjects, _anchor_others = [], []
-        _anchor_max_scale = 1.0
-    elif _anchor_st == "close_up":
-        _anchor_subjects = [_standing_box(_anchor_lead, "head")]
-        _anchor_others = [_standing_box(n, "full")
-                          for n in names if n != _anchor_lead]
-    elif _anchor_st == "medium_close_up":
-        _anchor_subjects = [_standing_box(_anchor_lead, "mcu")]
-        _anchor_others = [_standing_box(n, "head")
-                          for n in names if n != _anchor_lead]
-    elif _anchor_st == "extreme_close_up":
-        _anchor_subjects = [_standing_box(_anchor_lead, "tight")]
-        _anchor_others = [_standing_box(n, "head")
-                          for n in names if n != _anchor_lead]
-    elif _anchor_st == "shot_reverse_shot":
-        _anchor_subjects = [_standing_box(_anchor_lead, "head")]
-        _anchor_others = [_standing_box(n, "head")
-                          for n in names if n != _anchor_lead]
-    elif _anchor_st == "over_the_shoulder":
-        _anchor_subjects = [_standing_box(n, "full") for n in names]
-        _anchor_others = []
-        _anchor_max_scale = 1.0
-    elif _anchor_st == "reaction":
-        _anchor_subjects = [_standing_box(n, "head") for n in names]
-        _anchor_others = []
-    elif _anchor_st == "object_insert":
-        # Deferred: multi-frame inserts freeze in pass 2 from
-        # telemetry (see _defer_framing below); stills and
-        # split-screen freeze from the first frame in the loop.
-        _anchor_subjects = None
-        _anchor_others = [_standing_box(n, "head") for n in names]
-    else:
-        _anchor_subjects = [_standing_box(n, "full") for n in names]
-        _anchor_others = []
-        _anchor_max_scale = 1.0
-
-    def _freeze_anchor(_subjects, _others):
-        _shot_dict = {"shot_type": shot["shot_type"],
-                      "camera": {"scale": CAMERA_SHOT_SCALE.get(
-                          shot["shot_type"],
-                          SHOT_SCALE.get(shot["shot_type"], 1.6))},
-                      "focus_target": actor}
-        return anchor_focus_for_shot(_shot_dict, _subjects, _others,
-                                     W, H, max_scale=_anchor_max_scale)
-
-    _frozen = None
-    _crop_notes: list = []
-    if _anchor_subjects is not None:
-        (_safe_shot_a, _safe_focus_a, _crop_notes,
-         _frozen_crop_a) = _freeze_anchor(_anchor_subjects,
-                                          _anchor_others)
-        _frozen = (_safe_shot_a, _safe_focus_a, _frozen_crop_a)
+            for _lfn, _lph in listen_nods.values():
+                _lfn(_st + _lph)
+    # The D2 frozen crop (_frozen, _crop_notes, _standing_box)
+    # was computed before the environment build above (round 6)
+    # and is reused here unchanged.
     # Insert two-pass (RicksClips loop, 2026-11-13): object_insert
     # shots anchor from the prop's telemetry median, not its
     # frame-0 rest position (which framed legs while the prop
@@ -5725,13 +8484,13 @@ def _render_shot(args: dict) -> dict:
         and (_prop_machine is not None or has_prop))
     _insert_anchor: dict | None = None
     # ---- T1: executed camera life ----------------------------------
-    # A shot whose actor has no action events renders an otherwise
-    # frozen frame. The reference channel keeps a living camera on every
-    # shot, so DOLLY_*/PAN_* are EXECUTED here as an image-level micro
-    # move (and reported as executed, never as a limitation), and a shot
-    # with nothing to animate gets a gentle auto push-in. The scene
-    # camera itself stays fixed: no parallax is invented, and framing
-    # still changes only by cut.
+    # Scripted DOLLY_*/PAN_* are EXECUTED here as an image-level
+    # micro move (and reported as executed, never as a limitation).
+    # The scene camera itself stays fixed: no parallax is invented,
+    # and framing still changes only by cut. An UNSCRIPTED auto
+    # push-in on quiet shots is OPT-IN ONLY (see below): the locked
+    # D2 rule + channel study R9 fix the camera within a shot, and
+    # the reference study observed no in-shot camera motion.
     _movement_req_early = normalize_movement(shot.get("camera_movement"))
     _dolly: dict | None = None
     _auto_drift = False
@@ -5746,11 +8505,24 @@ def _render_shot(args: dict) -> dict:
         _executed_movement = _movement_req_early
     _has_action_events = bool(names) and any(
         _per_actor.get(n) for n in names) if _per_actor else False
+    # Auto push-in is OPT-IN ONLY via the explicit shot/package
+    # flag "auto_camera_drift". Default OFF per D2/R9 (above).
+    _auto_drift_opt_in = bool(shot.get("auto_camera_drift")
+                              or package.get("auto_camera_drift"))
     if (_dolly is None and not still_only and shot["kind"] != "action"
-            and not _has_action_events):
+            and not _has_action_events and _auto_drift_opt_in):
         _dolly = {"zoom": 0.050, "pan": 0.006, "out": False}
         _executed_movement = "DOLLY_IN"
         _auto_drift = True
+    # Exposure floor is OPT-IN ONLY via the explicit shot/package
+    # flag "exposure_floor". A global RGB gain remaps the exact
+    # palette colors (face cream, prop fills) the pixel QA
+    # contracts and character consistency rely on — proven by 5
+    # regressions on the merged tree (2026-11-14). Dark shots are
+    # fixed in the environment palette, not by brightening
+    # finished frames (see apply_exposure_floor's docstring).
+    _exposure_floor_opt_in = bool(shot.get("exposure_floor")
+                                  or package.get("exposure_floor"))
     _exposure_gains: list[float] = []
     _shot_gain: float | None = None
     for fi in range(n_frames):
@@ -5762,6 +8534,8 @@ def _render_shot(args: dict) -> dict:
                 fn(t)
         if talk_nod is not None:
             talk_nod(t)
+        for _lfn, _lph in listen_nods.values():
+            _lfn(t + _lph)
         # Per frame: build the full frame (background, characters,
         # foreground, rain, prop); the split-screen second viewport
         # is built after the crop parameters resolve below.
@@ -5793,13 +8567,68 @@ def _render_shot(args: dict) -> dict:
                                     joints_now[n]["elbow_r"]],
                         # Hip: the pass-2 glow re-derivation needs
                         # the same joints the state machine read.
+                        # Head: the hero-insert lean rule needs the
+                        # holder's head position (same frame).
+                        # Shoulder/knees/feet: the pass-2 glow
+                        # exclusion follows the posed limbs
+                        # (round-7: the static standing box ate
+                        # the insert halo whenever the holder
+                        # stood at the prop).
                         "hip": [float(v) for v in
                                 joints_now[n]["hip"]],
+                        "head": [float(v) for v in
+                                 joints_now[n]["head"]],
+                        "shoulder": [float(v) for v in
+                                     joints_now[n]["shoulder"]],
+                        "knee_l": [float(v) for v in
+                                   joints_now[n]["knee_l"]],
+                        "knee_r": [float(v) for v in
+                                   joints_now[n]["knee_r"]],
+                        "foot_l": [float(v) for v in
+                                   joints_now[n]["foot_l"]],
+                        "foot_r": [float(v) for v in
+                                   joints_now[n]["foot_r"]],
                         "head_r": float(getattr(
                             chars[n], "head_r", 0.0)),
                         "H": float(chars[n].H)}
                     for n in names},
                 "draws": _telemetry_draws})
+            # Round-7 head-intrusion audit (R6-D1): a held prop
+            # drawn over another character's face. The point is the
+            # prop's striking tip when the draw carries one (the
+            # hammer head), else the draw position; the head disc
+            # comes from the live joints of the same frame.
+            # Round 8 (R7-D1): the holder's OWN head counts too --
+            # the wind-up swept the stone and hammer across the
+            # striker's own face while the audit only watched
+            # bystanders. Resting props never count (only held
+            # states intrude).
+            for _dr in _telemetry_draws:
+                if _dr.get("state") not in (
+                        "GRASPED", "ATTACHED_TO_HAND", "IN_USE"):
+                    continue
+                _holder = _dr.get("holder")
+                if _holder not in names:
+                    continue
+                _pt = _dr.get("tip") or (_dr["x"], _dr["y"])
+                for _other in names:
+                    _hc = joints_now[_other]["head"]
+                    _hr = float(getattr(chars[_other], "head_r", 0.0))
+                    _dd = math.hypot(_pt[0] - _hc[0], _pt[1] - _hc[1])
+                    if _prop_intrudes_head(
+                            _pt, _hc, _hr, float(chars[_other].H)):
+                        _head_intrusion_count += 1
+                        if len(_head_intrusions) < 200:
+                            _head_intrusions.append({
+                                "frame": int(fi),
+                                "time": round(float(_t0 + t), 3),
+                                "pid": _dr.get("pid"),
+                                "kind": _dr.get("kind"),
+                                "holder": _holder,
+                                "other": _other,
+                                "self": _other == _holder,
+                                "distance_px": round(_dd, 1),
+                                "head_r_px": round(_hr, 1)})
         # ---- D2 frozen framing crop ---------------------------------
         # The crop is FRAMING (shot scale), not the camera angle: the
         # angle is the shot camera (viewpoint_for_shot) that rendered
@@ -5823,8 +8652,30 @@ def _render_shot(args: dict) -> dict:
             # freeze for the whole shot.
             if _prop_xy is not None:
                 _px, _py = _prop_xy
-                _subjects0 = [{"cx": _px, "head_y": _py - 90,
-                               "foot_y": _py + 90, "half_w": 170}]
+                # Hero prop grammar: the still-frame insert uses
+                # the SAME footprint-sized subject box as pass 2
+                # (kind from this frame's telemetry draws, else
+                # the shot's prop_kind). No hand median exists
+                # at frame 0, so the box is prop-only.
+                _kind0 = shot.get("prop_kind") or "wallet"
+                for _d0 in _telemetry_draws or []:
+                    if _d0.get("kind"):
+                        _kind0 = _d0["kind"]
+                        break
+                _box0, _fields0 = _insert_subject_box(
+                    _px, _py, _kind0, None, W, H)
+                _subjects0 = [_box0]
+                _insert_anchor = {
+                    "source": "first_frame_prop", "kind": _kind0,
+                    "x": _fields0["cx"], "y": _fields0["cy"],
+                    "n_draws": 1,
+                    "n_hands": 0, "pair_anchored": False,
+                    "n_pairs": 0}
+                if (_fields0["cx"], _fields0["cy"]) != (_px, _py):
+                    _insert_anchor.update(
+                        {"clamped_to_frame": True,
+                         "raw_x": _px, "raw_y": _py})
+                _insert_anchor.update(_fields0)
                 # No "others": safe_frame's never-half-cut rule
                 # for other characters would drag the crop off
                 # the prop. The insert's composition rule is
@@ -5838,6 +8689,14 @@ def _render_shot(args: dict) -> dict:
             (_safe_shot0, _safe_focus0, _crop_notes,
              _frozen_crop0) = _freeze_anchor(_subjects0, _others0)
             _frozen = (_safe_shot0, _safe_focus0, _frozen_crop0)
+            if _insert_anchor is not None:
+                _cw0 = float(_frozen_crop0["crop_rect"][2]
+                             - _frozen_crop0["crop_rect"][0])
+                if _cw0 > 0 and _insert_anchor.get("prop_w"):
+                    _insert_anchor["screen_share_w"] = round(
+                        _insert_anchor["prop_w"] / _cw0, 4)
+                _insert_anchor["applied_scale"] = float(
+                    _safe_shot0["camera"]["scale"])
         if _defer_framing:
             # Pass 1: no crop yet — the full staging frame is
             # saved and re-framed by pass 2 from telemetry.
@@ -5886,8 +8745,11 @@ def _render_shot(args: dict) -> dict:
         # One gain per shot, measured on the first finished frame: the
         # dolly/exposure ops happen before captions, and a per-frame gain
         # would track the moving characters as a slow brightness flicker.
+        # Opt-in only (see the flag above): without it the gain is 1.0
+        # and apply_gain is the identity, so palette colors stay exact.
         if _shot_gain is None:
-            _shot_gain = measured_exposure_gain(img)
+            _shot_gain = (measured_exposure_gain(img)
+                          if _exposure_floor_opt_in else 1.0)
             _exposure_gains.append(_shot_gain)
         img = apply_gain(img, _shot_gain)
         # ---- subtitles last, always at fixed 64 px --------------------
@@ -5896,7 +8758,8 @@ def _render_shot(args: dict) -> dict:
             for w in windows:
                 if w["start"] <= t < w["end"] or (
                         t >= duration - 1 / FPS and w is windows[-1]):
-                    draw_phrase(d, w["phrase"])
+                    draw_phrase(d, w["phrase"], lift_px=(
+                        _MAP_SUBTITLE_LIFT_PX if _is_map else 0.0))
                     break
         if still_only:
             still_path = shot_dir / "still.png"
@@ -5937,17 +8800,37 @@ def _render_shot(args: dict) -> dict:
         # — see the give_to latch — and must run once, in order).
         _subjects2, _insert_anchor = _insert_anchor_subjects(
             _grip_telemetry,
-            [_standing_box(n, "full") for n in names])
+            [_standing_box(n, "full") for n in names],
+            W, H)
         (_safe_shot2, _safe_focus2, _notes2,
          _frozen_crop2) = _freeze_anchor(_subjects2, [])
         _frozen = (_safe_shot2, _safe_focus2, _frozen_crop2)
         safe_shot, safe_focus, _frozen_crop = _frozen
+        _cw2 = float(_frozen_crop2["crop_rect"][2]
+                     - _frozen_crop2["crop_rect"][0])
+        if _cw2 > 0 and _insert_anchor.get("prop_w"):
+            _insert_anchor["screen_share_w"] = round(
+                _insert_anchor["prop_w"] / _cw2, 4)
+        _insert_anchor["applied_scale"] = float(
+            safe_shot["camera"]["scale"])
         _crop_notes.extend(_notes2)
         _crop_notes.append(
             "insert two-pass: crop frozen from "
             f"{_insert_anchor['source']} "
             f"(kind={_insert_anchor['kind']}, "
             f"n_draws={_insert_anchor['n_draws']})")
+        # Glow exclusions (round 6, R2-F1; round-7 rework): the
+        # repainted halos must not wash the cast on the flattened
+        # cropped frames. The exclusion follows the POSED limbs
+        # per frame (see _glow_exclusion_boxes) -- the static
+        # standing box erased the halo whenever the holder stood
+        # at the prop. A hole around each glow source stays lit
+        # (the glowing prop itself + the flesh touching it).
+        _crx0, _cry0, _crx1, _cry1 = (
+            float(v) for v in _frozen_crop["crop_rect"])
+        _czx = W / max(_crx1 - _crx0, 1.0)
+        _czy = H / max(_cry1 - _cry0, 1.0)
+        _glow_hole_r = GLOW_SOURCE_HOLE_STAGING_PX * _czx
         for _fi2, _path2 in enumerate(frames_written):
             _t2 = _fi2 / FPS
             _img2 = Image.open(_path2)
@@ -5969,15 +8852,37 @@ def _render_shot(args: dict) -> dict:
                     _cid2 = _name_to_id.get(_n2)
                     if _cid2:
                         _joints2[_cid2] = _h2
+                _glow_exclusions = _glow_exclusion_boxes(
+                    _joints2, names, _frozen_crop["crop_rect"],
+                    _img2.size)
                 for _pid2 in _machine_pids:
                     _glow2 = _prop_machine.energy_glow_at(
                         _pid2, _t0 + _fi2 / FPS, _joints2)
                     if _glow2 is not None and _glow2["radius"] > 0:
-                        paint_energy_glow(
-                            _img2,
-                            _screen_glow_record(
-                                _glow2, _frozen_crop["crop_rect"],
-                                _img2.size))
+                        _mapped2 = _screen_glow_record(
+                            _glow2, _frozen_crop["crop_rect"],
+                            _img2.size)
+                        _sx2, _sy2 = _mapped2["source_position"]
+                        paint_energy_glow_excluding(
+                            _img2, _mapped2, _glow_exclusions,
+                            holes=[(_sx2, _sy2, _glow_hole_r)])
+                # Event-driven burst, deferred like the held halo:
+                # re-derived from this frame's telemetry joints and
+                # painted post-crop with a capped radius, so an
+                # insert zoom cannot magnify it into a wash.
+                for _eid2, _atype2, _rec2 in _burst_records(
+                        _t0 + _fi2 / FPS, _joints2):
+                    _mapped_rec2 = _screen_glow_record(
+                        _rec2, _frozen_crop["crop_rect"], _img2.size)
+                    _sx2, _sy2 = _mapped_rec2["source_position"]
+                    paint_energy_glow_excluding(
+                        _img2, _mapped_rec2, _glow_exclusions,
+                        holes=[(_sx2, _sy2, _glow_hole_r)])
+                    _effect_peak[_eid2] = max(
+                        _effect_peak.get(_eid2, 0.0),
+                        _rec2["intensity"])
+                    _effect_frames[_eid2] = _effect_frames.get(
+                        _eid2, 0) + 1
             if _occluder is not None:
                 _img2.paste(_occluder, (0, 0), _occluder)
             if windows:
@@ -5986,7 +8891,8 @@ def _render_shot(args: dict) -> dict:
                     if _w2["start"] <= _t2 < _w2["end"] or (
                             _t2 >= duration - 1 / FPS
                             and _w2 is windows[-1]):
-                        draw_phrase(_d2, _w2["phrase"])
+                        draw_phrase(_d2, _w2["phrase"], lift_px=(
+                            _MAP_SUBTITLE_LIFT_PX if _is_map else 0.0))
                         break
             _img2.save(_path2, compress_level=1)
     # Camera report (Stage 3 / F9): the executed viewpoint + the
@@ -6062,6 +8968,15 @@ def _render_shot(args: dict) -> dict:
             "eye_level viewpoint) so the map stays legible; "
             f"requested angle {_angle_requested} recorded as "
             "camera_angle_requested.")
+    elif _elev_capped:
+        _camera_limitation = (
+            "establishing elevation cap: the requested angle "
+            f"{_angle_requested} ({_requested_elev:.0f} deg) would "
+            "pitch the frustum below the horizon (0 px of sky); "
+            "the executed elevation is capped at "
+            f"{ESTABLISHING_MAX_ELEV_DEG:.0f} deg so the place and "
+            "the sky stay in frame; requested angle recorded as "
+            "camera_angle_requested.")
     elif _angle == "dutch":
         _camera_limitation = (
             "dutch angle: frame tilt not applied (rotation overscan "
@@ -6092,22 +9007,62 @@ def _render_shot(args: dict) -> dict:
                                              ground_ys[_n]):
                     _footfalls.append({**_fall, "character": _n})
         _footfalls.sort(key=lambda f: (f["t"], f["character"]))
+
+    def _effect_records_list():
+        """Per-shot effect telemetry: one record per burst event
+        that painted at least one frame, plus the set-piece
+        reaction record when it fired. Coverage verification reads
+        this, never the event list alone: an event that never
+        painted (out of span, pocket-hidden, unanchored) leaves no
+        record."""
+        _out = []
+        for _eid, _peak in sorted(_effect_peak.items()):
+            _ev = next((e for e in _shot_events
+                        if str(e.get("action_id")) == _eid), None)
+            _out.append({
+                "event_id": _eid,
+                "effect": (_ev or {}).get("action_type"),
+                "prop_id": (_ev or {}).get("prop_id"),
+                "peak_intensity": round(_peak, 3),
+                "frames": _effect_frames.get(_eid, 0),
+            })
+        if _reaction_acc["frames"] > 0:
+            _out.append({
+                "event_id": None,
+                "effect": "SET_PIECE_REACTION",
+                "prop_id": None,
+                "peak_intensity": round(_reaction_acc["peak"], 3),
+                "frames": _reaction_acc["frames"],
+            })
+        return _out
+
     return {
         "index": shot["index"], "scene": shot["scene"],
         "kind": shot["kind"], "speaker": shot.get("speaker"),
         "shot_type": shot["shot_type"], "duration": duration,
         "n_frames": len(frames_written),
         "applied_scale": float(safe_shot["camera"]["scale"]),
+        "anchor_tier": _anchor_tier,
+        "locomotion_widened": bool(_locomotion_widened),
+        "characters_suppressed_for_map": bool(_map_suppressed),
+        "subtitle_lift_px": (
+            _MAP_SUBTITLE_LIFT_PX if _is_map else 0.0),
         "camera_movement": shot.get("camera_movement", "STATIC"),
         "camera_movement_requested": _movement_req,
         "camera_movement_executed": _executed_movement,
         "camera_auto_drift": _auto_drift,
         "exposure_gain_max": round(max(_exposure_gains or [1.0]), 4),
         "character_boxes": _parity_boxes,
+        "fg_clearance": _fg_clearance,
         "captions": _parity_captions,
         "movement_limitation": _movement_limitation,
         "camera_angle": _angle,
         "camera_angle_requested": _angle_requested,
+        "camera_elevation_deg": float(_exec_elev)
+        if _exec_elev is not None else float(elevation_for_angle(_angle)),
+        "camera_elevation_requested_deg": float(_requested_elev)
+        if _requested_elev is not None else float(elevation_for_angle(_angle)),
+        "camera_elevation_capped": _elev_capped,
         "camera_position": tuple(shot_cam.position),
         "camera_target": tuple(shot_cam.target),
         "camera_radius_scale": _radius_scale,
@@ -6155,10 +9110,30 @@ def _render_shot(args: dict) -> dict:
         "action_event_ids": [str(e.get("action_id"))
                              for e in _shot_events],
         "action_dispatch_fallback": list(_dispatch_fallback),
+        "insert_idle_windows": list(_insert_idle_windows),
+        "effect_records": _effect_records_list(),
         "prop_machine": _prop_machine is not None,
         "prop_diagnostics": list(_prop_diagnostics),
         "prop_rest_kinds": dict(_rest_kinds),
+        "prop_support_rests": dict(_support_records),
         "furniture_staging": dict(_furniture_staging),
+        "staging_fit_steps": _staging_fit_steps,
+        "anvil_staging": dict(_anvil_staging),
+        "pick_staging": dict(_pick_staging),
+        "place_staging": dict(_place_staging),
+        "support_sightline": {"moved": dict(_sightline_moved),
+                              "skipped": _sightline_skipped},
+        "shield_staging": dict(_shield_staging),
+        "shield_disc_alignment": dict(_shield_disc_align),
+        "bystander_clearance": _bystander_clearance,
+        "head_clearance": _head_clearance,
+        "head_intrusions": list(_head_intrusions),
+        "head_intrusion_count": _head_intrusion_count,
+        "hammer_contact_snaps": list(_contact_snaps),
+        "camera_radius_scale": _radius_scale,
+        "camera_pullback": _camera_pullback,
+        "anchor_tier": _anchor_tier,
+        "anchor_tier_capped": _tier_capped,
         "seated_at_start": dict(_seated_at_start),
         # Last built frame's prop draws (pid, state) and joints:
         # for stills this IS the frame; for videos it is the final

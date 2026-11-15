@@ -49,6 +49,8 @@ raising modules) so it can be imported anywhere without cycles.
 
 from __future__ import annotations
 
+import re
+
 # --- Error codes ---------------------------------------------------------
 
 COMPILER_EXCEPTION = "COMPILER_EXCEPTION"
@@ -216,8 +218,25 @@ def _expression_phrases() -> set[str]:
 
 
 def _looks_like_expression(text: str, phrases: set[str]) -> bool:
-    lowered = (text or "").lower()
-    return any(p in lowered for p in phrases)
+    """True when an expression phrase occurs as whole words.
+
+    Token-sequence matching, never substring matching: the phrase
+    list holds short interjections ("ủa", "ôi") that occur as
+    substrings of ordinary words ("của", "nôi", "tôi", "rồi") --
+    a substring check staged a narration sentence about cradles
+    as a face expression the moment its shot gained an expression
+    record. Punctuation splits tokens; multi-word phrases must
+    occur as a contiguous token run.
+    """
+    tokens = re.sub(r"[^\w\s]", " ", (text or "").lower()).split()
+    for phrase in phrases:
+        words = phrase.split()
+        if not words:
+            continue
+        for i in range(len(tokens) - len(words) + 1):
+            if tokens[i:i + len(words)] == words:
+                return True
+    return False
 
 
 def _looks_like_constraint(text: str) -> bool:
