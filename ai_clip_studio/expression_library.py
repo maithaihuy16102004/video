@@ -578,6 +578,34 @@ def gaze_wander(t: float, seed: int, amplitude: float = 0.12):
     return v0
 
 
+def fixation_time(t: float, seed: int) -> float:
+    """Time quantized to the gaze fixation grid (round 15).
+
+    The same grid ``gaze_wander`` steps on: flat holds of
+    ``_GAZE_DWELL_SEC`` with a ``_GAZE_EASE_SEC`` eased saccade
+    between them, per-seed offset. During a hold the returned
+    time is constant, so any signal evaluated at it (the idle
+    sway/breath/drift sines) holds pixel-flat together with
+    the gaze: the delivered arc differential steps instead of
+    drifting on sub-pixel head translation (R15-5 isolation
+    probe: the gaze steps perfectly and the drawn arc steps
+    with it at a fixed head; the delivered drift was head
+    motion). Returns local time (the seed offset is removed),
+    so the sine phases stay in the caller's time base.
+    """
+    _offset = 0.037 * (int(seed) % 7)
+    t_eff = max(0.0, float(t)) + _offset
+    step = math.floor(t_eff / _GAZE_DWELL_SEC)
+    t0 = step * _GAZE_DWELL_SEC
+    phase = t_eff - t0
+    if phase < _GAZE_EASE_SEC and step > 0:
+        u = phase / _GAZE_EASE_SEC
+        s = u * u * (3.0 - 2.0 * u)
+        return ((t0 - _GAZE_DWELL_SEC) * (1.0 - s) + t0 * s
+                - _offset)
+    return t0 - _offset
+
+
 # --- Transition alignment (Phase D) --------------------------------------
 # Directive: major expression changes align with a cut or a story
 # beat; only micro-animation (blink, lipsync, eye/brow, breathing,

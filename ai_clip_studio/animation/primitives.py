@@ -1004,7 +1004,7 @@ def give_to(giver, receiver, prop, duration, receive_hand="l"):
     return fn
 
 
-def idle(char, duration, ground_y):
+def idle(char, duration, ground_y, gaze_seed=None):
     """Standing idle: breathing, slow weight shift, slow head drift.
 
     The v4 audit caught the standing character as a frozen statue:
@@ -1015,16 +1015,29 @@ def idle(char, duration, ground_y):
     0.08) measured below notice in rendered motion -- the tester
     read idle holds as frozen. Amplitudes roughly doubled; still
     a background life signal, not a gesture.
+
+    Round 15 (R15-5): with ``gaze_seed`` given (the same seed the
+    shot uses for gaze_wander), the sines are evaluated at the
+    fixation-quantized time, so the head holds pixel-flat during
+    each gaze fixation and steps with the saccades -- the
+    delivered arc differential steps instead of drifting on
+    sub-pixel head translation. ``None`` keeps the continuous
+    sines (tests, non-shot callers).
     """
     _base = {}
+    _quantize = None
+    if gaze_seed is not None:
+        from ..expression_library import fixation_time
+        _quantize = lambda _t: fixation_time(_t, gaze_seed)  # noqa: E731
 
     def fn(t):
         if "root" not in _base:
             _base["root"] = (char.pose["root_x"], char.pose["root_y"])
         bx, by = _base["root"]
-        breathe = math.sin(t * 2 * math.pi * 0.25)   # ~15 breaths/min
-        sway = math.sin(t * 2 * math.pi * 0.08)      # ~12 s weight shift
-        drift = math.sin(t * 2 * math.pi * 0.05)     # slow head drift
+        tq = _quantize(t) if _quantize is not None else t
+        breathe = math.sin(tq * 2 * math.pi * 0.25)   # ~15 breaths/min
+        sway = math.sin(tq * 2 * math.pi * 0.08)      # ~12 s weight shift
+        drift = math.sin(tq * 2 * math.pi * 0.05)     # slow head drift
         char.set_pose(root_x=bx + _s(char, 10) * sway,
                       root_y=by,
                       torso_lean=0.03 * sway,

@@ -985,6 +985,21 @@ def _sky_dressing(rng, light, sky_rgb=None):
             extra={"ridge": True}))
     cloud_white = tod_surface_response(light, (246, 246, 250),
                                        sky_rgb=sky_rgb)
+    # Round 15 (L02-D5): at night the dimmed clouds still
+    # contrasted against the dark sky and their flat shaded
+    # base read as saucer rims. Haze the cloud colour toward
+    # the upper sky as the light drops below dusk -- night
+    # clouds nearly vanish into the sky. The gate opens below
+    # dusk/warm's ambient (0.35), so dusk and day clouds are
+    # untouched; night/warm (0.25) hazes 0.57, night-cold
+    # (0.22) 0.74.
+    _night_haze = min(1.0, max(0.0, (0.35 - light.get("ambient", 0.5))
+                               / 0.15))
+    if _night_haze > 0.0:
+        cloud_white = _blend(
+            cloud_white,
+            tuple(light.get("sky_top", (18, 24, 44))),
+            _night_haze * 0.85)
     for i in range(4):
         elements.append(_el(
             f"sky_cloud_{i}", "cloud", "BG", "blob",
@@ -3485,9 +3500,51 @@ def _sun_clearance_top(elements, camera, width, height):
     return tops
 
 
+def _sun_cy(window_top, radius, height, horizon, visible_rect):
+    """The disc centre-y for a candidate window (round 15).
+
+    Shared by the head-avoidance scoring and the final
+    placement, so the position scored in the search is the
+    position placed. Centre above the occluders with the disc
+    clear of the top edge; a low horizon pulls it up so the
+    ground loop does not clip it. With a visible rect, the
+    top/bottom bounds are the rect's edges (margin included);
+    a rect too short for the disc centres it (best effort).
+    """
+    cy = min(window_top - radius - 8.0, height * 0.30)
+    if visible_rect is not None:
+        _vx0, _vy0, _vx1, _vy1 = (float(v) for v in visible_rect)
+        _top = _vy0 + radius + 12.0
+        _bottom = _vy1 - radius - 12.0
+        if _bottom < _top:  # rect too short: centre the disc
+            cy = (_vy0 + _vy1) / 2.0
+            _floor = _vy0
+        else:
+            cy = min(max(cy, _top), _bottom)
+            _floor = _top
+    else:
+        cy = max(radius + 12.0, cy)
+        _floor = radius + 12.0
+    if 0.0 < horizon < cy + radius:
+        cy = max(_floor, horizon - radius * 0.4)
+        if visible_rect is not None and _bottom >= _top:
+            cy = min(cy, _bottom)
+    return cy
+
+
+# Round 15 (L02-D6): a candidate window whose disc would sit
+# behind a subject's head loses by more than the whole score
+# range (window tops <= height, preference term <= ~288), so
+# any clear window beats any head-overlapping one; when every
+# window overlaps, the best overlapping window still wins
+# (the disc renders, best effort).
+_SUN_HEAD_AVOID_PENALTY = 10000.0
+
+
 def sun_disc_spec(light: dict, elements, camera, width: int,
                   height: int, horizon: float,
-                  seed_key: str, visible_rect=None) -> dict | None:
+                  seed_key: str, visible_rect=None,
+                  avoid_boxes=None) -> dict | None:
     """Screen-space sun/moon placement for an outdoor render.
 
     The disc goes in the most open sky: the column window with
@@ -3505,6 +3562,12 @@ def sun_disc_spec(light: dict, elements, camera, width: int,
     233x211, bbox y0=0). When given, the disc is placed so the
     whole disc + margin lies inside the VISIBLE region, not just
     the full frame. ``None`` keeps the round-14 behaviour.
+
+    Round 15 (L02-D6): ``avoid_boxes`` is a list of head boxes
+    (x0, y0, x1, y1, full-frame pixels). A candidate window
+    whose disc would sit behind a head is penalised out of the
+    running, so the moon never lands directly behind a
+    character's head. ``None``/empty keeps the old behaviour.
     """
     tod = str(light.get("time_of_day", "day"))
     rng = random.Random(
@@ -3536,6 +3599,16 @@ def sun_disc_spec(light: dict, elements, camera, width: int,
         if cx < _lo_x or cx > _hi_x:
             continue
         score = window_top - 0.15 * abs(cx - preferred)
+        if avoid_boxes:
+            _cy = _sun_cy(window_top, radius, height, horizon,
+                          visible_rect)
+            for _box in avoid_boxes:
+                _bx0, _by0, _bx1, _by1 = (float(v) for v in _box)
+                if (cx + radius > _bx0 and cx - radius < _bx1
+                        and _cy + radius > _by0
+                        and _cy - radius < _by1):
+                    score -= _SUN_HEAD_AVOID_PENALTY
+                    break
         if best is None or score > best[0]:
             best = (score, cx, window_top)
     if best is None:  # degenerate: fall back to the seeded spot
@@ -3543,31 +3616,9 @@ def sun_disc_spec(light: dict, elements, camera, width: int,
         window_top = min(tops)
         best = (0.0, cx, window_top)
     _, cx, window_top = best
-    # Centre above the occluders with the disc clear of the top
-    # edge; a low horizon pulls it up so the ground loop does
-    # not clip it. When no window fits the whole disc, the disc
-    # still centres as high as possible (best effort). With a
-    # visible rect, the top/bottom bounds are the rect's edges
-    # (margin included): a disc that fits the rect but overlaps
-    # an occluder top reads as sun-behind-hill, which beats a
-    # clipped disc.
-    cy = min(window_top - radius - 8.0, height * 0.30)
-    if visible_rect is not None:
-        _top = _vy0 + radius + 12.0
-        _bottom = _vy1 - radius - 12.0
-        if _bottom < _top:  # rect too short: centre the disc
-            cy = (_vy0 + _vy1) / 2.0
-            _floor = _vy0
-        else:
-            cy = min(max(cy, _top), _bottom)
-            _floor = _top
-    else:
-        cy = max(radius + 12.0, cy)
-        _floor = radius + 12.0
-    if 0.0 < horizon < cy + radius:
-        cy = max(_floor, horizon - radius * 0.4)
-        if visible_rect is not None and _bottom >= _top:
-            cy = min(cy, _bottom)
+    # Shared with the avoidance scoring: the placed cy is the
+    # scored cy (see _sun_cy).
+    cy = _sun_cy(window_top, radius, height, horizon, visible_rect)
     if tod == "night":
         colour = _MOON_COLOR
     else:
@@ -5354,7 +5405,7 @@ def render_environment(pkg: dict, camera, size=(1920, 1080),
                        energy_glow=None, spark_frame: int = 0,
                        scoped_state=None, rain_frame: int = 0,
                        fg_blur_radius: float = 0.0,
-                       visible_rect=None
+                       visible_rect=None, avoid_boxes=None
                        ) -> Image.Image:
     """Render an EnvironmentPackage to a PIL image.
 
@@ -5494,7 +5545,7 @@ def render_environment(pkg: dict, camera, size=(1920, 1080),
         _sun = sun_disc_spec(
             light, pkg.get("elements", []), camera, width, height,
             horizon, f"{pkg.get('archetype')}:{_sun_seed}",
-            visible_rect=visible_rect)
+            visible_rect=visible_rect, avoid_boxes=avoid_boxes)
         if _sun is not None:
             _draw_sun_disc(img, _sun)
             draw = ImageDraw.Draw(img)
