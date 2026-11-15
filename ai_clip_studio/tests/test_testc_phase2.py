@@ -205,7 +205,7 @@ class TestZoomCapF2(unittest.TestCase):
         timeline = TestShotPlanSync()._timeline()
         shots = plan_shots(pkg, timeline)
         bend = next(s for s in shots if s["kind"] == "action"
-                    and s.get("action_cues") == ["bend_pick"])
+                    and "bend_pick" in (s.get("action_cues") or []))
         with tempfile.TemporaryDirectory() as tmp:
             res = _render_shot(
                 {"shot": dict(bend, index=1, duration=0.5),
@@ -338,9 +338,10 @@ class TestFaceF4(unittest.TestCase):
                         f"stray brow ink ({n}px) for {expr}/{view}/"
                         f"facing {facing}")
 
-    def test_brows_present_except_neutral(self):
-        # The fix must clamp brows, not delete them: every expression
-        # that moves the brows still shows brow ink in the brow band.
+    def test_brows_present_in_every_expression(self):
+        # RicksClips loop round 1 (2026-11-14): brows are drawn in
+        # EVERY state including neutral (flat). The clamp fix must
+        # keep brows, not delete them.
         for expr in EXPRESSIONS:
             arr, J, r = self._render_face(expr, "profile", 1)
             hx, hy = J["head"]
@@ -351,12 +352,7 @@ class TestFaceF4(unittest.TestCase):
             # else does (eyes stay below -0.341r, hair above -0.72r).
             y0, y1 = int(hy - 0.60 * r), int(hy - 0.38 * r)
             n = int(dark[y0:y1, x0:x1].sum())
-            if expr == "neutral":
-                # <=3 px is anti-aliasing noise; a real brow is 20+ px.
-                self.assertLessEqual(n, 3,
-                                     f"neutral grew brows ({n}px)")
-            else:
-                self.assertGreater(n, 5, f"{expr} lost its brows")
+            self.assertGreater(n, 5, f"{expr} lost its brows")
 
     def test_surprised_mouth_clears_the_eyes(self):
         # Mouth top must sit below the far eye's bottom with a clear
@@ -503,7 +499,7 @@ class TestBusF6(unittest.TestCase):
         pkg = TestShotPlanSync()._pkg()
         shots = plan_shots(pkg, TestShotPlanSync()._timeline())
         board = next(s for s in shots if s["kind"] == "action"
-                     and s.get("action_cues") == ["board"])
+                     and "board" in (s.get("action_cues") or []))
         self.assertNotIn("bus", list(board.get("scene_cues") or [])
                          + list(board.get("action_cues") or []))
         with tempfile.TemporaryDirectory() as tmp:
@@ -541,12 +537,35 @@ class TestBusF6(unittest.TestCase):
                     int(wcx) - 12:int(wcx) + 12]
         self.assertGreater(int((patch.sum(axis=2) > 550).sum()), 10,
                            "no wheel hubcap in the board still")
-        # Headlight.
-        hlx, hly = left + 0.045 * w, bottom - 0.10 * h
-        patch = arr[int(hly) - 10:int(hly) + 10,
-                    int(hlx) - 10:int(hlx) + 10]
+        # Headlight: _draw_bus_details paints it on the background
+        # layer, where the boarding character may occlude it in the
+        # final frame (under the R9-7 3/4 viewpoint Lan's arm covers
+        # it -- correct depth, not a missing light). Assert it on a
+        # background-only render of the same shot, projected with
+        # that render's own camera.
+        with tempfile.TemporaryDirectory() as tmp:
+            rep_bg = _render_shot(
+                {"shot": dict(board, index=2, visible=[]),
+                 "package": pkg, "out_dir": Path(tmp),
+                 "still_only": True})
+            arr_bg = np.asarray(Image.open(
+                Path(tmp) / "shot_002" / "still.png").convert("RGB")
+            ).astype(int)
+        CAM_BG = PerspectiveCamera(
+            position=rep_bg["camera_position"],
+            target=rep_bg["camera_target"])
+        pts_bg = [CAM_BG.project((cx + dx * sx_ / 2.0,
+                                  cy + dy * sy_ / 2.0, zf), PW, PH)
+                  for dx in (-1, 1) for dy in (-1, 1)]
+        left_bg = min(p[0] for p in pts_bg)
+        bottom_bg = max(p[1] for p in pts_bg)
+        w_bg = max(p[0] for p in pts_bg) - left_bg
+        h_bg = bottom_bg - min(p[1] for p in pts_bg)
+        hlx, hly = left_bg + 0.045 * w_bg, bottom_bg - 0.10 * h_bg
+        patch = arr_bg[int(hly) - 10:int(hly) + 10,
+                       int(hlx) - 10:int(hlx) + 10]
         self.assertGreater(int((patch.sum(axis=2) > 650).sum()), 20,
-                           "no headlight in the board still")
+                           "no headlight in the board background")
 
 
     def test_scene_cue_union_never_summons_the_bus(self):

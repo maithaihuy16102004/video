@@ -173,9 +173,19 @@ class TestRenderTraits(unittest.TestCase):
             set(traits),
             # visual_profile (2026-11-13): the generic, species-neutral
             # feature contract is part of every render_traits object.
+            # eye_count (RicksClips loop round 1, 2026-11-14): the
+            # general one-eye face trait is part of every object.
+            # hair_color / beard_style / beard_color / hat_color /
+            # scarf_color (round-3 system 3, 2026-11-14): the worn
+            # traits are part of every render_traits object.
+            # apron_color (round 5, 2026-11-14): the apron trait
+            # joins the same contract.
             {"description", "voice_hint", "template", "body_variant",
-             "costume", "hair_style", "hat", "moustache_style",
-             "glasses", "jacket_color", "height_px",
+             "costume", "hair_style", "hair_color", "beard_style",
+             "beard_color", "hat", "hat_color", "scarf_color",
+             "apron_color",
+             "moustache_style",
+             "glasses", "jacket_color", "height_px", "eye_count",
              "visual_profile"})
         self.assertEqual(traits["height_px"], 560)
         self.assertEqual(_traits()["height_px"], 540)
@@ -213,11 +223,24 @@ class TestLocationTraits(unittest.TestCase):
         self.assertEqual(traits["mood"], "cold")
         traits = derive_location_traits(time_of_day_text="Morning",
                                         mood_text="Warm")
-        self.assertEqual(traits["time_of_day"], "day")
+        # Round 7: distinct daytime palettes -- "Morning" keeps
+        # its own palette instead of collapsing to "day".
+        self.assertEqual(traits["time_of_day"], "morning")
         self.assertEqual(traits["mood"], "warm")
         self.assertEqual(
             derive_location_traits(time_of_day_text="Hoàng hôn")[
-                "time_of_day"], "day")
+                "time_of_day"], "dusk")
+        self.assertEqual(
+            derive_location_traits(time_of_day_text="Midday")[
+                "time_of_day"], "midday")
+        self.assertEqual(
+            derive_location_traits(time_of_day_text="Afternoon")[
+                "time_of_day"], "afternoon")
+        # Free prose still falls back to the marker scan.
+        self.assertEqual(
+            derive_location_traits(
+                time_of_day_text="a dark night scene")[
+                    "time_of_day"], "night")
 
     def test_setting_falls_back_to_name(self):
         traits = derive_location_traits(name="Chợ đêm")
@@ -244,6 +267,11 @@ class TestPropKinds(unittest.TestCase):
         self.assertEqual(derive_prop_kind("Quyển Sách", ""), "book")
         self.assertEqual(derive_prop_kind("Giỏ Hoa",
                                           "giỏ tre đầy hoa"), "flower")
+        # Round 15 (L02-D3): the compound wins -- a mail bag is
+        # a bag, not the letter inside it.
+        self.assertEqual(derive_prop_kind("túi thư", ""), "bag")
+        self.assertEqual(derive_prop_kind("Túi Thư", ""), "bag")
+        self.assertEqual(derive_prop_kind("lá thư", ""), "letter")
 
     def test_pen_is_own_kind(self):
         self.assertEqual(
@@ -335,7 +363,8 @@ class TestCameraMapping(unittest.TestCase):
     def test_shot_types(self):
         cases = [
             ("WIDE_ESTABLISHING", "establishing"),
-            ("MEDIUM_CLOSEUP", "close_up"),
+            ("MEDIUM_CLOSEUP", "medium_close_up"),
+            ("MEDIUM_CLOSE_UP", "medium_close_up"),
             ("CLOSEUP_REACTION", "reaction"),
             ("OBJECT_INSERT_CLOSEUP", "object_insert"),
             ("HISTORICAL_MAP_OVERVIEW", "establishing"),
@@ -401,7 +430,7 @@ class TestCameraAnglesC9(unittest.TestCase):
             ("MEDIUM_SIDE_SHOT", "medium", "eye_level"),
             ("MEDIUM_SHOT", "medium", "eye_level"),
             ("MEDIUM_TWO_SHOT", "medium", "eye_level"),
-            ("MEDIUM_CLOSEUP", "close_up", "eye_level"),
+            ("MEDIUM_CLOSEUP", "medium_close_up", "eye_level"),
             ("MEDIUM_TRACKING", "tracking", "eye_level"),
             ("CLOSEUP", "close_up", "eye_level"),
             ("CLOSEUP_REVERSE", "shot_reverse_shot", "eye_level"),
@@ -670,7 +699,8 @@ class TestSyncWithEngine(unittest.TestCase):
         from ai_clip_studio.animation.primitives import PRIMITIVES
         self.assertEqual(set(PRIMITIVE_NAMES), set(PRIMITIVES))
         # 37 = 35 + crouch + receive_prop (A2 semantic props, 2026-11-12).
-        self.assertEqual(len(PRIMITIVE_NAMES), 37)
+        # 39 = 38 + present_prop (round-2 light payoff).
+        self.assertEqual(len(PRIMITIVE_NAMES), 39)
 
     def test_expressions_match_face_system(self):
         from ai_clip_studio.animation.character_art import EXPRESSIONS

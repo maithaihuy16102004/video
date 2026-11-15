@@ -36,7 +36,7 @@ class TestSubtitles(unittest.TestCase):
         phrases = split_subtitle(LONG_LINE)
         for p in phrases:
             self.assertLessEqual(len(p), MAX_CHARS, f"phrase too long: {p!r}")
-            self.assertLessEqual(len(p), 42)
+            self.assertLessEqual(len(p), 30)
 
     def test_no_word_is_cut(self):
         phrases = split_subtitle(LONG_LINE)

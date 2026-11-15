@@ -33,8 +33,9 @@ HEAD_RATIO_LOCKED = 0.34
 TEMPLATES = ("male", "female", "child", "elderly")
 BODY_VARIANTS = ("slim", "standard", "sturdy")
 COSTUME_GARMENTS = ("none", "dress", "uniform")
-HAIR_STYLES = ("short", "long", "tuft", "side_part", "none")
-HATS = ("none", "bowler")
+HAIR_STYLES = ("short", "long", "tuft", "side_part", "tied", "none")
+HATS = ("none", "bowler", "cap")
+BEARD_STYLES = ("none", "full")
 MOUSTACHE_STYLES = ("none", "toothbrush", "handlebar", "full")
 LOCATION_KEYWORDS = (
     "great_wall", "eiffel_tower", "rainy_street", "street", "generic")
@@ -93,7 +94,7 @@ PRIMITIVE_NAMES = frozenset({
     "hold_pen", "look_at_point", "open_wallet", "pick_up", "put_away",
     "raise_hand", "react_event", "sign_document", "sit_at_desk",
     "stand_from_chair", "walk_mud", "write_on_paper", "seated_idle",
-    "crouch", "receive_prop",
+    "crouch", "receive_prop", "shield", "present_prop",
 })
 
 # Face-system expression names (animation/character_art.EXPRESSIONS).
@@ -134,15 +135,51 @@ DEFAULT_ANGLE_BY_SHOT = {
 }
 
 # Generic colour-word map. Mirror of planner_fallback.COLOR_WORDS
-# (same order, same substring semantics); a sync test asserts the
-# two stay identical. Kept here so this module stays dependency-free.
+# (same entries, same order); a sync test asserts the two stay
+# identical. Kept here so this module stays dependency-free. The V1
+# matcher below scans these words in TEXT order with word
+# boundaries; the legacy planner keeps substring order.
 COLOR_WORDS: list[tuple[str, str]] = [
     ("xanh đậm", "#1d3a5f"), ("xanh dương", "#2b5ea7"), ("xanh lá", "#2e7d4f"),
     ("màu be", "#c9b18c"), ("be", "#c9b18c"), ("nâu", "#7a4a2b"),
     ("đen", "#222222"), ("đỏ", "#b03a2e"), ("vàng", "#d9a441"),
     ("trắng", "#f3f0e8"), ("xám", "#6b7280"), ("hồng", "#d98a9e"),
+    ("đỏ gạch", "#a84332"), ("xám tro", "#6b7280"), ("xanh lam", "#2b5ea7"),
+    ("xanh lục", "#2e7d4f"), ("tím", "#7a4a8c"), ("cam", "#d97a2b"),
+    ("nâu đậm", "#5a3421"), ("nâu nhạt", "#a67c52"), ("đỏ đậm", "#8c2b21"),
+    ("xanh nhạt", "#7fa8c9"),
 ]
 DEFAULT_JACKET_COLOR = "#3a4a5f"
+
+# Hair / beard colour words (round-3 system 3). A DEDICATED table:
+# hair grey/white must read against the cream face (#f3f0e8), so the
+# greys here are lighter than the garment greys, and white hair is a
+# light grey, never the face colour itself. Scanned ONLY from the
+# HAIR / FACIAL_FEATURES field text -- a costume colour must never
+# recolour hair ("ao do" must not make hair red). Same token-sequence
+# scan as the jacket colours (phrases first, text order).
+HAIR_COLOR_WORDS: list[tuple[str, str]] = [
+    ("nâu đậm", "#3a2a1e"), ("dark brown", "#3a2a1e"),
+    ("đen", "#222222"), ("black", "#222222"),
+    ("xám", "#9aa0a6"), ("grey", "#9aa0a6"), ("gray", "#9aa0a6"),
+    ("bạc", "#c9ccd1"), ("silver", "#c9ccd1"),
+    ("trắng", "#c9ccd1"), ("white", "#c9ccd1"),
+    ("nâu", "#5a3421"), ("brown", "#5a3421"),
+    ("vàng", "#d9b45b"), ("blond", "#d9b45b"), ("blonde", "#d9b45b"),
+    ("đỏ", "#7a3b26"), ("red", "#7a3b26"),
+    ("hung", "#7a3b26"), ("auburn", "#7a3b26"),
+]
+
+# Deterministic fallback palette for cast members whose script names
+# no costume colour (round-3 system 1). Flat, mutually distinct,
+# RicksClips-readable. Slot 0 is the historical default, so a cast
+# with a single uncoloured character renders exactly as before.
+# 16 slots cover the largest known cast (Zeus, 14) without reuse.
+DISTINCT_JACKET_PALETTE: tuple[str, ...] = (
+    "#3a4a5f", "#b03a2e", "#2e7d4f", "#2b5ea7", "#d9a441", "#7a4a2b",
+    "#6b7280", "#d98a9e", "#7a4a8c", "#c9b18c", "#2b7a7a", "#d97a2b",
+    "#4a6b3a", "#8c2b21", "#5a4a8c", "#a67c52",
+)
 
 # Planner duration hints (seconds) for special-action directives.
 # Hints only: the timeline stage reconciles them with real speech
@@ -309,6 +346,17 @@ _GLASSES_MARKERS = ("đeo kính", "kính mắt", "kính cận", "kính râm",
 # Standalone "kính" is NOT a glasses marker: it is also a respectful
 # form of address ("kính thưa"). Only compounds count.
 _HAT_MARKERS = ("bowler", "mũ nồi", "mũ quả dưa", "mũ phớt")
+
+# One-eye characters (general face trait): an explicit EYES field wins;
+# otherwise a lexical cue in the character's own text. "cyclops" is a
+# species word -- a cyclops is one-eyed by definition -- the same
+# family as the species keyword scan, never a name lookup. Both
+# accented and unaccented Vietnamese forms are listed because _norm
+# keeps diacritics. ("one eyed": _norm turns hyphens into spaces.)
+_ONE_EYE_MARKERS = ("một mắt", "mot mat", "một con mắt", "mot con mat",
+                    "chỉ có một mắt", "chi co mot mat", "độc nhãn",
+                    "doc nhan", "one eye", "one eyed", "single eye",
+                    "cyclops", "cyclopes")
 
 
 # --- Character visual profile (generic species contract) -------------
@@ -499,11 +547,73 @@ def merge_render_traits(base: dict, override: dict) -> dict:
 
 
 def _jacket_color_from_text(text: str) -> str:
-    low = (text or "").lower()
-    for word, color in COLOR_WORDS:
-        if word in low:
-            return color
-    return DEFAULT_JACKET_COLOR
+    """First costume colour in TEXT order, word-boundary matched.
+
+    Costume lists name the top garment first ("Áo màu đỏ gạch. Khăn
+    màu vàng."), so the first colour phrase in the text is the
+    jacket colour -- not the first table entry that substring-matches
+    (the old rule let "nâu" in the trousers beat "đỏ" in the shirt,
+    and bare "be" substring-matched "bé"/"bên"). Matching is a
+    token-sequence scan: at each position the 2-word phrase wins over
+    the single word ("đỏ gạch" beats "đỏ", "màu be" beats "be").
+    Diacritics are kept, so "bé" never matches "be". No colour word
+    -> DEFAULT_JACKET_COLOR.
+    """
+    return _trait_color_from_text(text, COLOR_WORDS) or DEFAULT_JACKET_COLOR
+
+
+def _trait_color_from_text(text: str, table) -> str | None:
+    """First colour in TEXT order from ``table``, or None.
+
+    Same token-sequence scan as the jacket colours: at each position
+    the 2-word phrase wins over the single word, diacritics kept.
+    Returns None (never a default) so callers can tell "no colour
+    named" from a named colour -- hair/hat/scarf colours must never
+    be invented.
+    """
+    tokens = re.sub(r"[^\w\s]", " ", (text or "").lower()).split()
+    phrases = {}
+    for word, color in table:
+        phrases.setdefault(tuple(word.split()), color)
+    for i in range(len(tokens)):
+        for n in (2, 1):
+            key = tuple(tokens[i:i + n])
+            if len(key) == n and key in phrases:
+                return phrases[key]
+    return None
+
+
+def resolve_cast_jacket_colors(colors: list[tuple[str, str]]) -> dict[str, str]:
+    """Assign distinct jacket colours across one cast, deterministically.
+
+    ``colors`` is [(identity, jacket_color)] in cast (declaration)
+    order. A colour that is NOT the default is script-named and is
+    kept verbatim, even on collision -- the script is authoritative.
+    Default-coloured members take the next unused DISTINCT_JACKET_
+    PALETTE slot, skipping colours already used by script-named or
+    earlier palette members. Slot 0 is the default itself, so the
+    first uncoloured member keeps the historical colour. When the
+    palette exhausts, slots wrap (deterministic; the caller notes
+    it). Pure: no input is mutated.
+    """
+    used: set[str] = set()
+    resolved: dict[str, str] = {}
+    slot = 0
+    for identity, color in colors:
+        if color != DEFAULT_JACKET_COLOR:
+            resolved[identity] = color
+            used.add(color)
+            continue
+        tries = 0
+        while (DISTINCT_JACKET_PALETTE[slot % len(DISTINCT_JACKET_PALETTE)] in used
+               and tries < len(DISTINCT_JACKET_PALETTE)):
+            slot += 1
+            tries += 1
+        pick = DISTINCT_JACKET_PALETTE[slot % len(DISTINCT_JACKET_PALETTE)]
+        slot += 1
+        resolved[identity] = pick
+        used.add(pick)
+    return resolved
 
 
 def _hair_style(scan_text: str) -> str:
@@ -512,12 +622,104 @@ def _hair_style(scan_text: str) -> str:
     if _has_any_word(scan_text, ("side part", "sidepart", "rẽ ngôi",
                                  "ngôi lệch", "side parted")):
         return "side_part"
+    if _has_any_word(scan_text, ("tied high", "tied up", "tied back",
+                                 "buộc cao", "buộc lên", "búi", "búi tóc",
+                                 "tóc búi", "ponytail", "đuôi ngựa",
+                                 "tóc đuôi ngựa", "bun")):
+        return "tied"
     if _has_any_word(scan_text, ("tóc dài", "long hair", "mái tóc dài",
                                  "tóc xoã", "tóc xõa")):
         return "long"
     if _has_any_word(scan_text, ("tuft", "chỏm", "tóc chỏm")):
         return "tuft"
     return "short"
+
+
+# Hat words (round-3 system 3). A bare hat word alone is NOT enough
+# -- "mu" appears in place names and idioms -- so a hat needs a colour
+# word or a wearing verb in the SAME costume segment. Bowler markers
+# stay a separate, stronger rule (anywhere in the scan).
+_HAT_WORDS = ("mũ", "nón", "hat", "cap")
+# NOTE: bare "doi" is FORBIDDEN here -- it matches "quan doi" (army)
+# in "mu quan doi". Only the verb+hat phrase counts as wearing.
+_HAT_WEARING_WORDS = ("đội mũ", "đội nón", "wearing", "wears", "wore")
+_SCARF_WORDS = ("khăn quàng", "khăn choàng", "khăn cổ", "khăn", "scarf")
+_APRON_WORDS = ("tạp dề", "apron")
+_BEARD_WORDS = ("râu bạc", "râu trắng", "râu dài", "râu rậm",
+                "râu quai nón", "râu dê", "beard", "râu")
+
+
+def _hair_color_from_text(hair_text: str) -> str | None:
+    """Hair colour from the HAIR field text only, or None."""
+    return _trait_color_from_text(hair_text, HAIR_COLOR_WORDS)
+
+
+def _beard_from_text(facial_text: str) -> tuple[str, str | None]:
+    """Beard (style, colour) from facial-feature text.
+
+    Scoped to FACIAL_FEATURES + appearance: bare "râu" is safe there
+    (the field IS facial features). A beard is NOT a moustache -- the
+    moustache scan keeps its own rules; both traits can coexist.
+    Colour comes from the same text (bac/trang -> light grey); no
+    colour word -> None (the art falls back to ink).
+    """
+    normed = _norm(facial_text)
+    if not _has_any_word(normed, _BEARD_WORDS):
+        return "none", None
+    return "full", _trait_color_from_text(facial_text, HAIR_COLOR_WORDS)
+
+
+def _hat_from_segments(segments) -> tuple[str, str | None]:
+    """Hat (kind, colour) from costume segments.
+
+    A hat word in a segment plus a colour word or a wearing verb in
+    the SAME segment yields a "cap" with that colour (None when only
+    the verb is present). No evidence -> ("none", None). Never
+    invents a colour. (Bowler detection stays with the caller: the
+    bowler rule scans the whole character text, as before.)
+    """
+    for seg in segments:
+        normed = _norm(seg)
+        if not _has_any_word(normed, _HAT_WORDS):
+            continue
+        color = _trait_color_from_text(seg, COLOR_WORDS)
+        if color is not None:
+            return "cap", color
+        if _has_any_word(normed, _HAT_WEARING_WORDS):
+            return "cap", None
+    return "none", None
+
+
+def _scarf_color_from_segments(segments) -> str | None:
+    """Scarf colour: a scarf word + a colour word in the SAME segment.
+
+    A scarf with no named colour draws nothing -- the colour IS the
+    scarf's identity, and inventing one would misrepresent the script.
+    """
+    for seg in segments:
+        if not _has_any_word(_norm(seg), _SCARF_WORDS):
+            continue
+        color = _trait_color_from_text(seg, COLOR_WORDS)
+        if color is not None:
+            return color
+    return None
+
+
+def _apron_color_from_segments(segments) -> str | None:
+    """Apron colour: an apron word + a colour word in the SAME segment.
+
+    Same rule as the scarf: a colourless apron draws nothing -- the
+    colour IS the apron, and inventing one would misrepresent the
+    script. Round-5: Ông Ba's "Tạp dề da màu nâu đậm" is the
+    motivating case.
+    """
+    for seg in segments:
+        if not _has_any_word(_norm(seg), _APRON_WORDS):
+            continue
+        color = _trait_color_from_text(seg, COLOR_WORDS)
+        if color is not None:
+            return color
+    return None
 
 
 def _moustache_from_scan(scan_text: str) -> str:
@@ -621,8 +823,8 @@ def derive_render_traits(name: str, role: str, appearance: str,
 
     ``traits`` is a list of trait strings (a single string is also
     accepted). ``fields`` is the verbatim fields dict of the newer
-    script dialect; only the GENDER, HAIR, BODY_TYPE, MOUSTACHE and
-    GLASSES fields are read -- the whole dict is never scanned, so
+    script dialect; only the GENDER, HAIR, BODY_TYPE, MOUSTACHE,
+    GLASSES and EYES fields are read -- the whole dict is never scanned, so
     unrelated field values (a costume mentioning a place name, for
     example) can never create a moustache or change a template.
     Elderly detection yields template "elderly"; cane and glasses
@@ -640,6 +842,22 @@ def derive_render_traits(name: str, role: str, appearance: str,
         voice_style) if p))
     hair_scan = _norm(" ".join(p for p in (
         _field_text(fields, "HAIR"), appearance, role) if p))
+    hair_field_text = _field_text(fields, "HAIR")
+    facial_text = " ".join(p for p in (
+        _field_text(fields, "FACIAL_FEATURES"), appearance) if p)
+    beard_style, beard_color = _beard_from_text(facial_text)
+    # Costume segments: bullets joined by "; " (adapter) plus the
+    # appearance line -- hat/scarf evidence must share a segment
+    # with its colour word, never leak across garments.
+    _segments = [s for s in (costume_text or "").split(";")]
+    if appearance:
+        _segments.append(appearance)
+    if _has_any_word(scan, _HAT_MARKERS):
+        hat_kind, hat_color = "bowler", None
+    else:
+        hat_kind, hat_color = _hat_from_segments(_segments)
+    scarf_color = _scarf_color_from_segments(_segments)
+    apron_color = _apron_color_from_segments(_segments)
     moustache_field_style, _note = moustache_style_from_fields(fields)
     if moustache_field_style is not None:
         moustache_style = moustache_field_style
@@ -652,13 +870,22 @@ def derive_render_traits(name: str, role: str, appearance: str,
         glasses = False
     else:
         glasses = _has_any_word(scan, _GLASSES_MARKERS)
+    # Eye count (general face trait): an explicit EYES field wins --
+    # a field that says nothing about one eye means two eyes, even
+    # when the scan would match (e.g. EYES: "Large expressive eyes").
+    # Otherwise a lexical one-eye cue in the character's own text.
+    eyes_field = _norm(_field_text(fields, "EYES"))
+    if eyes_field:
+        eye_count = 1 if _has_any_word(eyes_field, _ONE_EYE_MARKERS) else 2
+    else:
+        eye_count = 1 if _has_any_word(scan, _ONE_EYE_MARKERS) else 2
     if _has_any_word(scan, _UNIFORM_MARKERS):
         costume = "uniform"
     elif _has_any_word(scan, _DRESS_MARKERS):
         costume = "dress"
     else:
         costume = "none"
-    hat = "bowler" if _has_any_word(scan, _HAT_MARKERS) else "none"
+    hat = hat_kind
     visual_profile, profile_notes = derive_visual_profile(
         fields=fields, scan_text=scan, who=name or "character")
     if notes is not None:
@@ -675,9 +902,16 @@ def derive_render_traits(name: str, role: str, appearance: str,
             scan, _field_text(fields, "BODY_TYPE")),
         "costume": costume,
         "hair_style": _hair_style(hair_scan),
+        "hair_color": _hair_color_from_text(hair_field_text),
+        "beard_style": beard_style,
+        "beard_color": beard_color,
         "hat": hat,
+        "hat_color": hat_color,
+        "scarf_color": scarf_color,
+        "apron_color": apron_color,
         "moustache_style": moustache_style,
         "glasses": glasses,
+        "eye_count": eye_count,
         "jacket_color": _jacket_color_from_text(" ".join(p for p in (
             role, appearance, costume_text, traits_text) if p)),
         "height_px": int(height_px),
@@ -692,6 +926,16 @@ _RAINY_STREET_MARKERS = ("phố mưa", "rainy street")
 _NIGHT_MARKERS = ("đêm", "tối", "khuya", "nửa đêm", "ban đêm", "night",
                   "evening", "midnight")
 _COLD_MARKERS = ("lạnh", "lẽo", "giá lạnh", "buốt", "u ám", "âm u", "cold")
+# Free-prose dusk markers (the label path goes through
+# normalize_time_of_day; these catch prose like "at sunset").
+_DUSK_MARKERS = ("dusk", "sunset", "sunrise", "dawn", "golden hour",
+                 "hoàng hôn", "chiều tối")
+# Free-prose daytime markers: compound labels like "Trưa
+# nắng" or "Chiều muộn" are not exact aliases, but the
+# marker word still names the time of day.
+_MORNING_MARKERS = ("sáng", "sang", "morning")
+_MIDDAY_MARKERS = ("trưa", "trua", "noon", "midday")
+_AFTERNOON_MARKERS = ("chiều", "chieu", "afternoon")
 
 
 def derive_location_traits(name: str = "", geography: str = "",
@@ -721,13 +965,34 @@ def derive_location_traits(name: str = "", geography: str = "",
         keyword = "rainy_street"
     else:
         keyword = "street"
-    night = _has_any_word((time_of_day_text or "").lower(), _NIGHT_MARKERS)
+    # Round 7: the time of day is the script's own label, not a
+    # binary day/night collapse (the old rule made Morning,
+    # Midday and Afternoon render with one identical palette).
+    # An exact label normalizes through the lighting table
+    # (morning / midday / afternoon / dusk / night / interior);
+    # free prose falls back to the marker scan (night first,
+    # preserving the old reading of "a dark night scene").
+    from .lighting import normalize_time_of_day
+    tod_text = (time_of_day_text or "").strip()
+    tod = normalize_time_of_day(tod_text)
+    if tod == "day" and tod_text:
+        low = tod_text.lower()
+        if _has_any_word(low, _NIGHT_MARKERS):
+            tod = "night"
+        elif _has_any_word(low, _DUSK_MARKERS):
+            tod = "dusk"
+        elif _has_any_word(low, _MIDDAY_MARKERS):
+            tod = "midday"
+        elif _has_any_word(low, _AFTERNOON_MARKERS):
+            tod = "afternoon"
+        elif _has_any_word(low, _MORNING_MARKERS):
+            tod = "morning"
     cold = _has_any_word((mood_text or "").lower(), _COLD_MARKERS)
     return {
         "setting": inline_text or name or "",
         "location_keyword": keyword,
         "mood": "cold" if cold else "warm",
-        "time_of_day": "night" if night else "day",
+        "time_of_day": tod,
     }
 
 
@@ -765,8 +1030,8 @@ PROP_KEYWORDS: dict[str, tuple[str, ...]] = {
     "cup": ("cup", "mug", "cốc", "tách", "chén", "ly"),
     "key": ("chìa khóa", "chìa khoá", "key"),
     "flower": ("flower", "bó hoa", "bouquet", "hoa"),
-    "bag": ("backpack", "ba lô", "túi xách", "túi", "cặp", "giỏ",
-            "bag"),
+    "bag": ("backpack", "ba lô", "túi xách", "túi thư", "mail bag",
+            "túi", "cặp", "giỏ", "bag"),
     "book": ("quyển sách", "book", "novel", "sách", "truyện"),
     "pen": ("fountain pen", "bút chì", "pencil", "pen", "bút"),
 }
@@ -777,12 +1042,24 @@ def derive_prop_kind(name: str, description: str) -> str:
 
     Unrecognised props map to "generic", which is itself a drawable
     kind -- never a mislabelled specific kind.
+
+    Round 15 (L02-D3): the LONGEST match wins across kinds.
+    Dict order let "thư" (letter) claim "túi thư" (a mail bag)
+    before "túi" (bag) was ever checked, so An carried an
+    envelope instead of her satchel. Compounds beat single
+    words; ties keep dict order (stable: earliest entry wins).
     """
     text = _norm(f"{name or ''} {description or ''}")
-    for kind, keywords in PROP_KEYWORDS.items():
-        if _has_any_word(text, keywords):
-            return kind
-    return "generic"
+    candidates = []
+    for order, (kind, keywords) in enumerate(PROP_KEYWORDS.items()):
+        for kw in keywords:
+            if _has_word(text, kw):
+                candidates.append((len(kw.split()), len(kw),
+                                   -order, kind))
+    if not candidates:
+        return "generic"
+    candidates.sort(reverse=True)
+    return candidates[0][3]
 
 
 # --- SFX cue mapping ---------------------------------------------------
@@ -853,7 +1130,7 @@ _EXPRESSION_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
                    "astonished", "startled", "ủa", "ôi")),
     ("angry", ("tức giận", "giận dữ", "phẫn nộ", "gắt gỏng", "đanh đá",
                "tức", "giận", "cáu", "angry", "furious", "enraged",
-               "irritated")),
+               "irritated", "annoyed")),
     ("worried", ("lo lắng", "hốt hoảng", "sợ hãi", "bất an",
                  "căng thẳng", "lo", "sợ", "hoảng", "worried",
                  "afraid", "scared", "anxious", "fearful", "nervous",
@@ -861,10 +1138,11 @@ _EXPRESSION_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
     ("sad", ("thất vọng", "chán nản", "đau buồn", "mệt mỏi", "thất thần",
              "não nề", "u sầu", "buồn", "khóc", "disappointed", "sad",
              "gloomy", "grim", "sorrowful", "depressed", "weary",
-             "tired", "exhausted", "dismayed", "downcast")),
+             "tired", "exhausted", "dismayed", "downcast", "defeated")),
     ("happy", ("hạnh phúc", "vui vẻ", "hớn hở", "thích thú",
                "phấn khởi", "vui", "cười", "mừng", "happy", "joyful",
-               "cheerful", "delighted", "pleased", "laughing", "glad")),
+               "cheerful", "delighted", "pleased", "laughing", "glad",
+               "amused", "satisfied")),
     ("thinking", ("trầm ngâm", "suy nghĩ", "trầm tư", "đăm chiêu",
                   "nghĩ ngợi", "suy tư", "thoughtful", "thinking",
                   "reflective", "pensive", "contemplative",
@@ -872,7 +1150,7 @@ _EXPRESSION_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
     ("doubtful", ("nghi ngờ", "hoài nghi", "ngờ vực", "băn khoăn",
                   "do dự", "không chắc", "uncertain", "doubtful",
                   "skeptical", "sceptical", "suspicious", "unsure",
-                  "hesitant", "confused")),
+                  "hesitant", "confused", "unimpressed")),
     ("neutral", ("bình thản", "bình tĩnh", "vô cảm", "thản nhiên",
                  "điềm tĩnh", "calm", "neutral", "composed",
                  "indifferent", "blank")),
@@ -916,6 +1194,12 @@ _CAMERA_SHOT_RULES: list[tuple[str, tuple[str, ...]]] = [
     ("reaction", ("reaction", "phản ứng")),
     ("object_insert", ("object insert", "insert", "chèn vật")),
     ("extreme_close_up", ("extreme", "cực cận", "đặc tả")),
+    # Medium close-up BEFORE close_up: "medium closeup" contains
+    # "closeup", so the close_up rule would swallow it (round-7
+    # framing: MEDIUM_CLOSEUP mapped to close_up, and the script's
+    # medium-close direction was never honoured).
+    ("medium_close_up", ("medium closeup", "medium close up",
+                         "mediumcloseup")),
     ("close_up", ("closeup", "close up", "cận cảnh", "cận")),
     ("tracking", ("tracking", "bám theo", "theo dõi")),
     ("establishing", ("establishing", "overview", "wide",
@@ -1303,7 +1587,7 @@ def build_location_trait_block(*, location_id: str, scene_numbers=None,
                                foreground: str = "", midground: str = "",
                                background: str = "", lighting: str = "",
                                weather: str = "", palette=None,
-                               forbidden=None,
+                               forbidden=None, landmarks=None,
                                render_traits: dict | None = None) -> dict:
     """One section 15.3 location block (V1 fields verbatim)."""
     if render_traits is None:
@@ -1325,6 +1609,7 @@ def build_location_trait_block(*, location_id: str, scene_numbers=None,
         "weather": weather,
         "palette": list(palette or []),
         "forbidden": list(forbidden or []),
+        "landmarks": list(landmarks or []),
         "render_traits": dict(render_traits),
     }
 
@@ -1550,6 +1835,7 @@ def _clean_render_traits(raw: dict, who: str, dropped: list) -> dict:
         ("template", TEMPLATES), ("body_variant", BODY_VARIANTS),
         ("costume", COSTUME_GARMENTS), ("hair_style", HAIR_STYLES),
         ("hat", HATS), ("moustache_style", MOUSTACHE_STYLES),
+        ("beard_style", BEARD_STYLES),
     )
     for key, allowed in enums:
         value = raw.get(key)
@@ -1568,6 +1854,13 @@ def _clean_render_traits(raw: dict, who: str, dropped: list) -> dict:
         else:
             dropped.append(
                 f"{who}: glasses {glasses!r} is not a boolean; dropped")
+    eye_count = raw.get("eye_count")
+    if eye_count is not None:
+        if eye_count in (1, 2) and not isinstance(eye_count, bool):
+            cleaned["eye_count"] = int(eye_count)
+        else:
+            dropped.append(
+                f"{who}: eye_count {eye_count!r} is not 1 or 2; dropped")
     color = raw.get("jacket_color")
     if color is not None:
         if isinstance(color, str) and _JACKET_COLOR_RE.match(color.strip()):
@@ -1575,6 +1868,15 @@ def _clean_render_traits(raw: dict, who: str, dropped: list) -> dict:
         else:
             dropped.append(
                 f"{who}: jacket_color {color!r} is not #RRGGBB; dropped")
+    for _ckey in ("hair_color", "beard_color", "hat_color", "scarf_color",
+                    "apron_color"):
+        _cval = raw.get(_ckey)
+        if _cval is not None:
+            if isinstance(_cval, str) and _JACKET_COLOR_RE.match(_cval.strip()):
+                cleaned[_ckey] = _cval.strip()
+            else:
+                dropped.append(
+                    f"{who}: {_ckey} {_cval!r} is not #RRGGBB; dropped")
     for key in ("description", "voice_hint"):
         text = _clean_text(raw.get(key), 200)
         if raw.get(key) is not None and text is not None:

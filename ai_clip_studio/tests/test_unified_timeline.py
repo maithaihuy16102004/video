@@ -168,7 +168,9 @@ class TestRealScripts(unittest.TestCase):
         _pkg, shots, entries, events = _fixture(
             "zeus_ep01_fall_of_cronus", [0.65] * 40)
         timeline = build_unified_timeline(shots, entries, events)
-        self.assertEqual(len(timeline.track("shots")), 64)
+        # Round 7: the pacing merge folds 5 short lead shots
+        # (64 -> 59); the clock total below is preserved.
+        self.assertEqual(len(timeline.track("shots")), 59)
         self.assertTrue(timeline.narration_complete(
             [f"line:{i + 1}" for i in range(40)]))
         shot_sec = sum(float(s["duration"]) for s in shots)

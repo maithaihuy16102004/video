@@ -113,8 +113,19 @@ class GeometryFamiliesTest(unittest.TestCase):
                 self.assertTrue(spec["parts"], kind)
                 self.assertEqual(spec["kind"], kind)
                 self.assertIn("grip", spec["contact_points"])
-                self.assertEqual(spec["contact_points"]["grip"],
-                                 (0.0, 0.0))
+                if kind == "shield":
+                    # Round-7: the shield's grip is the upper
+                    # strap, 0.33 radii above the centre, so the
+                    # disc hangs over the torso instead of
+                    # covering the face.
+                    _x0, _y0, _x1, _y1 = spec["bbox"]
+                    _grip = spec["contact_points"]["grip"]
+                    self.assertAlmostEqual(_grip[0], 0.0, places=6)
+                    self.assertAlmostEqual(
+                        _grip[1], -0.33 * (_y1 - _y0) / 2.0, places=3)
+                else:
+                    self.assertEqual(spec["contact_points"]["grip"],
+                                     (0.0, 0.0))
 
 
 class BoltGeometryTest(unittest.TestCase):

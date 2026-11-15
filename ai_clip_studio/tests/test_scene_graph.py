@@ -74,8 +74,19 @@ class TestSceneGraphRealScripts(unittest.TestCase):
         self.assertEqual(len(graph["shots"]), 41)
         self.assertEqual(len(graph["characters"]), 14)
         self.assertEqual(len(graph["props"]), 8)
-        self.assertEqual(len(graph["events"]), 62)
-        self.assertEqual(len(graph["semantic_actions"]), 50)
+        # 77 = 65 + 12 shot-span EXPRESSION_HOLD events from named
+        # V1 EXPRESSION fields (round 2, expression wiring): 10 from
+        # comma forms ("Cronus suspicious, Rhea worried", ...) and 2
+        # from single-segment forms ("Cronus satisfied", "Zeus
+        # astonished"). The 65 base includes the 3 lifts recovered
+        # by the "nâng" vocabulary (two-hand system).
+        self.assertEqual(len(graph["events"]), 77)
+        # 53 = 50 + the same 3 recovered lifts (one semantic
+        # action per compiled event). EXPRESSION_HOLD events from
+        # shot fields carry no semantic record (the EXPRESSION
+        # field is a shot attribute, not an action sentence), so
+        # this count does not move with the 12 new events.
+        self.assertEqual(len(graph["semantic_actions"]), 53)
         hammers = [n for n in graph["events"].values()
                    if n["verb"] == "HAMMER_STRIKE"]
         self.assertTrue(hammers)

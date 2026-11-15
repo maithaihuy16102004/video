@@ -1136,7 +1136,8 @@ class TestMappingTotality(unittest.TestCase):
     def test_every_semantic_type_maps_to_a_compiler_verb(self):
         self.assertEqual(set(SEMANTIC_TO_COMPILER_VERB),
                          set(SEMANTIC_ACTION_TYPES))
-        self.assertEqual(len(SEMANTIC_ACTION_TYPES), 34)
+        # 38 = 35 + CRACK/ACTIVATE/EMIT (round-2 light payoff).
+        self.assertEqual(len(SEMANTIC_ACTION_TYPES), 38)
 
     def test_every_mapped_verb_exists(self):
         for sem_type, verb in SEMANTIC_TO_COMPILER_VERB.items():

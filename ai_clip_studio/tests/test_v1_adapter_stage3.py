@@ -313,7 +313,7 @@ class TestCameraMapping(unittest.TestCase):
     def test_new_script_camera_values(self):
         cases = [
             ("WIDE_ESTABLISHING", "establishing", "high_angle"),
-            ("MEDIUM_CLOSEUP", "close_up", "eye_level"),
+            ("MEDIUM_CLOSEUP", "medium_close_up", "eye_level"),
             ("CLOSEUP_REACTION", "reaction", "eye_level"),
             ("HISTORICAL_MAP_OVERVIEW", "establishing", "birds_eye"),
             ("MEDIUM_SIDE_SHOT", "medium", "eye_level"),

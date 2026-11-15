@@ -362,8 +362,10 @@ class TestRealScriptRolePins(unittest.TestCase):
     def test_zeus_counts_unchanged(self):
         package, events, _uns = _compile_script(
             EXAMPLES / "zeus_ep01_fall_of_cronus.studio.md")
-        self.assertEqual(len(events), 62)
-        self.assertEqual(len(resolve_semantic_actions(package)), 50)
+        # 77 = 62 (regression matrix) + 3 "nâng" lifts + 12
+        # EXPRESSION_HOLD events; semantic actions 53 = 50 + 3 lifts.
+        self.assertEqual(len(events), 77)
+        self.assertEqual(len(resolve_semantic_actions(package)), 53)
 
     def test_ep1_off_frame_recipient_stays_unknown(self):
         _pkg, events, _uns = _compile_script(

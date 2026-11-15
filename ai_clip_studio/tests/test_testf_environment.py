@@ -139,7 +139,16 @@ class TestForgeBuild(unittest.TestCase):
         self.assertEqual(ingot["attachment"]["parent"], "anvil_top")
         self.assertEqual(ingot["attachment"]["relation"], "on_top")
         steam = by_id["quench_steam"]
-        self.assertIn("suspension", steam["extra"])
+        # Round 6: the steam is GROUNDED now -- attached on_top
+        # of the barrel with its bottom exactly at the barrel
+        # top (0.9), so it no longer needs the "suspension"
+        # reason that documented it as a floater.
+        self.assertEqual(steam["attachment"]["parent"],
+                         "quench_barrel")
+        self.assertEqual(steam["attachment"]["relation"], "on_top")
+        self.assertAlmostEqual(
+            steam["center"][1] - steam["size"][1] / 2, 0.9,
+            places=6)
         coal = by_id["coal_pile"]
         self.assertEqual(coal["attachment"]["relation"], "on_ground")
         self.assertAlmostEqual(
@@ -274,8 +283,14 @@ class TestEnergyGlowContract(unittest.TestCase):
 
 
 class TestPointLightShading(unittest.TestCase):
-    def test_no_points_is_bit_identical_to_grayscale(self):
-        rig = rig_for(light_for("day", "warm"))
+    def test_white_key_matches_grayscale(self):
+        # Round 8 (R2-V4): the key now tints per channel, so the
+        # old bit-identical claim holds only for a WHITE key.
+        # Build the rig from a white-key spec: day/warm with the
+        # sun colour replaced.
+        spec = light_for("day", "warm")
+        spec["sun_color"] = (255, 255, 255)
+        rig = rig_for(spec)
         self.assertEqual(rig.points, [])
         for base in ((100, 100, 100), (96, 90, 84), (255, 140, 40)):
             for point, normal in (((0, 1, 0), (0, 0, 1)),
@@ -284,6 +299,25 @@ class TestPointLightShading(unittest.TestCase):
                 self.assertEqual(
                     shade_with_points(base, rig, point, normal),
                     shade_color(base, rig.irradiance(point, normal)))
+
+    def test_amber_key_warms_partially_lit_face(self):
+        # An amber afternoon key suppresses blue on a face the
+        # sun grazes (front normal, slanted light), relative to
+        # the same rig with a white key. Fully-lit faces clamp
+        # and show no tint -- the assertion uses the grazing
+        # normal where the key term is below the clamp.
+        base = (120, 120, 120)
+        point, normal = (0.0, 1.0, 0.0), (0.0, 0.0, 1.0)
+        amber = rig_for(light_for("afternoon", "warm"))
+        white_spec = light_for("afternoon", "warm")
+        white_spec["sun_color"] = (255, 255, 255)
+        white = rig_for(white_spec)
+        warm = shade_with_points(base, amber, point, normal)
+        neutral = shade_with_points(base, white, point, normal)
+        self.assertEqual(warm[0], neutral[0])
+        self.assertLess(warm[2], neutral[2])
+        self.assertGreater(warm[0] - warm[2],
+                           neutral[0] - neutral[2])
 
     def test_gain_is_unit_without_points(self):
         rig = rig_for(light_for("day", "warm"))

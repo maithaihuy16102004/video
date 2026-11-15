@@ -399,6 +399,22 @@ class TestFitRadiusScale(unittest.TestCase):
         _gx, gy, h = char_metrics(cam, 0.0, 0.0, base_scale=1.8)
         self.assertGreaterEqual(gy - h, 12.0)
 
+    def test_unscaled_overflow_at_close_depth_fits_after_fit(self):
+        # Round 7: the fit is no longer gated on scaled-up subjects.
+        # An unscaled subject at anvil depth under a head-framing
+        # camera overflows the top (head 141 px above the frame) and
+        # the fit must pull the camera back until the head clears.
+        scale = _fit_radius_scale(
+            "medium_close_up", "eye_level", 0.0, 0.0, None, 0,
+            [(-0.3, -3.2)], [1.0])
+        self.assertGreater(scale, 1.0)
+        self.assertLessEqual(scale, 3.0)
+        cam = viewpoint_for_shot(
+            "medium_close_up", "eye_level",
+            subject_pos=(0.0, 1.2, 0.0), radius_scale=scale)
+        _gx, gy, h = char_metrics(cam, -0.3, -3.2, base_scale=1.0)
+        self.assertGreaterEqual(gy - h, 12.0)
+
 
 def _two_char_package(scale_a=None, scale_b=None):
     chars = [

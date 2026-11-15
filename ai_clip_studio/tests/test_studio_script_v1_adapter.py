@@ -221,10 +221,16 @@ class TestFixtureEndToEnd(unittest.TestCase):
         self.assertEqual(first["action_lead_sec"], 0.8)
 
     def test_location_dicts_generic(self):
-        for scene in self.package["scenes"]:
+        # Round 7: each scene keeps its own declared time of
+        # day (Sáng / Chiều muộn / Trưa nắng / Chiều tà /
+        # Hoàng hôn ...) instead of collapsing to "day".
+        expected_tod = ["morning", "afternoon", "midday",
+                        "afternoon", "afternoon", "dusk",
+                        "midday", "afternoon"]
+        for scene, tod in zip(self.package["scenes"], expected_tod):
             loc = scene["location"]
             self.assertEqual(loc["location_keyword"], "street")
-            self.assertEqual(loc["time_of_day"], "day")
+            self.assertEqual(loc["time_of_day"], tod)
         self.assertEqual(self.package["scenes"][0]["location"]["mood"],
                          "warm")
         # Scene 8 mood carries "lạnh lẽo" in the script's own text.
@@ -292,7 +298,8 @@ class TestGrammarShapes(unittest.TestCase):
         scene2 = self.package["scenes"][1]
         self.assertEqual(scene2["setting"], "Chợ đêm ven sông")
         self.assertIsNone(scene2["v1_scene"]["location_ref"])
-        self.assertEqual(scene2["location"]["time_of_day"], "day")
+        # Round 7: scene 2 declares TIME_OF_DAY Sáng -> morning.
+        self.assertEqual(scene2["location"]["time_of_day"], "morning")
         self.assertEqual(scene2["location"]["mood"], "warm")
 
     def test_prop_preserved(self):
@@ -468,9 +475,11 @@ class TestDerivationHelpers(unittest.TestCase):
 
     def test_time_of_day_and_mood(self):
         self.assertEqual(_time_of_day("Đêm khuya"), "night")
-        self.assertEqual(_time_of_day("Buổi tối"), "night")
-        self.assertEqual(_time_of_day("Sáng sớm"), "day")
-        self.assertEqual(_time_of_day("Hoàng hôn"), "day")
+        # Round 7: evening is dusk, not night; early morning and
+        # sunset keep their own readings instead of collapsing.
+        self.assertEqual(_time_of_day("Buổi tối"), "dusk")
+        self.assertEqual(_time_of_day("Sáng sớm"), "morning")
+        self.assertEqual(_time_of_day("Hoàng hôn"), "dusk")
         self.assertEqual(_mood("Lạnh lẽo, u ám"), "cold")
         self.assertEqual(_mood("Ấm áp"), "warm")
         self.assertEqual(_mood("Vui vẻ"), "warm")
