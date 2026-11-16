@@ -62,6 +62,8 @@ from typing import Any, Dict, List, Optional
 HEAD_RATIO_DEFAULT = 0.34
 HEAD_RATIO_MIN = 0.33
 HEAD_RATIO_MAX = 0.35
+CHARACTER_HEAD_RATIO_MIN = 0.25
+CHARACTER_HEAD_RATIO_MAX = 0.50
 
 # Shot vocabulary. MUST match camera_planner.SHOT_TYPES exactly (that
 # module imports PIL, so the vocabulary is duplicated here to keep this
@@ -103,6 +105,10 @@ CAMERA_MOVEMENTS = (
     "CRANE_UP",
     "CRANE_DOWN",
     "HANDHELD",
+    "SLOW_PULL_BACK",
+    "SLOW_DOLLY_IN",
+    "SUBJECT_TRACKING",
+    "STATIC_ANCHORED",
 )
 
 ASPECT_RATIOS = ("16:9", "9:16")
@@ -279,6 +285,9 @@ SHOT_KEYS = (
     "POST_DIALOGUE_PAUSE",
     "END_HOLD",
     "FLASH_SAFETY",
+    # Free-form production constraint.  The value may be on the next line
+    # and may itself contain a colon; it is metadata, never dialogue.
+    "CONSTRAINT",
 )
 
 SCENE_KEYS = (
@@ -437,6 +446,8 @@ VISUAL_STYLE_KEYS = (
     "VISUAL_TARGET_SCORE",
     "DESIGN_POLICY",
     "HEAD_RATIO",
+    "HEAD_RATIO_DEFAULT",
+    "HEAD_RATIO_MODE",
     "BODY_STYLE",
     "OUTLINE",
     "SHADING",
@@ -920,18 +931,19 @@ def _parse_duration(
     errors.append(ValidationIssue(
         line, "V1E012",
         f"{where}: DURATION must be AUTO or a plain non-negative number "
-        f"of seconds (no unit suffix), got {raw!r}."))
+        f"of seconds, got {raw!r}."))
     return raw, None
 
 
 def _parse_target_duration(
     value: str, line: int, errors: List[ValidationIssue]
 ) -> tuple[str, Optional[float], Optional[float]]:
-    """Parse TARGET_DURATION (SPEC §4): AUTO, a plain non-negative
-    number, or a range such as "85–100 seconds" (en dash, em dash, or
-    hyphen; optional "seconds"/"s" suffix). Returns (verbatim, min,
-    max): min == max for a plain number, both None for AUTO. Anything
-    else (including "30s") is V1E012."""
+    """Parse TARGET_DURATION consistently for every V1 script dialect.
+
+    Accept AUTO, plain seconds, seconds with a unit suffix, or a range.
+    The accepted duration syntax must not depend on the header style used
+    elsewhere in the document.
+    """
     raw = value.strip()
     if raw.upper() == "AUTO":
         return raw, None, None
@@ -940,6 +952,9 @@ def _parse_target_duration(
         seconds = float(m.group(1))
         if seconds >= 0:
             return raw, seconds, seconds
+    seconds = _parse_seconds(raw)
+    if seconds is not None and seconds >= 0:
+        return raw, seconds, seconds
     m = _RANGE_DURATION_RE.match(raw)
     if m:
         low, high = float(m.group(1)), float(m.group(2))
@@ -947,8 +962,8 @@ def _parse_target_duration(
             return raw, low, high
     errors.append(ValidationIssue(
         line, "V1E012",
-        "TARGET_DURATION must be AUTO, a plain non-negative number of "
-        f"seconds, or a range such as '85–100 seconds', got {raw!r}."))
+        "TARGET_DURATION must be AUTO, non-negative seconds (for example "
+        f"285, 285s, or 285 seconds), or a range such as '85–100 seconds', got {raw!r}."))
     return raw, None, None
 
 
@@ -1682,15 +1697,52 @@ class StudioScriptV1Parser:
             # a pending spoken sub-block. Any other line flushes both.
             m_bullet = _BULLET_RE.match(line)
             m_sub_cont = None
+            m_sfx_cont = None
+            # Constraint prose may contain a human-readable label with a
+            # colon. It is not a spoken sub-block (e.g. ``Foreshadow:``).
+            if (context == "scene" and current_shot is not None
+                    and re.match(r"^(Foreshadow|Final deliverable audio QA)\s*:", line, re.IGNORECASE)):
+                continue
             if pending_spoken is not None and context == "scene":
                 m_sub_cont = re.match(
                     r"^(SPEAKER|LINE_ID|TEXT|LIP_SYNC)\s*:\s*(.*)$",
+                    line, re.IGNORECASE)
+            if pending_sfx is not None and context == "scene":
+                m_sfx_cont = re.match(
+                    r"^(ID|TYPE|TRIGGER|DURATION|DURATION_MODE|INTENSITY|PRIORITY|GAIN_DB)\s*:\s*(.*)$",
                     line, re.IGNORECASE)
             if m_bullet:
                 if pending_spoken is not None:
                     flush_spoken()
                 attach_bullet(m_bullet.group(1).strip(), lineno)
                 continue
+            # Stage-3 scripts commonly use labelled action lines without a
+            # leading bullet, e.g. ``Mandatory: ...``. Keep the label out of
+            # the action text and attach the continuation to ACTION.
+            if (pending_holder[0] is not None
+                    and pending_holder[0].get("kind") in ("shot_action", "scene_action")):
+                m_action_line = re.match(r"^(?:Mandatory|Optional|Foreshadow)\s*:\s*(.+)$", line, re.IGNORECASE)
+                if m_action_line:
+                    attach_bullet(m_action_line.group(1).strip(), lineno)
+                    continue
+            # A free-form CONSTRAINT continuation often contains a colon
+            # (for example "Visible inscription: ...").  Consume it as
+            # shot metadata before the generic bare-speaker parser can
+            # mistake the label for a CHARACTER and synthesize a LINE_ID.
+            if (pending_holder[0] is not None
+                    and pending_holder[0].get("kind") == "shot_constraint"
+                    and not re.match(r"^(?:SCENE|SHOT)\b", line, re.IGNORECASE)):
+                known_field = _KEY_VALUE_RE.match(line)
+                candidate = (KEY_ALIASES.get(known_field.group(1).strip().upper(),
+                                             known_field.group(1).strip().upper())
+                             if known_field else "")
+                known_keys = set(SHOT_KEYS) | set(SCENE_KEYS) | {
+                    "NARRATION", "DIALOGUE", "SFX", "AMBIENCE", "BGM",
+                    "MUSIC", "MEME", "VOICE_NOTE", "LIP_SYNC",
+                }
+                if not known_field or candidate not in known_keys:
+                    attach_bullet(line, lineno)
+                    continue
             if m_sub_cont is not None:
                 subkey = m_sub_cont.group(1).upper()
                 subvalue = m_sub_cont.group(2).strip()
@@ -1703,6 +1755,9 @@ class StudioScriptV1Parser:
                     pending_spoken["text_line"] = lineno
                 elif subkey == "LIP_SYNC":
                     pending_spoken["lip_sync"] = subvalue
+                continue
+            if m_sfx_cont is not None:
+                pending_sfx["subfields"][m_sfx_cont.group(1).upper()] = m_sfx_cont.group(2).strip()
                 continue
             flush_spoken()
             flush_sfx()
@@ -1986,8 +2041,8 @@ class StudioScriptV1Parser:
                         doc.aspect_ratio = value
                 elif key == "TARGET_DURATION":
                     (doc.target_duration, doc.target_duration_min,
-                     doc.target_duration_max) = _parse_target_duration(
-                        value, lineno, errors)
+                    doc.target_duration_max) = _parse_target_duration(
+                         value, lineno, errors)
                 elif key == "TONE":
                     doc.tone = value
                 elif key == "MEME_POLICY":
@@ -2068,10 +2123,15 @@ class StudioScriptV1Parser:
                                               "V1E008", "HEAD_RATIO")
                         if parsed is not None:
                             char.head_ratio = parsed
-                            if not (HEAD_RATIO_MIN <= parsed <= HEAD_RATIO_MAX):
+                            character_specific = str(
+                                doc.visual_style_fields.get("HEAD_RATIO_MODE", "")
+                            ).upper() == "CHARACTER_SPECIFIC"
+                            minimum = CHARACTER_HEAD_RATIO_MIN if character_specific else HEAD_RATIO_MIN
+                            maximum = CHARACTER_HEAD_RATIO_MAX if character_specific else HEAD_RATIO_MAX
+                            if not (minimum <= parsed <= maximum):
                                 error(lineno, "V1E009",
                                       f"HEAD_RATIO {parsed} is outside the locked range "
-                                      f"{HEAD_RATIO_MIN}-{HEAD_RATIO_MAX} (default {HEAD_RATIO_DEFAULT}).")
+                                      f"{minimum}-{maximum} (default {HEAD_RATIO_DEFAULT}).")
                     elif key == "IDENTITY_ID":
                         char.identity_id = value
                     if not value:
@@ -2289,7 +2349,7 @@ class StudioScriptV1Parser:
                     elif key == "TARGET_DURATION":
                         (doc.target_duration, doc.target_duration_min,
                          doc.target_duration_max) = _parse_target_duration(
-                            value, lineno, errors)
+                         value, lineno, errors)
                     elif key == "MEME_POLICY":
                         policy = value.upper()
                         if policy not in MEME_POLICIES:
@@ -2713,6 +2773,11 @@ class StudioScriptV1Parser:
                     shot.vfx = _split_list(value)
                 else:
                     _set_pending("shot_vfx", key, shot.fields, shot=shot)
+            elif key == "CONSTRAINT":
+                if value:
+                    shot.fields[key] = value
+                else:
+                    _set_pending("shot_constraint", key, shot.fields, shot=shot)
             elif key == "LOCATION_OVERRIDE":
                 shot.location_override = value
             elif key == "TRIGGER":
@@ -3155,15 +3220,18 @@ class StudioScriptV1Parser:
                               f"SHOT {shot.id} in SCENE {scene.number} has no TYPE; "
                               f"TYPE is required and must be one of {', '.join(SHOT_TYPES)}.")
                 if shot.subject:
-                    subject_norm = _normalize_name(shot.subject)
-                    if (_is_narrator_label(shot.subject)
-                            or doc.get_character(shot.subject) is not None
-                            or subject_norm in prop_names
-                            or subject_norm in prop_ids):
-                        pass
-                    else:
+                    subjects = _split_csv(shot.subject)
+                    invalid = []
+                    for subject in subjects:
+                        subject_norm = _normalize_name(subject)
+                        if not (_is_narrator_label(subject)
+                                or doc.get_character(subject) is not None
+                                or subject_norm in prop_names
+                                or subject_norm in prop_ids):
+                            invalid.append(subject)
+                    if invalid:
                         error(shot.line, "V1E018",
-                              f"SHOT {shot.id} SUBJECT {shot.subject!r} does not match "
+                              f"SHOT {shot.id} SUBJECT {', '.join(invalid)!r} does not match "
                               f"a declared CHARACTER or PROP.")
                 if shot.location_override:
                     override_norm = _normalize_name(shot.location_override)

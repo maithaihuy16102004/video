@@ -32,7 +32,7 @@ LAST_TTS_TIME = 0.0
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
-from env_secrets import get_gemini_api_key, load_dotenv  # noqa: E402
+from env_secrets import get_gemini_api_key, load_dotenv, redact  # noqa: E402
 
 # API keys are never hard-coded: GEMINI_API_KEY comes from the environment or a
 # local git-ignored .env file (see .env.example).
@@ -1357,6 +1357,77 @@ def make_dialogue_voice(segments: list[dict], folder: Path, job_id: str | None =
     return output, captions
 
 
+def build_v5_package(payload: dict, director) -> dict:
+    """Build V5 render data from the validated frontend plan.
+
+    Gemini may enrich render-only fields, but the plan owns cast, dialogue,
+    voices, scene IDs and durations.  Raw-script re-parsing is retained only
+    for legacy requests that genuinely have no structured plan.
+    """
+    plan = payload.get("plan") or {}
+    scenes = plan.get("scenes") or []
+    cast = plan.get("cast") or []
+    script = str(payload.get("script") or "")
+    if not scenes:
+        return director.analyze_script(script)
+
+    characters = []
+    for index, member in enumerate(cast):
+        characters.append({
+            "characterId": str(member.get("character") or f"char_{index + 1:02d}"),
+            "canonicalName": str(member.get("name") or f"Actor {index + 1}"),
+            "role": str(member.get("role") or ("PROTAGONIST_STORYTELLER" if index == 0 else "SUPPORTING_SPEAKER")),
+            "voiceId": str(member.get("voice") or payload.get("voice") or "vieneu-Thiện Minh"),
+            "archetypeId": str(member.get("archetypeId") or "custom"),
+            "headContour": "round_youth",
+            "hairStyle": "simple_cinematic",
+            "costumePrimaryColor": "#1B3B6F" if index == 0 else "#2B2D42",
+            "heldProp": "none",
+        })
+    if not characters:
+        speakers = []
+        for scene in scenes:
+            speaker = str(scene.get("speaker") or "Narrator")
+            if speaker not in speakers:
+                speakers.append(speaker)
+        for index, speaker in enumerate(speakers):
+            characters.append({"characterId": f"char_{index + 1:02d}", "canonicalName": speaker,
+                               "role": "PROTAGONIST_STORYTELLER" if index == 0 else "SUPPORTING_SPEAKER",
+                               "voiceId": str(payload.get("voice") or "vieneu-Thiện Minh"),
+                               "archetypeId": "custom", "headContour": "round_youth",
+                               "hairStyle": "simple_cinematic", "costumePrimaryColor": "#1B3B6F", "heldProp": "none"})
+
+    plan_locations = plan.get("locations") or []
+    locations = [{"locationId": str(loc.get("location_id") or loc.get("locationId") or f"LOC_{i+1:02d}"),
+                  "name": str(loc.get("canonical_name") or loc.get("name") or "Scene"),
+                  "category": str(loc.get("category") or "NEOCLASSICAL"), "weather": "CLEAR", "periodYear": ""}
+                 for i, loc in enumerate(plan_locations)]
+    if not locations:
+        locations = [{"locationId": "LOC_01", "name": "Story World", "category": "NEOCLASSICAL", "weather": "CLEAR", "periodYear": ""}]
+
+    beats = []
+    cursor = 0.0
+    for index, scene in enumerate(scenes):
+        duration = max(0.5, float(scene.get("duration") or 3.0))
+        speaker = str(scene.get("speaker") or "Narrator")
+        voice = str(scene.get("voice") or next((c["voiceId"] for c in characters if c["canonicalName"] == speaker), payload.get("voice") or "vieneu-Thiện Minh"))
+        actions = scene.get("action") or []
+        verb = str(actions[0] if isinstance(actions, list) and actions else "speak").lower()
+        if verb not in {"idle", "walk", "run", "sprint", "stop", "turn", "climb", "jump", "reach", "grab", "hold", "carry", "give", "receive", "open", "close", "read", "write", "point", "speak", "listen", "laugh", "cry", "surprise", "fear", "anger", "relief", "think", "react", "slip", "trip", "fall", "catch_balance", "hang", "recover", "sit", "stand"}:
+            verb = "speak"
+        beats.append({"beatId": str(scene.get("id") or f"BEAT_{index+1:02d}"),
+                      "timeRange": [cursor, cursor + duration], "primaryVerb": verb,
+                      "whatHappens": str(scene.get("text") or ""),
+                      "shotType": str(scene.get("shot") or "MEDIUM_SHOT"),
+                      "emotion": str(scene.get("emotion") or "focused"),
+                      "dialogue": {"speaker": speaker, "text": str(scene.get("text") or ""), "voiceId": voice}})
+        cursor += duration
+    base = {"title": str(plan.get("title") or "AI Clip Studio"), "genre": "Animation",
+            "historicalPeriod": "", "durationSeconds": cursor, "characters": characters,
+            "locations": locations, "storyBeats": beats, "soundCues": [], "visualPlan": []}
+    return director.enrich_render_package(base, script)
+
+
 def prepare_voice(payload: dict, folder: Path, variant: int = 0, job_id: str | None = None) -> tuple[Path, Path, list[dict], list[dict]]:
     if variant == 0:
         default_voice = payload.get("voice") or "vi-VN-NamMinhNeural"
@@ -1370,7 +1441,7 @@ def prepare_voice(payload: dict, folder: Path, variant: int = 0, job_id: str | N
 
     from pipeline.universal.v5_story_director import V5UniversalStoryDirector
     director = V5UniversalStoryDirector()
-    v5_pkg = director.analyze_script(payload.get("script", ""))
+    v5_pkg = build_v5_package(payload, director)
     
     cast = [
         {"name": c.get("canonicalName", "Actor"), "voice": c.get("voiceId", default_voice), "character": c.get("characterId", f"char_{i+1}")}
@@ -1968,7 +2039,7 @@ def run_production_render_service(payload: dict, duration: float, voice_path: Pa
     """V5 Authoritative Production Render Service (Three.js WebGL + Motion Canvas 2D Vector Compositor)."""
     from pipeline.universal.v5_story_director import V5UniversalStoryDirector
     director = V5UniversalStoryDirector()
-    v5_pkg = director.analyze_script(str(payload.get("script", "")))
+    v5_pkg = build_v5_package(payload, director)
     runner_pkg = director.compile_to_runner_package(v5_pkg, variant=variant)
     effective_duration = min(15.0 if mode == "preview" else 30.0, max(5.0, duration))
     runner_pkg["total_sequence_duration_seconds"] = effective_duration
@@ -2078,30 +2149,38 @@ def variants_worker(job_id: str, payload: dict):
         target = ENGINE / "public" / "ricks-draft" / "audio" / "voice.wav"
         variants = []
         variant_labels = [
-            "Bản 1: Nhịp nhanh - High Retention (NamMinh +5%)",
-            "Bản 2: Châm biếm lịch sử - Dry Comedy (HoaiMy -2%)",
-            "Bản 3: Phim tài liệu điện ảnh - Cinematic Documentary (NamMinh -5%)"
+            "Bản 1: Cinematic Retention · nhịp mạnh, camera động có chủ đích",
+            "Bản 2: Emotional Storytelling · diễn xuất sâu, bố cục điện ảnh"
         ]
         draft_1_hash = None
         draft_1_config = None
+        shared_audio = None
 
         with RENDER_LOCK:
             for i, label in enumerate(variant_labels):
                 var_folder = folder / f"variant_{i + 1}"
                 var_folder.mkdir(parents=True, exist_ok=True)
-                STATE[job_id] = {"status": "running", "message": f"Đang tạo giọng và âm thanh draft ({i + 1}/3) · {label}..."}
-                voice, subtitles, segments, cast = prepare_voice(payload, var_folder, variant=i, job_id=job_id)
+                STATE[job_id] = {"status": "running", "message": f"Đang tạo giọng và âm thanh draft ({i + 1}/2) · {label}..."}
+                if shared_audio is None:
+                    voice, subtitles, segments, cast = prepare_voice(payload, var_folder, variant=0, job_id=job_id)
+                    shared_audio = (voice, subtitles, segments, cast)
+                else:
+                    # Both drafts compare visual direction, not a different
+                    # performance. Reuse the exact approved voice/timing so
+                    # the user's choice is fair and the second draft starts
+                    # rendering immediately.
+                    voice, subtitles, segments, cast = shared_audio
                 duration = voice_duration(voice)
                 target.write_bytes(voice.read_bytes())
 
-                STATE[job_id] = {"status": "running", "message": f"Đang render draft {aspect} ({i + 1}/3) · {label}..."}
+                STATE[job_id] = {"status": "running", "message": f"Đang render draft {aspect} ({i + 1}/2) · {label}..."}
                 spec = render_spec(payload, duration, var_folder, subtitles, i, f"variant-{i + 1}.json", segments, cast)
                 out = folder / f"draft-{i + 1}.mp4"
 
                 # Extract variant configuration to verify deliberate differences
                 from pipeline.universal.v5_story_director import V5UniversalStoryDirector
                 director = V5UniversalStoryDirector()
-                v5_pkg = director.analyze_script(str(payload.get("script", "")))
+                v5_pkg = build_v5_package(payload, director)
                 runner_pkg = director.compile_to_runner_package(v5_pkg, variant=i)
 
                 current_config = {
@@ -2122,7 +2201,7 @@ def variants_worker(job_id: str, payload: dict):
                     draft_1_hash = compute_file_sha256(staged_out)
                     shutil.move(str(staged_out), str(out))
                 else:
-                    # Before writing draft-2 and draft-3:
+                    # Before writing draft-2:
                     # 1. Verify scene seed, camera, or dialogue timing has deliberately changed
                     verify_variant_parameters_changed(i, current_config, draft_1_config)
 
@@ -2166,9 +2245,9 @@ def variants_worker(job_id: str, payload: dict):
             "variants": variants
         }
         (folder / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
-        STATE[job_id] = {"status": "review_required", "message": f"Đã có 3 draft {aspect} · chọn bản có tiềm năng viral cao nhất", "variants": variants, "downloadAllowed": False}
+        STATE[job_id] = {"status": "review_required", "message": f"Đã có 2 draft {aspect} tối ưu · bạn xem và chọn bản Master", "variants": variants, "downloadAllowed": False}
         if os.getenv("GEMINI_API_KEY"):
-            STATE[job_id] = {**STATE[job_id], "status": "viral_reviewing", "message": "Gemini Vision đang chấm 3 draft..."}
+            STATE[job_id] = {**STATE[job_id], "status": "viral_reviewing", "message": "Gemini Vision đang so sánh 2 draft..."}
             review_path = folder / "gemini-review.json"
             result = subprocess.run(
                 [sys.executable, str(ROOT / "pipeline" / "gemini_video_reviewer.py"), "--job", str(folder), "--out", str(review_path)],
@@ -2183,10 +2262,10 @@ def variants_worker(job_id: str, payload: dict):
                     "status": "review_required",
                     "expert_review": review,
                     "winner": winner,
-                    "message": f"Đã đẩy 3 draft nhẹ lên Google Drive · Gemini gợi ý Draft #{winner + 1} ({score:.0f}/100) · chờ bạn duyệt xem trước khi render Master",
+                    "message": f"Đã có 2 draft tối ưu · Gemini gợi ý Draft #{winner + 1} ({score:.0f}/100) · bạn xem và chọn bản Master",
                 }
             else:
-                STATE[job_id] = {**STATE[job_id], "status": "review_required", "message": "Đã đẩy 3 draft nhẹ lên Google Drive · chờ bạn chọn draft để render Master", "review_error": (result.stderr or result.stdout)[-300:]}
+                STATE[job_id] = {**STATE[job_id], "status": "review_required", "message": "Đã có 2 draft tối ưu · bạn xem và chọn bản Master", "review_error": (result.stderr or result.stdout)[-300:]}
     except Exception as e:
         for local_draft in folder.glob("draft-*.mp4"):
             local_draft.unlink(missing_ok=True)
@@ -2232,7 +2311,13 @@ def worker(job_id: str, payload: dict):
 
 
 def run_gemini_content_review(payload: dict) -> dict:
-    """One-click comprehensive Vietnamese content, storyboard, voice, visual & SFX review via Gemini API."""
+    """Advisory creative review for any story; never a technical gate.
+
+    The script remains ground truth.  Gemini may identify risks and suggest
+    changes, but it may not silently rewrite dialogue, cast, facts or scene
+    continuity.  Missing credentials/API failures are reported honestly and
+    never replaced by a fabricated high score.
+    """
     api_key = str(payload.get("key") or get_gemini_api_key()).strip()
     model = str(payload.get("model") or os.getenv("GEMINI_REVIEW_MODEL") or DEFAULT_GEMINI_MODEL).strip()
     script = str(payload.get("script") or "").strip()
@@ -2243,50 +2328,44 @@ def run_gemini_content_review(payload: dict) -> dict:
     if not cast and script:
         _, cast = parse_dialogue(script, payload.get("voice", "vieneu-Thiện Minh"))
 
-    prompt = f"""Bạn là Giám đốc Sáng tạo Video Lịch sử YouTube (phong cách OverSimplified / Valiant Hearts) kiêm Chuyên gia Đạo diễn Âm thanh & Hình ảnh.
-Hãy đánh giá CHI TIẾT, SÂU SẮC bằng tiếng Việt cho dự án video 16:9 Full HD (1920x1080) dưới đây (không dùng phụ đề đáy màn hình, tập trung 100% vào nghệ thuật vẽ PyCairo vector chi tiết, diễn xuất đa giọng đọc VieNeu-TTS v3 Turbo 48kHz và Sound Effects/Foley đa tầng).
+    plan_excerpt = json.dumps({
+        "duration": plan.get("duration"),
+        "scenes": scenes,
+        "cast": cast,
+    }, ensure_ascii=False)[:30000]
+    prompt = f"""Bạn là biên tập viên sáng tạo cấp cao cho video YouTube hoạt hình.
+Hãy review bằng tiếng Việt dựa CHỈ trên dữ liệu được cung cấp. Kịch bản là nguồn sự thật;
+không phát minh nhân vật, sự kiện, lời thoại, dữ kiện lịch sử hoặc quyền sở hữu tài sản.
+Không tuyên bố video chắc chắn viral/kiếm tiền. Không chấm thông số codec, LUFS, frame đen
+hay bản quyền nếu chưa có bằng chứng từ file MP4/giấy phép. Gemini chỉ đưa khuyến nghị;
+mọi thay đổi nội dung phải chờ người dùng duyệt.
 
-THÔNG TIN DỰ ÁN:
-- Số cảnh storyboard: {len(scenes)}
-- Dàn nhân vật & giọng đọc (VieNeu-TTS v3 Turbo 48kHz): {json.dumps(cast, ensure_ascii=False)}
-- Kịch bản gốc:
-{script[:6500]}
+KỊCH BẢN GỐC:
+{script[:50000]}
 
-Hãy trả về DUY NHẤT một JSON hợp lệ theo đúng cấu trúc sau:
+STORYBOARD VÀ PHÂN VAI HIỆN CÓ:
+{plan_excerpt}
+
+Đánh giá tính nguyên bản, hook/retention, cấu trúc, continuity, phân vai voice,
+khả năng minh họa, SFX có quan hệ nhân-quả, rủi ro chính sách YouTube nhìn thấy trực tiếp
+từ kịch bản và các điểm bắt buộc người thật kiểm tra. Trả về DUY NHẤT JSON:
 {{
   "overall_score": <số nguyên 0-100>,
-  "verdict": "<Nhận định tổng quan 2-3 câu sắc sảo về chất lượng kịch bản, nhịp độ và độ cuốn hút trên YouTube>",
+  "verdict": "<nhận định 2-3 câu, không bảo đảm viral hoặc kiếm tiền>",
   "scores": {{
     "hook_and_retention": <0-100>,
-    "historical_accuracy": <0-100>,
-    "dark_comedy_balance": <0-100>,
-    "voice_casting_48khz": <0-100>,
+    "story_structure": <0-100>,
+    "originality_and_value": <0-100>,
+    "voice_casting": <0-100>,
     "visual_and_sfx_direction": <0-100>
   }},
-  "detailed_sections": {{
-    "hook_analysis": "<Phân tích chi tiết đoạn mở đầu (Munich 1914) và khả năng giữ chân người xem trong 30 giây đầu>",
-    "pacing_and_structure": "<Đánh giá nhịp điệu chuyển cảnh từ Munich 1914 -> Chiến hào -> Somme 1916 -> Ypres 1918 -> Pasewalk -> Munich 1919>",
-    "historical_fidelity": "<Đánh giá độ chính xác lịch sử: Trung đoàn Dự bị Bavaria 16, Thập tự Sắt, thương tích Somme, khí độc Ypres, viện Pasewalk, cuộc họp DAP 12/9/1919>",
-    "voice_and_emotion_review": "<Đánh giá cách phân vai VieNeu-TTS v3 Turbo 48kHz (Thiện Minh, Hải Đăng, Quang Sơn, Adam bựa, Phạm Tuyên, Thanh Bình, Thái Sơn) và thẻ cảm xúc [thở dài], [cười], [hắng giọng]>",
-    "visual_and_sfx_review": "<Đánh giá thiết kế bối cảnh 16:9 không phụ đề, trang phục quân phục/tay áo chi tiết và lớp âm thanh Foley pháo nổ, mưa bùn, khí độc, chuông huân chương, quán bia>"
-  }},
-  "strengths": [
-    "<Điểm mạnh nổi bật 1>",
-    "<Điểm mạnh nổi bật 2>",
-    "<Điểm mạnh nổi bật 3>",
-    "<Điểm mạnh nổi bật 4>"
-  ],
+  "strengths": ["<điểm mạnh có dẫn chứng từ scene/line>"],
   "improvements": [
-    "<Đề xuất tối ưu nâng cao 1>",
-    "<Đề xuất tối ưu nâng cao 2>",
-    "<Đề xuất tối ưu nâng cao 3>"
+    {{"severity":"BLOCKER|MAJOR|MINOR","location":"<scene/line>","issue":"<vấn đề>","suggestion":"<đề xuất không tự sửa kịch bản>"}}
   ],
-  "scene_highlights": [
-    {{"scene": "Munich 1914 (Hook)", "rating": "9.5/10", "note": "<Nhận xét chi tiết về cảnh mở đầu & visual/SFX>"}},
-    {{"scene": "Chiến hào Mặt trận phía Tây & Shipper mặt trận", "rating": "9.6/10", "note": "<Nhận xét chi tiết>"}},
-    {{"scene": "Trận Somme 1916 & Ypres 1918", "rating": "9.4/10", "note": "<Nhận xét chi tiết>"}},
-    {{"scene": "Bệnh viện Pasewalk & Quán bia Munich 1919", "rating": "9.5/10", "note": "<Nhận xét chi tiết>"}}
-  ]
+  "youtube_risks": ["<chỉ rủi ro quan sát được; không kết luận pháp lý/bản quyền>"],
+  "human_review_required": ["<những việc Gemini không thể xác nhận>"],
+  "scene_highlights": [{{"scene":"<id/tên>","rating":"<0-10>/10","note":"<nhận xét>"}}]
 }}"""
 
     body_bytes = json.dumps({
@@ -2294,7 +2373,8 @@ Hãy trả về DUY NHẤT một JSON hợp lệ theo đúng cấu trúc sau:
         "generationConfig": {"temperature": 0.25, "responseMimeType": "application/json"},
     }).encode("utf-8")
 
-    for try_model in [model, "gemini-3.5-flash-lite"]:
+    errors = []
+    for try_model in dict.fromkeys([model, DEFAULT_GEMINI_MODEL]):
         try:
             if not api_key:
                 break
@@ -2313,45 +2393,17 @@ Hãy trả về DUY NHẤT một JSON hợp lệ theo đúng cấu trúc sau:
             parsed["ok"] = True
             parsed["model"] = try_model
             return parsed
-        except Exception:
+        except Exception as exc:
+            errors.append(f"{try_model}: {redact(exc)}")
             continue
 
     return {
-        "ok": True,
-        "model": f"{model}-fallback",
-        "overall_score": 95,
-        "verdict": "Kịch bản POV lịch sử kết hợp dark comedy cực kỳ sắc sảo, cấu trúc 6 hồi rõ ràng từ Munich 1914 đến cuộc họp DAP 1919, tối ưu xuất sắc cho định dạng YouTube 16:9 Full HD không phụ đề đáy.",
-        "scores": {
-            "hook_and_retention": 96,
-            "historical_accuracy": 95,
-            "dark_comedy_balance": 94,
-            "voice_casting_48khz": 96,
-            "visual_and_sfx_direction": 95,
-        },
-        "detailed_sections": {
-            "hook_analysis": "Mở đầu bằng góc nhìn POV người trẻ 25 tuổi thất nghiệp tại Munich năm 1914 tạo sự đồng cảm tức thì trước khi tung cú twist Thế chiến thứ nhất bùng nổ.",
-            "pacing_and_structure": "Nhịp độ tăng dần từ hài hước châm biếm ('kết thúc trước Giáng sinh', 'shipper chiến hào') sang bi kịch khốc liệt (Somme 1916, khí độc Ypres 1918) và khép lại bằng cliffhanger chính trị đầy sức nặng năm 1919.",
-            "historical_fidelity": "Chính xác cao về mặt sử liệu: Trung đoàn Bộ binh Dự bị Bavaria số 16, Huân chương Thập tự Sắt hạng Nhì (12/1914) & hạng Nhất (8/1918), vết thương chân tại Somme, mù tạm thời tại Ypres/Pasewalk và buổi họp DAP ngày 12/09/1919.",
-            "voice_and_emotion_review": "Hệ thống 7 giọng đọc VieNeu-TTS v3 Turbo 48kHz tách biệt rõ cá tính từng nhân vật (Thiện Minh trầm ấm dẫn chuyện, Hải Đăng sắc lạnh cho Hitler, Quang Sơn & Adam bựa tung hứng lính chiến hào, Phạm Tuyên uy nghiêm cho Sĩ quan, Thanh Bình điềm tĩnh cho Bác sĩ).",
-            "visual_and_sfx_review": "Khung hình 16:9 1920x1080 vẽ bằng PyCairo khử răng cưa sắc nét, loại bỏ hoàn toàn phụ đề đáy giúp phô diễn trọn vẹn kiến trúc Frauenkirche, chiến hào bùn lầy, bệnh viện Pasewalk và quán bia Munich, kết hợp âm thanh Foley 48kHz có sidechain ducking."
-        },
-        "strengths": [
-            "Cấu trúc kể chuyện POV kết hợp thoại ngắn gọn, giàu nhịp điệu điện ảnh.",
-            "Kiểm soát ranh giới Dark Comedy chuẩn mực: châm biếm sự phi lý của chiến tranh nhưng giữ thái độ nghiêm cẩn trước thương vong và cực đoan chính trị.",
-            "Phối hợp 7 giọng đọc VieNeu-TTS v3 Turbo 48kHz kèm thẻ cảm xúc [thở dài], [cười], [hắng giọng] tự nhiên.",
-            "Hệ thống hiệu ứng hình ảnh PyCairo 16:9 và Foley SFX đa lớp khớp từng mốc sự kiện."
-        ],
-        "improvements": [
-            "Giữ khoảng nghỉ 1 giây sau câu 'Spoiler lịch sử: Không hề' để tiếng trống trầm (impact bass) tạo hiệu ứng hài hước tối đa.",
-            "Tăng nhẹ âm lượng tiếng pháo nổ xa ở phân cảnh giao thư tại Mặt trận phía Tây.",
-            "Nhấn mạnh ánh đèn vàng quán bia Munich 1919 khi chuyển sang đoạn kết mở sang Tập 2."
-        ],
-        "scene_highlights": [
-            {"scene": "Munich 1914 (Hook)", "rating": "9.6/10", "note": "Bối cảnh quảng trường Bavaria nắng ấm đối lập với lời thoại châm biếm sâu sắc."},
-            {"scene": "Chiến hào Mặt trận phía Tây", "rating": "9.7/10", "note": "Ẩn dụ 'shipper mặt trận' kết hợp mưa bùn, chuột chiến hào và pháo kích cực kỳ sinh động."},
-            {"scene": "Trận Somme 1916 & Khí độc Ypres 1918", "rating": "9.4/10", "note": "Hiệu ứng sương mù khí độc vàng xanh đa lớp và rung lắc camera tạo cảm giác chân thực."},
-            {"scene": "Pasewalk & Quán bia Munich 1919", "rating": "9.5/10", "note": "Chuyển tông sang chính trị hậu chiến mượt mà, tạo tiền đề hấp dẫn cho Tập 2."}
-        ],
+        "ok": False,
+        "configured": bool(api_key),
+        "model": model,
+        "error": ("Chưa cấu hình GEMINI_API_KEY; không tạo báo cáo giả."
+                  if not api_key else "Gemini review thất bại; không tạo báo cáo giả."),
+        "details": errors[-2:],
     }
 
 
@@ -2566,7 +2618,7 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 data = json.loads(self.rfile.read(int(self.headers.get("Content-Length", "0"))))
                 result = run_gemini_content_review(data)
-                return self.send_json(result, 200)
+                return self.send_json(result, 200 if result.get("ok") else 503)
             except Exception as e:
                 return self.send_json({"error": f"Không thể review nội dung: {e}"}, 500)
         if self.path == "/api/settings/openrouter":

@@ -34,6 +34,95 @@ const femaleNames = new Set([
   "hillary",
 ]);
 
+const viFemaleVoices = [
+  "vieneu-Trúc Ly", "vieneu-Mai Anh", "vieneu-Thùy Dung", "vieneu-Ngọc Huyền",
+];
+const viMaleVoices = [
+  "vieneu-Thiện Minh", "vieneu-Hải Đăng", "vieneu-Quang Sơn", "vieneu-Minh Đức",
+];
+
+function adaptStudioV1Plan(analysis: any, defaultVoice: string, energy?: string) {
+  const pkg = analysis?.package || {};
+  const characters = Array.isArray(pkg.characters) ? pkg.characters : [];
+  const sourceScenes = Array.isArray(pkg.scenes) ? pkg.scenes : [];
+  const lines = sourceScenes.flatMap((scene: any) =>
+    (Array.isArray(scene.lines) ? scene.lines : []).map((line: any) => ({ ...line, scene })),
+  );
+  const spokenNames = [...new Set(lines.map((line: any) => String(line.speaker || "").trim()).filter(Boolean))] as string[];
+  const byName = new Map(characters.map((character: any) => [String(character.name), character]));
+  const used = new Set<string>();
+  let femaleIndex = 0;
+  let maleIndex = 0;
+
+  const cast = spokenNames.map((name, index) => {
+    const character: any = byName.get(name) || {};
+    const scripted = String(character.voice_id || character.voice || "").trim();
+    const scriptedUsable = scripted && !["NONE", "AUTO"].includes(scripted.toUpperCase());
+    const gender = String(character.gender || character.render_traits?.gender || "").toLowerCase();
+    const female = gender.includes("female") || gender.includes("nữ");
+    let voice = scriptedUsable ? scripted : index === 0 ? defaultVoice : female
+      ? viFemaleVoices[femaleIndex++ % viFemaleVoices.length]
+      : viMaleVoices[maleIndex++ % viMaleVoices.length];
+    if (used.has(voice) && spokenNames.length > 1) {
+      const pool = female ? viFemaleVoices : viMaleVoices;
+      voice = pool.find((candidate) => !used.has(candidate)) || voice;
+    }
+    used.add(voice);
+    return {
+      name,
+      voice,
+      character: String(character.identity_id || character.id || name),
+      rate: "-3%",
+      pitch: "+0Hz",
+      role: character.role || "SPEAKER",
+      kind: lines.find((line: any) => line.speaker === name)?.kind || "narration",
+    };
+  });
+  const castByName = new Map(cast.map((entry) => [entry.name, entry]));
+  const scenes = lines.map((line: any, index: number) => {
+    const speaker: any = castByName.get(String(line.speaker));
+    const text = String(line.text || "");
+    return {
+      id: String(line.line_id || `line_${String(index + 1).padStart(3, "0")}`),
+      sceneNumber: Number(line.scene?.number || 0),
+      sceneTitle: String(line.scene?.title || ""),
+      text,
+      speaker: String(line.speaker),
+      voice: speaker?.voice || defaultVoice,
+      character: speaker?.character || String(line.speaker),
+      emotion: ["curious", "serious", "intrigued", "reflective"][index % 4],
+      shot: index === 0 ? "hook close-up" : index % 2 === 0 ? "two-shot" : "cinematic medium",
+      duration: Number(Math.min(12, Math.max(2.6, text.split(/\s+/).length / 2.15)).toFixed(1)),
+      sfx: "semantic-event",
+      kind: line.kind || "narration",
+    };
+  });
+  const declaredDuration = Number(pkg.v1_meta?.target_duration || pkg.v1_meta?.target_duration_min || 0);
+  return {
+    title: pkg.v1_meta?.title || sourceScenes[0]?.title || "STUDIO SCRIPT V1",
+    duration: declaredDuration > 0
+      ? declaredDuration
+      : Number(scenes.reduce((sum: number, scene: any) => sum + scene.duration, 0).toFixed(1)),
+    voice: defaultVoice,
+    energy,
+    resolution: "1920x1080",
+    aspectRatio: "16:9",
+    subtitlesBurnedIn: false,
+    scenes,
+    cast,
+    multiVoice: cast.length > 1,
+    voicePlan: {
+      engine: "VieNeu-TTS v3 Turbo 48kHz Studio",
+      source: "STUDIO SCRIPT V1 speakers only",
+      speakerCount: cast.length,
+      narrationLines: scenes.filter((scene: any) => scene.kind === "narration").length,
+      dialogueLines: scenes.filter((scene: any) => scene.kind === "dialogue").length,
+      normalization: "YouTube Master -14 LUFS",
+      ducking: "BGM/SFX duck dưới lời kể",
+    },
+  };
+}
+
 function inferContextualSfx(text: string, idx: number): string {
   const t = text.toLowerCase();
   if (/(pháo|nổ|somme|bắn|đạn|xóa cả khu vực)/.test(t)) return "artillery-boom";
@@ -304,6 +393,21 @@ export async function POST(request: Request) {
     const script = (b.script || "").trim();
     if (script.length < 10)
       return NextResponse.json({ error: "Kịch bản quá ngắn" }, { status: 400 });
+    if (/^\s*STUDIO\s+SCRIPT\s+V1\b/im.test(script)) {
+      const productionBackend = process.env.PRODUCTION_BACKEND_URL || "http://127.0.0.1:8788";
+      const response = await fetch(`${productionBackend}/api/production/analyze`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ script }),
+        signal: AbortSignal.timeout(30000),
+        cache: "no-store",
+      });
+      const analysis = await response.json();
+      if (!response.ok) {
+        return NextResponse.json({ error: analysis?.error || "STUDIO SCRIPT V1 không hợp lệ", details: analysis }, { status: response.status });
+      }
+      return NextResponse.json(adaptStudioV1Plan(analysis, b.voice || "vieneu-Thiện Minh", b.energy));
+    }
     try {
       const backend = process.env.RENDER_BACKEND_URL || "http://127.0.0.1:8787";
       const response = await fetch(`${backend}/api/story-world`, {

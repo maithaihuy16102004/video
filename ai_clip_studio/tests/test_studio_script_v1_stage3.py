@@ -499,9 +499,11 @@ class TestTargetDuration(unittest.TestCase):
         doc = self._doc_with_duration("khoang hai phut")
         self.assertEqual(len(_error_codes(doc, "V1E012")), 1)
 
-    def test_seconds_suffix_still_v1e012(self):
+    def test_seconds_suffix_parsed(self):
         doc = self._doc_with_duration("30s")
-        self.assertEqual(len(_error_codes(doc, "V1E012")), 1)
+        self.assertTrue(doc.is_valid, _codes(doc))
+        self.assertEqual(doc.target_duration_min, 30.0)
+        self.assertEqual(doc.target_duration_max, 30.0)
 
 
 class TestShotFields(unittest.TestCase):

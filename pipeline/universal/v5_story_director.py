@@ -140,6 +140,76 @@ class V5UniversalStoryDirector:
 
         return gemini_result
 
+    def enrich_render_package(self, package: Dict[str, Any], raw_script: str) -> Dict[str, Any]:
+        """Let Gemini direct art/render fields without changing story truth.
+
+        IDs, dialogue text, speakers, voices, timing and object ownership are
+        locked by the validated plan.  Gemini may only propose whitelisted
+        appearance, environment and shot-direction fields for existing IDs.
+        """
+        base = json.loads(json.dumps(package, ensure_ascii=False))
+        if not self.api_key:
+            base["renderEnrichment"] = {"provider": "local", "reason": "gemini_not_configured"}
+            return self._normalize_package(base, raw_script)
+
+        locked = {
+            "characters": [{"characterId": c.get("characterId"), "canonicalName": c.get("canonicalName"), "role": c.get("role")}
+                           for c in base.get("characters", [])],
+            "locations": [{"locationId": l.get("locationId"), "name": l.get("name")}
+                          for l in base.get("locations", [])],
+            "beats": [{"beatId": b.get("beatId"), "speaker": (b.get("dialogue") or {}).get("speaker"),
+                       "text": (b.get("dialogue") or {}).get("text"), "whatHappens": b.get("whatHappens")}
+                      for b in base.get("storyBeats", [])],
+        }
+        prompt = f"""Bạn là Art & Render Director cho hoạt hình stickman cinematic.
+Chỉ bổ sung chỉ dẫn hình ảnh cho các ID đã có. Tuyệt đối không tạo/xóa/đổi ID,
+không sửa speaker, lời thoại, voice, timing, sự kiện, đạo cụ sở hữu hay continuity.
+Trả JSON thuần theo schema bên dưới.
+
+DỮ LIỆU KHÓA:
+{json.dumps(locked, ensure_ascii=False)[:45000]}
+
+SCHEMA:
+{{"characters":[{{"characterId":"existing","headContour":"round_youth|delicate_heart|oval_gaunt|square_jaw|athletic_lean","hairStyle":"short description","costumePrimaryColor":"#RRGGBB","costumeSecondaryColor":"#RRGGBB","personality":"acting direction"}}],
+"locations":[{{"locationId":"existing","category":"CAFE|ANTARCTIC|VICTORIAN_THAMES|EDO_BRIDGE|EDO_HOUSE|NEOCLASSICAL|ROBOTICS_LAB|RAIL_STATION|HOSPITAL_ER|DESERT_STATION","weather":"CLEAR|RAIN|FOG|SNOW","lighting":"short cinematic lighting","palette":"short palette"}}],
+"beats":[{{"beatId":"existing","shotType":"WIDE_ESTABLISHING|MEDIUM_SHOT|TWO_SHOT|CLOSE_UP|HEROIC_CLOSE_UP|LOW_ANGLE|INSERT_OBJECT","primaryVerb":"idle|walk|run|sprint|stop|turn|reach|grab|hold|carry|give|receive|open|close|read|write|point|speak|listen|laugh|cry|surprise|fear|anger|relief|think|react","emotion":"short acting direction","cameraMotion":"STATIC|DOLLY_IN|DOLLY_OUT|PAN_LEFT|PAN_RIGHT|TRACKING","lighting":"short shot lighting","sfxDirection":"causal sound only"}}]}}"""
+        try:
+            result = self._call_gemini_json(prompt, timeout=30)
+            self._merge_render_enrichment(base, result)
+            base["renderEnrichment"] = {"provider": "gemini", "model": self.model_name}
+        except Exception as exc:
+            base["renderEnrichment"] = {"provider": "local", "reason": f"gemini_failed:{type(exc).__name__}"}
+        return self._normalize_package(base, raw_script)
+
+    def _call_gemini_json(self, prompt: str, timeout: int = 30) -> Dict[str, Any]:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model_name}:generateContent"
+        payload = {"contents": [{"parts": [{"text": prompt}]}],
+                   "generationConfig": {"temperature": 0.15, "responseMimeType": "application/json"}}
+        req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"),
+                                     headers={"Content-Type": "application/json", "x-goog-api-key": self.api_key},
+                                     method="POST")
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        return json.loads(data["candidates"][0]["content"]["parts"][0]["text"])
+
+    def _merge_render_enrichment(self, base: Dict[str, Any], result: Dict[str, Any]) -> None:
+        char_fields = {"headContour", "hairStyle", "costumePrimaryColor", "costumeSecondaryColor", "personality"}
+        loc_fields = {"category", "weather", "lighting", "palette"}
+        beat_fields = {"shotType", "primaryVerb", "emotion", "cameraMotion", "lighting", "sfxDirection"}
+        for target_key, id_key, allowed in (("characters", "characterId", char_fields),
+                                             ("locations", "locationId", loc_fields),
+                                             ("storyBeats", "beatId", beat_fields)):
+            source_key = "beats" if target_key == "storyBeats" else target_key
+            targets = {str(x.get(id_key)): x for x in base.get(target_key, []) if x.get(id_key)}
+            for suggestion in result.get(source_key, []) if isinstance(result, dict) else []:
+                target = targets.get(str(suggestion.get(id_key)))
+                if not target:
+                    continue
+                for field in allowed:
+                    value = suggestion.get(field)
+                    if value not in (None, ""):
+                        target[field] = value
+
     def _call_gemini_director(self, script_text: str) -> Optional[Dict[str, Any]]:
         """Invokes Gemini with structured JSON output enforcing V5 production schema."""
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model_name}:generateContent?key={self.api_key}"

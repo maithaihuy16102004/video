@@ -1,4 +1,4 @@
-"""Gemini Vision reviewer for three local draft contact sheets.
+"""Gemini Vision reviewer for two optimized local draft contact sheets.
 
 The API key is read from process memory only and is never written to disk.
 """
@@ -47,15 +47,15 @@ def main() -> None:
     key = get_gemini_api_key(required=True)
     job = Path(args.job)
     contacts = sorted(job.glob("draft-*-contact.png"))
-    if len(contacts) != 3:
-        raise SystemExit("Expected three draft contact sheets")
+    if len(contacts) != 2:
+        raise SystemExit("Expected two draft contact sheets")
     prompt = (
-        "You are a strict senior YouTube animation editor. Compare the three "
-        f"contact sheets in order Draft 1, Draft 2, Draft 3. {RUBRIC} "
+        "You are a strict senior YouTube animation editor. Compare the two "
+        f"contact sheets in order Draft 1, Draft 2. {RUBRIC} "
         "Return only valid JSON with this exact shape: "
         '{"approved":false,"winner":0,"winner_score":0,'
-        '"ranking":[0,1,2],"scores":[0,0,0],'
-        '"reasons":["","",""],"required_fixes":[""]}. '
+        '"ranking":[0,1],"scores":[0,0],'
+        '"reasons":["",""],"required_fixes":[""]}. '
         "winner and ranking use zero-based indexes. approved may be true only "
         "when winner_score is at least 85 and there is no hard fail."
     )
@@ -94,7 +94,7 @@ def main() -> None:
     text = payload["candidates"][0]["content"]["parts"][0]["text"]
     review = extract_json(text)
     winner = int(review.get("winner", -1))
-    if winner not in range(3) or len(review.get("scores", [])) != 3:
+    if winner not in range(2) or len(review.get("scores", [])) != 2:
         raise SystemExit("Gemini returned invalid review JSON")
     review["provider"] = "gemini"
     review["model"] = model

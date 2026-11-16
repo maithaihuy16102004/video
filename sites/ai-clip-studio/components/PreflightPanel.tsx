@@ -20,6 +20,9 @@ export interface PreflightReport {
   overall_passed: boolean;
   status: string;
   blockers: string[];
+  hash_matches?: boolean;
+  script_hash?: string;
+  warnings?: string[];
   checks: {
     rule_1_scenes: { passed: boolean; count: number; expected: number; scenes: any[] };
     rule_2_characters: { passed: boolean; count: number; expected: number; characters: any[] };
@@ -40,13 +43,15 @@ interface PreflightPanelProps {
   scriptHash?: string;
   onLoadCompliantScript: () => void;
   onAllowDraftRender?: () => void;
+  onResult?: (passed: boolean) => void;
 }
 
 export const PreflightPanel: React.FC<PreflightPanelProps> = ({
   script,
   scriptHash,
   onLoadCompliantScript,
-  onAllowDraftRender
+  onAllowDraftRender,
+  onResult
 }) => {
   const [report, setReport] = useState<PreflightReport | null>(null);
   const [loading, setLoading] = useState(false);
@@ -62,6 +67,7 @@ export const PreflightPanel: React.FC<PreflightPanelProps> = ({
       });
       const data = await res.json();
       setReport(data);
+      onResult?.(Boolean(data.overall_passed));
     } catch (err) {
       console.error("Preflight audit error:", err);
     } finally {
@@ -71,9 +77,35 @@ export const PreflightPanel: React.FC<PreflightPanelProps> = ({
 
   useEffect(() => {
     runAudit();
-  }, [script]);
+  }, [script, scriptHash]);
 
   if (!report) return null;
+
+  if (!report.checks) {
+    return (
+      <div className="rounded-[28px] border-[3px] border-[#172033] bg-white p-6 shadow-[8px_8px_0_#172033] mb-6">
+        <div className="flex items-start gap-3 rounded-2xl border-2 border-[#e44d46] bg-[#fff1f0] p-4 text-[#e44d46]">
+          <AlertTriangle className="mt-0.5 shrink-0" size={22} />
+          <div className="min-w-0 flex-1">
+            <div className="font-black">Không thể hoàn tất Preflight</div>
+            <ul className="mt-2 list-disc space-y-1 pl-5 text-xs font-bold">
+              {(report.blockers?.length ? report.blockers : ["Backend kiểm tra chưa sẵn sàng."]).map((blocker, index) => (
+                <li key={index}>{blocker}</li>
+              ))}
+            </ul>
+            <button
+              type="button"
+              onClick={runAudit}
+              disabled={loading}
+              className="mt-3 rounded-xl border-2 border-[#172033] bg-[#ffd34e] px-4 py-2 text-xs font-black text-[#172033] shadow-[2px_2px_0_#172033] disabled:opacity-50"
+            >
+              {loading ? "Đang kết nối lại..." : "🔄 Chạy lại Preflight"}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const ch = report.checks;
 
@@ -99,7 +131,7 @@ export const PreflightPanel: React.FC<PreflightPanelProps> = ({
                   report.overall_passed ? "bg-[#47bd75] text-white" : "bg-[#e44d46] text-white"
                 }`}
               >
-                {report.overall_passed ? "PASSED (11/11)" : "REJECTED / BLOCKED"}
+                {report.overall_passed ? "PASSED" : "REJECTED / BLOCKED"}
               </span>
             </div>
             <h3 className="text-xl font-black mt-1">
@@ -132,8 +164,10 @@ export const PreflightPanel: React.FC<PreflightPanelProps> = ({
       {scriptHash && (
         <div className="mt-3 flex items-center gap-2 text-xs font-mono text-[#5b6477] bg-[#f8fafc] px-3 py-1.5 rounded-lg border border-[#e2e8f0]">
           <span className="font-bold text-[#172033]">Verified Script Hash (SHA-256):</span>
-          <span className="truncate">{scriptHash}</span>
-          <span className="ml-auto text-emerald-600 font-bold whitespace-nowrap">✓ Preflight Synced</span>
+          <span className="truncate">{report.script_hash || scriptHash}</span>
+          <span className={`ml-auto font-bold whitespace-nowrap ${report.hash_matches === false ? "text-red-600" : "text-emerald-600"}`}>
+            {report.hash_matches === false ? "Đang đồng bộ lại" : "✓ Preflight Synced"}
+          </span>
         </div>
       )}
 
@@ -153,14 +187,14 @@ export const PreflightPanel: React.FC<PreflightPanelProps> = ({
               </ul>
               <div className="mt-3 flex items-center gap-3">
                 <span className="text-xs font-semibold text-[#172033]">
-                  Bạn có thể xem chi tiết audit 10 mục bên dưới hoặc nạp kịch bản Episode 01 chuẩn:
+                  Sửa đúng các lỗi theo số dòng bên trên, sau đó chạy lại Preflight:
                 </span>
                 <button
                   type="button"
                   onClick={onLoadCompliantScript}
                   className="rounded-xl border-2 border-[#172033] bg-[#51d8e5] px-3 py-1.5 text-xs font-black text-[#172033] shadow-[2px_2px_0_#172033] hover:bg-white"
                 >
-                  ⚡ Nạp STUDIO SCRIPT V1 Episode 01 Chuẩn
+                  ⚡ Nạp kịch bản mẫu
                 </button>
               </div>
             </div>
@@ -175,28 +209,28 @@ export const PreflightPanel: React.FC<PreflightPanelProps> = ({
             {/* 1. Scenes */}
             <div className={`rounded-xl border-2 p-3 ${ch.rule_1_scenes.passed ? "border-[#47bd75] bg-[#f2faf5]" : "border-[#e44d46] bg-[#fff5f5]"}`}>
               <div className="flex items-center justify-between text-xs font-black">
-                <span>1. Đủ 8 Cảnh</span>
+                <span>1. Cảnh và shot hợp lệ</span>
                 {ch.rule_1_scenes.passed ? <CheckCircle2 size={16} className="text-[#47bd75]" /> : <XCircle size={16} className="text-[#e44d46]" />}
               </div>
               <div className="mt-1 text-sm font-black">
-                {ch.rule_1_scenes.count} / 8 cảnh
+                {ch.rule_1_scenes.count} cảnh
               </div>
               <div className="text-[11px] opacity-70">
-                {ch.rule_1_scenes.passed ? "Đủ tiêu đề, bối cảnh, action, camera" : "Thiếu cảnh hoặc tag"}
+                {ch.rule_1_scenes.passed ? "Parser nhận được cấu trúc cảnh/shot" : "Thiếu cảnh, shot hoặc tag bắt buộc"}
               </div>
             </div>
 
             {/* 2. Characters */}
             <div className={`rounded-xl border-2 p-3 ${ch.rule_2_characters.passed ? "border-[#47bd75] bg-[#f2faf5]" : "border-[#e44d46] bg-[#fff5f5]"}`}>
               <div className="flex items-center justify-between text-xs font-black">
-                <span>2. Đủ 4 Nhân Vật</span>
+                <span>2. Nhân vật khai báo</span>
                 {ch.rule_2_characters.passed ? <CheckCircle2 size={16} className="text-[#47bd75]" /> : <XCircle size={16} className="text-[#e44d46]" />}
               </div>
               <div className="mt-1 text-sm font-black">
-                {ch.rule_2_characters.count} / 4 nhân vật
+                {ch.rule_2_characters.count} nhân vật
               </div>
               <div className="text-[11px] opacity-70">
-                {ch.rule_2_characters.passed ? "Đã gán giọng VieNeu đúng" : "Chưa đủ 4 nhân vật"}
+                {ch.rule_2_characters.passed ? "Có nhân vật hợp lệ" : "Chưa có nhân vật hợp lệ"}
               </div>
             </div>
 
@@ -231,14 +265,14 @@ export const PreflightPanel: React.FC<PreflightPanelProps> = ({
             {/* 5. 3 Memes */}
             <div className={`rounded-xl border-2 p-3 ${ch.rule_5_meme_cues.passed ? "border-[#47bd75] bg-[#f2faf5]" : "border-[#e44d46] bg-[#fff5f5]"}`}>
               <div className="flex items-center justify-between text-xs font-black">
-                <span>5. Đúng 3 Cue Meme</span>
+                <span>5. Meme là tùy chọn</span>
                 {ch.rule_5_meme_cues.passed ? <CheckCircle2 size={16} className="text-[#47bd75]" /> : <XCircle size={16} className="text-[#e44d46]" />}
               </div>
               <div className="mt-1 text-sm font-black">
-                Cảnh 1, 2, 5
+                Không bắt buộc
               </div>
               <div className="text-[11px] opacity-70">
-                ối dồi ôi · gòi gòi · among us
+                Không ép meme theo kịch bản khác
               </div>
             </div>
           </div>
@@ -248,24 +282,24 @@ export const PreflightPanel: React.FC<PreflightPanelProps> = ({
             {/* 6. Local Asset Resolution */}
             <div className="rounded-xl border border-[#172033]/20 bg-[#f9f8f4] p-2.5">
               <div className="flex items-center justify-between font-bold">
-                <span>6. File Meme Cục Bộ</span>
-                <span className="text-[#47bd75] font-black">3/3 MP3</span>
+                <span>6. Tài sản âm thanh</span>
+                <span className="text-[#47bd75] font-black">Theo kịch bản</span>
               </div>
               <div className="mt-1 text-[11px] opacity-75">
-                oi_doi_oi, goi_goi, among_us sẵn sàng trên đĩa.
+                SFX được kiểm tra theo event và asset thực tế.
               </div>
             </div>
 
             {/* 7. Clean Scenes */}
             <div className={`rounded-xl border p-2.5 ${ch.rule_7_clean_scenes.passed ? "border-[#47bd75]/40 bg-[#f2faf5]" : "border-[#e44d46]/40 bg-[#fff5f5]"}`}>
               <div className="flex items-center justify-between font-bold">
-                <span>7. Cảnh 03,04,06,07,08</span>
+                <span>7. Chính sách meme</span>
                 <span className={ch.rule_7_clean_scenes.passed ? "text-[#47bd75]" : "text-[#e44d46]"}>
-                  {ch.rule_7_clean_scenes.passed ? "Sạch meme" : "Vi phạm"}
+                  {ch.rule_7_clean_scenes.passed ? "Hợp lệ" : "Vi phạm"}
                 </span>
               </div>
               <div className="mt-1 text-[11px] opacity-75">
-                Không có meme ở các cảnh trang nghiêm.
+                Không áp quy tắc cảnh cố định của Episode khác.
               </div>
             </div>
 
@@ -294,13 +328,13 @@ export const PreflightPanel: React.FC<PreflightPanelProps> = ({
             {/* 10. Scene 08 Integrity */}
             <div className={`rounded-xl border p-2.5 ${ch.rule_10_scene_8_integrity.passed ? "border-[#47bd75]/40 bg-[#f2faf5]" : "border-[#e44d46]/40 bg-[#fff5f5]"}`}>
               <div className="flex items-center justify-between font-bold">
-                <span>10. Cảnh 08 Trang Nghiêm</span>
+                <span>10. Cấu trúc cuối</span>
                 <span className={ch.rule_10_scene_8_integrity.passed ? "text-[#47bd75]" : "text-[#e44d46]"}>
                   {ch.rule_10_scene_8_integrity.passed ? "Đạt chuẩn" : "Chưa đạt"}
                 </span>
               </div>
               <div className="mt-1 text-[11px] opacity-75">
-                Đổi góc máy đa dạng, tự sự lịch sử trang trọng.
+                Kiểm tra cảnh cuối theo chính kịch bản hiện tại.
               </div>
             </div>
 
@@ -323,11 +357,11 @@ export const PreflightPanel: React.FC<PreflightPanelProps> = ({
             <div className="text-xs font-semibold text-[#172033]/70">
               {report.overall_passed ? (
                 <span className="text-[#2f9e5b] font-bold">
-                  ✓ Toàn bộ 10 tiêu chuẩn Preflight đã thông qua. Bạn có thể xuất bản Audiovisual Draft để kiểm duyệt trực quan.
+                  ✓ STUDIO SCRIPT V1 đã qua kiểm tra cấu trúc. Có thể tạo Audiovisual Draft để kiểm duyệt trực quan.
                 </span>
               ) : (
                 <span className="text-[#e44d46] font-bold">
-                  ⚠️ Render Master bị khóa cho đến khi toàn bộ 10 điều kiện Preflight được đáp ứng.
+                  ⚠️ Render Master bị khóa cho đến khi các lỗi STUDIO SCRIPT V1 được sửa.
                 </span>
               )}
             </div>

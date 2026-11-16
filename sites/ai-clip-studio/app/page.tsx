@@ -1,5 +1,5 @@
 "use client";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { PreflightPanel } from "../components/PreflightPanel";
 import {
   Clapperboard,
@@ -41,20 +41,15 @@ type ContentReview = {
   model?: string;
   scores?: {
     hook_and_retention?: number;
-    historical_accuracy?: number;
-    dark_comedy_balance?: number;
-    voice_casting_48khz?: number;
+    story_structure?: number;
+    originality_and_value?: number;
+    voice_casting?: number;
     visual_and_sfx_direction?: number;
   };
-  detailed_sections?: {
-    hook_analysis?: string;
-    pacing_and_structure?: string;
-    historical_fidelity?: string;
-    voice_and_emotion_review?: string;
-    visual_and_sfx_review?: string;
-  };
   strengths?: string[];
-  improvements?: string[];
+  improvements?: { severity: string; location: string; issue: string; suggestion: string }[];
+  youtube_risks?: string[];
+  human_review_required?: string[];
   scene_highlights?: { scene: string; rating: string; note: string }[];
 };
 
@@ -411,6 +406,7 @@ export default function Home() {
     [variants, setVariants] = useState<Variant[]>([]),
     [jobId, setJobId] = useState("52d57a1cf6"),
     [selectedWinner, setSelectedWinner] = useState<number | null>(null),
+    [preflightPassed, setPreflightPassed] = useState(false),
     [reviewerKey, setReviewerKey] = useState("");
 
   const words = useMemo(
@@ -419,7 +415,7 @@ export default function Home() {
   );
 
   // Synchronize SHA-256 Script Hash across Editor, Preflight, Storyboard, TTS and Render
-  useMemo(() => {
+  useEffect(() => {
     if (typeof window !== "undefined" && window.crypto && window.crypto.subtle) {
       const enc = new TextEncoder();
       const data = enc.encode(script.trim());
@@ -521,7 +517,7 @@ export default function Home() {
     setJobId("");
     setSelectedWinner(null);
     setVideo("");
-    setMessage("Đang tạo 3 phương án draft 16:9 (Motion Canvas + Three.js WebGL + SFX 48kHz)...");
+    setMessage("Đang tạo 2 Draft tối ưu 16:9 (Motion Canvas + Three.js WebGL + SFX 48kHz)...");
     try {
       const r = await fetch("/api/render", {
         method: "POST",
@@ -647,6 +643,7 @@ export default function Home() {
               setMessage("Đã nạp STUDIO SCRIPT V1 Episode 01 Chuẩn (8 cảnh · 4 nhân vật · 3 meme cues)");
             }}
             onAllowDraftRender={render}
+            onResult={setPreflightPassed}
           />
           <div>
             <div className="mb-3 flex items-end justify-between">
@@ -732,7 +729,7 @@ export default function Home() {
                 onChange={(e) => setMultiVoice(e.target.value === "multi")}
                 className="w-full bg-transparent outline-none"
               >
-                <option value="multi">Tự động 7 giọng nhân vật + cảm xúc</option>
+                <option value="multi">Tự động theo SPEAKER thật trong kịch bản</option>
                 <option value="narrator">Một người kể</option>
               </select>
             </label>
@@ -840,10 +837,10 @@ export default function Home() {
                 <div className="grid gap-2.5 sm:grid-cols-5">
                   {[
                     ["Hook & Giữ chân", contentReview.scores.hook_and_retention],
-                    ["Chính xác Lịch sử", contentReview.scores.historical_accuracy],
-                    ["Dark Comedy", contentReview.scores.dark_comedy_balance],
-                    ["Giọng 48kHz", contentReview.scores.voice_casting_48khz],
-                    ["Vẽ 16:9 & SFX", contentReview.scores.visual_and_sfx_direction],
+                    ["Cấu trúc", contentReview.scores.story_structure],
+                    ["Nguyên bản & Giá trị", contentReview.scores.originality_and_value],
+                    ["Phân vai Voice", contentReview.scores.voice_casting],
+                    ["Hình ảnh & SFX", contentReview.scores.visual_and_sfx_direction],
                   ].map(([label, val]) => (
                     <div
                       key={String(label)}
@@ -853,55 +850,10 @@ export default function Home() {
                         {label}
                       </div>
                       <div className="mt-1 text-lg font-black text-[#e44d46]">
-                        {val ?? 95}/100
+                        {val ?? "—"}/100
                       </div>
                     </div>
                   ))}
-                </div>
-              )}
-
-              {contentReview.detailed_sections && (
-                <div className="grid gap-3 text-sm md:grid-cols-2">
-                  <div className="rounded-2xl border-2 border-[#172033]/15 p-3.5">
-                    <div className="text-xs font-black uppercase text-[#e44d46]">
-                      1. Hook & Mở đầu (Munich 1914)
-                    </div>
-                    <p className="mt-1 font-semibold leading-relaxed">
-                      {contentReview.detailed_sections.hook_analysis}
-                    </p>
-                  </div>
-                  <div className="rounded-2xl border-2 border-[#172033]/15 p-3.5">
-                    <div className="text-xs font-black uppercase text-[#e44d46]">
-                      2. Nhịp độ & Chuyển cảnh 6 Hồi
-                    </div>
-                    <p className="mt-1 font-semibold leading-relaxed">
-                      {contentReview.detailed_sections.pacing_and_structure}
-                    </p>
-                  </div>
-                  <div className="rounded-2xl border-2 border-[#172033]/15 p-3.5">
-                    <div className="text-xs font-black uppercase text-[#e44d46]">
-                      3. Độ chính xác Sử liệu (1914–1919)
-                    </div>
-                    <p className="mt-1 font-semibold leading-relaxed">
-                      {contentReview.detailed_sections.historical_fidelity}
-                    </p>
-                  </div>
-                  <div className="rounded-2xl border-2 border-[#172033]/15 p-3.5">
-                    <div className="text-xs font-black uppercase text-[#e44d46]">
-                      4. Dàn 7 Giọng VieNeu v3 Turbo 48kHz & Cảm xúc
-                    </div>
-                    <p className="mt-1 font-semibold leading-relaxed">
-                      {contentReview.detailed_sections.voice_and_emotion_review}
-                    </p>
-                  </div>
-                  <div className="rounded-2xl border-2 border-[#172033]/15 p-3.5 md:col-span-2">
-                    <div className="text-xs font-black uppercase text-[#e44d46]">
-                      5. Mỹ thuật Motion Canvas + Three.js 16:9 (Không phụ đề đáy) & Foley SFX Đa tầng
-                    </div>
-                    <p className="mt-1 font-semibold leading-relaxed">
-                      {contentReview.detailed_sections.visual_and_sfx_review}
-                    </p>
-                  </div>
                 </div>
               )}
 
@@ -924,13 +876,26 @@ export default function Home() {
                       <AlertCircle size={16} /> Gợi ý tinh chỉnh đạo diễn
                     </div>
                     <ul className="space-y-1.5 text-xs font-bold leading-relaxed">
-                      {contentReview.improvements.map((s, idx) => (
-                        <li key={idx}>• {s}</li>
+                      {contentReview.improvements.map((item, idx) => (
+                        <li key={idx}>• [{item.severity}] {item.location}: {item.issue} — {item.suggestion}</li>
                       ))}
                     </ul>
                   </div>
                 )}
               </div>
+
+              {(contentReview.youtube_risks?.length || contentReview.human_review_required?.length) ? (
+                <div className="grid gap-3 text-xs font-bold md:grid-cols-2">
+                  <div className="rounded-2xl bg-[#fff0ef] p-4">
+                    <div className="mb-2 font-black uppercase text-[#c83f38]">Rủi ro YouTube cần xem xét</div>
+                    {(contentReview.youtube_risks || []).map((item, i) => <div key={i}>• {item}</div>)}
+                  </div>
+                  <div className="rounded-2xl bg-[#eef4ff] p-4">
+                    <div className="mb-2 font-black uppercase text-[#315b9f]">Bắt buộc người thật kiểm tra</div>
+                    {(contentReview.human_review_required || []).map((item, i) => <div key={i}>• {item}</div>)}
+                  </div>
+                </div>
+              ) : null}
 
               {contentReview.scene_highlights && contentReview.scene_highlights.length > 0 && (
                 <div>
@@ -1085,7 +1050,7 @@ export default function Home() {
                 disabled={busy}
                 className="flex w-full items-center justify-center gap-2 rounded-2xl border-[3px] border-white bg-[#ff6b5e] px-5 py-4 font-black text-white disabled:opacity-50"
               >
-                <Play fill="currentColor" /> Render mới 3 Draft 16:9 & Chọn bản Master
+                <Play fill="currentColor" /> Render 2 Draft tối ưu & Chọn bản Master
               </button>
               {variants.length > 0 && (
                 <div className="grid grid-cols-2 gap-2">
@@ -1128,18 +1093,18 @@ export default function Home() {
                       <button
                         type="button"
                         onClick={() => {
-                          if (!script.includes("STUDIO SCRIPT V1") || !script.includes("SCENE 08")) {
-                            alert("🛑 MASTER RENDERING BLOCKED: Kịch bản hiện tại chưa vượt qua Preflight Gate (Yêu cầu đủ 8 cảnh, 4 nhân vật, 3 meme chuẩn và kiểm định âm thanh).");
+                          if (!preflightPassed) {
+                            alert("🛑 MASTER RENDERING BLOCKED: Kịch bản hiện tại chưa vượt qua STUDIO SCRIPT V1 Preflight Gate.");
                             return;
                           }
                           chooseWinner(v.index);
                         }}
-                        disabled={busy || selectedWinner !== null || !script.includes("STUDIO SCRIPT V1")}
+                        disabled={busy || selectedWinner !== null || !preflightPassed}
                         className="mt-2 w-full rounded-lg bg-[#51d8e5] px-3 py-2 text-xs font-black text-[#172033] disabled:opacity-40"
                       >
                         {selectedWinner === v.index
                           ? "Đang render Master..."
-                          : (!script.includes("STUDIO SCRIPT V1") ? "🛑 Master Bị Khóa (Preflight Failed)" : "Chọn bản này · Render Full HD")}
+                            : (!preflightPassed ? "🛑 Master Bị Khóa (Preflight Failed)" : "Chọn bản này · Render Full HD")}
                       </button>
                     </div>
                   ))}
