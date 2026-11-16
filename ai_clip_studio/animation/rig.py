@@ -156,9 +156,18 @@ def interp_keys(keys, t):
 #     2-5 s insert, pace ~70-90 steps/min (estimate from visible
 #     strides, not a measurement). v5 used 0.16 H at 115/min -- too
 #     fast and too shuffly; v6 uses 0.25 H at ~80/min.
-#   arm_amp: arm-swing amplitude in radians. Reference: arms do NOT
-#     swing -- both hands are committed to a task; if they swing at
-#     all, keep it SMALL and opposite to the legs. v6 cuts 0.45->0.25.
+#   arm_amp: arm-swing amplitude in radians. Round 19: the v6
+#     cut (0.45 -> 0.25) read the reference as "arms do NOT
+#     swing -- both hands are committed to a task", but that
+#     observation governs TASK walks, which the arm_mode
+#     system already handles (task 0.25x, restrained 0.10x,
+#     carrying fixed). A free walk with uncommitted hands
+#     swings at 0.45 again (measured hand travel 0.11H ->
+#     0.18H on Loop 01 shot #7): the R18 tester lists "arm
+#     swings stay close to the body" as an absent reference
+#     trait. Wiring arm_pose per event (held-prop walks use
+#     task/carrying) is the follow-up; until then every
+#     rendered walk uses the swing mode.
 #   lean: forward torso lean in radians while walking. Reference:
 #     weight is sold by forward LEAN into effort, not by bob.
 #   bob_frac: vertical COM excursion as a fraction of leg length.
@@ -179,7 +188,7 @@ GAIT_DEFAULT = {
     "stride_frac": 0.25,
     "step_length_frac": 0.25,
     "stride_length_frac": 0.50,
-    "arm_amp": 0.25,
+    "arm_amp": 0.45,
     "lean": 0.12,
     "bob_frac": 0.015,
     "lift_frac": 0.05,
@@ -332,6 +341,11 @@ class Stickman:
         self.pose = {
             "root_x": 960.0, "root_y": 900.0, "facing": 1,
             "torso_lean": 0.0, "head_look": 0.0, "head_pitch": 0.0,
+            # Round 19: impact squash/stretch. 0 = rigid (the
+            # default -- joints() ignores it; draw_character_v4
+            # projects the drawn figure). + = squash (shorter,
+            # wider), - = stretch (taller, narrower).
+            "squash": 0.0,
             "thigh_l": 0.0, "thigh_r": 0.0, "knee_l": 0.0, "knee_r": 0.0,
             "arm_l": 0.0, "arm_r": 0.0, "elbow_l": 0.0, "elbow_r": 0.0,
             "bob": 0.0,

@@ -29,8 +29,11 @@ WAV per input line, in order.
 """
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 import re
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -55,6 +58,39 @@ ENGINE_LABEL = ("tts_cli (/opt/hatch/bin/tts, Meta Shortwave) — "
 VOICE_TARGET_DB = -20.0
 VOICE_MAX_GAIN_DB = 12.0
 VOICE_PEAK_CEILING_DB = -1.0
+
+#: Cache version: bump when anything affecting the synthesised
+#: bytes changes (engine, CLI flags, normalisation). Part of
+#: every cache key, so old entries never shadow new behaviour.
+CACHE_VERSION = 1
+
+
+def default_cache_dir() -> Path:
+    """Shared voice cache dir (XDG-style, outside the repo so a
+    GitHub push never carries cached audio). Overridable with
+    AI_CLIP_TTS_CACHE; the value "off" disables the cache."""
+    override = os.environ.get("AI_CLIP_TTS_CACHE", "")
+    if override:
+        return Path(override)
+    return Path.home() / ".cache" / "ai_clip_studio" / "tts"
+
+
+def cache_key(*, voice: str, text: str, speed: int = 100,
+              language: str = "vi",
+              target_db: float = VOICE_TARGET_DB,
+              max_gain_db: float = VOICE_MAX_GAIN_DB,
+              peak_ceiling_db: float = VOICE_PEAK_CEILING_DB) -> str:
+    """Content key for one synthesised line: every input that
+    affects the cached bytes, so identical inputs always hit
+    the same entry and any change misses honestly."""
+    payload = json.dumps({
+        "v": CACHE_VERSION, "engine": "tts_cli",
+        "voice": voice, "text": text, "speed": speed,
+        "language": language, "target_db": target_db,
+        "max_gain_db": max_gain_db,
+        "peak_ceiling_db": peak_ceiling_db,
+    }, ensure_ascii=False, sort_keys=True)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def _gender_of_hint(voice_hint: str = "") -> str:
@@ -225,14 +261,29 @@ def _normalize_wav(path: Path, *, target_db: float = VOICE_TARGET_DB,
 
 def tts_cli_provider(lines, job_dir: Path, *,
                      voice_hints: dict[str, str] | None = None,
-                     voice_ids: dict[str, str] | None = None
+                     voice_ids: dict[str, str] | None = None,
+                     cache_dir: Path | None | bool = None
                      ) -> list[Path]:
     """Synthesise one real WAV per line. `lines` are TimelineLine objects
     (or dicts with text/speaker). Raises on any failure — never returns a
-    silent placeholder. Writes job_dir/voices_manifest.json (P8)."""
+    silent placeholder. Writes job_dir/voices_manifest.json (P8).
+
+    Round 20: identical (voice, text) lines reuse a cached
+    normalised WAV (see cache_key), pinning voice durations so
+    the audio-driven timeline is stable across renders. Pass
+    ``cache_dir=False`` to disable; ``None`` uses
+    default_cache_dir() (AI_CLIP_TTS_CACHE overrides it, and
+    the value "off" disables the cache)."""
     job_dir = Path(job_dir)
     out_dir = job_dir / "voices"
     out_dir.mkdir(parents=True, exist_ok=True)
+    if cache_dir is None:
+        cache_dir = default_cache_dir()
+    if cache_dir is False or str(cache_dir) == "off":
+        cache_path = None
+    else:
+        cache_path = Path(cache_dir)
+    cache_hits = 0
     hints = voice_hints or {}
     ids = voice_ids or {}
     parsed = []
@@ -253,6 +304,23 @@ def tts_cli_provider(lines, job_dir: Path, *,
     line_records = []
     for i, (text, speaker) in enumerate(parsed, 1):
         voice = assignment[speaker]["voice"]
+        wav = out_dir / f"line{i:02d}_{speaker}.wav"
+        key = cache_key(voice=voice, text=text) if cache_path else None
+        cached_wav = (cache_path / f"{key}.wav") if key else None
+        if cached_wav is not None and cached_wav.exists() \
+                and cached_wav.stat().st_size >= 1000:
+            shutil.copyfile(cached_wav, wav)
+            cache_hits += 1
+            wavs.append(wav)
+            line_records.append({
+                "line": i, "speaker": speaker,
+                "voice": voice,
+                "script_voice_id": assignment[speaker]["script_voice_id"],
+                "voice_hint": assignment[speaker]["voice_hint"],
+                "wav": str(wav), "cached": True, "cache_key": key,
+                "normalisation": {"note": "cached normalised WAV; "
+                                          "not re-synthesised"}})
+            continue
         mp3 = out_dir / f"line{i:02d}_{speaker}.mp3"
         r = subprocess.run(
             [TTS_BIN, "speak", "--language", "vi", "--speed", "100",
@@ -262,7 +330,6 @@ def tts_cli_provider(lines, job_dir: Path, *,
             raise RuntimeError(
                 f"TTS failed for line {i} ({speaker}): "
                 f"{r.stderr.decode('utf-8', 'replace')[:300]}")
-        wav = out_dir / f"line{i:02d}_{speaker}.wav"
         r2 = subprocess.run(
             ["ffmpeg", "-y", "-v", "error", "-i", str(mp3),
              "-ac", "1", "-ar", "48000", str(wav)],
@@ -270,13 +337,24 @@ def tts_cli_provider(lines, job_dir: Path, *,
         if r2.returncode != 0 or not wav.exists():
             raise RuntimeError(f"ffmpeg decode failed for line {i}: {r2.stderr[:300]}")
         norm = _normalize_wav(wav)
+        if cached_wav is not None:
+            # Best-effort atomic store: a cache failure must
+            # never fail the job.
+            try:
+                cache_path.mkdir(parents=True, exist_ok=True)
+                tmp = cache_path / f".{key}.tmp.wav"
+                shutil.copyfile(wav, tmp)
+                tmp.replace(cached_wav)
+            except OSError:
+                pass
         wavs.append(wav)
         line_records.append({
             "line": i, "speaker": speaker,
             "voice": voice,
             "script_voice_id": assignment[speaker]["script_voice_id"],
             "voice_hint": assignment[speaker]["voice_hint"],
-            "wav": str(wav), "normalisation": norm})
+            "wav": str(wav), "cached": False, "cache_key": key,
+            "normalisation": norm})
     manifest = {
         "engine": ENGINE_LABEL,
         "engine_note": ("The VM stand-in synthesises Vietnamese via the "
@@ -292,6 +370,9 @@ def tts_cli_provider(lines, job_dir: Path, *,
         "speakers": speakers,
         "lines": line_records,
         "normalisation_target_db": VOICE_TARGET_DB,
+        "cache": {"dir": str(cache_path) if cache_path else None,
+                  "hits": cache_hits,
+                  "misses": len(line_records) - cache_hits},
     }
     (job_dir / "voices_manifest.json").write_text(
         json.dumps(manifest, indent=2, ensure_ascii=False),

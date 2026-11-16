@@ -578,7 +578,8 @@ def gaze_wander(t: float, seed: int, amplitude: float = 0.12):
     return v0
 
 
-def fixation_time(t: float, seed: int) -> float:
+def fixation_time(t: float, seed: int,
+                  ease_sec: float = None) -> float:
     """Time quantized to the gaze fixation grid (round 15).
 
     The same grid ``gaze_wander`` steps on: flat holds of
@@ -592,14 +593,24 @@ def fixation_time(t: float, seed: int) -> float:
     with it at a fixed head; the delivered drift was head
     motion). Returns local time (the seed offset is removed),
     so the sine phases stay in the caller's time base.
+
+    ``ease_sec`` overrides the saccade ease (round 16): head
+    overlays need a longer ease than the 1-frame eye saccade
+    because a head jump inside a single frame pops on
+    delivered frames (measured 8.6M rim diffs at the 0.04 s
+    ease vs 3.8M for the smooth control). The grid itself
+    (dwells + per-seed offset) is unchanged, so signals
+    sharing a seed still step together whatever ease each
+    uses.
     """
     _offset = 0.037 * (int(seed) % 7)
+    _ease = _GAZE_EASE_SEC if ease_sec is None else float(ease_sec)
     t_eff = max(0.0, float(t)) + _offset
     step = math.floor(t_eff / _GAZE_DWELL_SEC)
     t0 = step * _GAZE_DWELL_SEC
     phase = t_eff - t0
-    if phase < _GAZE_EASE_SEC and step > 0:
-        u = phase / _GAZE_EASE_SEC
+    if phase < _ease and step > 0:
+        u = phase / _ease
         s = u * u * (3.0 - 2.0 * u)
         return ((t0 - _GAZE_DWELL_SEC) * (1.0 - s) + t0 * s
                 - _offset)
