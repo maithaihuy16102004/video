@@ -255,7 +255,7 @@ def _mix_audio_legacy(job_dir: Path, timeline_entries: list[dict],
         r = subprocess.run(
             ["ffmpeg", "-y", "-v", "error", "-f", "lavfi",
              "-i", f"anoisesrc=color=pink:"
-                   f"duration={span_end - span_start:.2f}",
+                   f"duration={span_end - span_start:.2f}:seed=20261112",
              "-af", "lowpass=f=800,volume=0.10",
              "-ac", "1", "-ar", "48000", str(rain_path)],
             capture_output=True, text=True, timeout=120)
@@ -382,8 +382,13 @@ def _synth_segment(spec: dict, duration: float, out_path: Path,
         fade_d = min(0.35, dur * 0.5)
         fade_st = max(0.0, dur - fade_d)
     edge = min(0.2, dur / 4.0)
+    # R17-D2: ffmpeg's anoisesrc defaults to a random seed, so
+    # every noise-based stem differed run to run. One fixed seed
+    # makes identical inputs render bit-identical stems; the
+    # specs' distinct filters keep the sounds distinct.
     fmt = {"dur": f"{dur:.3f}", "fade_st": f"{fade_st:.3f}",
-           "fade_d": f"{fade_d:.3f}", "edge": f"{edge:.3f}"}
+           "fade_d": f"{fade_d:.3f}", "edge": f"{edge:.3f}",
+           "seed": "20261112"}
     inputs: list[str] = []
     for lavfi in spec["inputs"]:
         inputs += ["-f", "lavfi", "-i", lavfi.format(**fmt)]

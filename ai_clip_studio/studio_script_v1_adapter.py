@@ -296,10 +296,10 @@ _COSTUME_FIELD_KEYS = (
     "COSTUME", "COSTUME_CIVILIAN", "COSTUME_MILITARY",
     "COSTUME_ADULT", "COSTUME_CHILD", "COSTUME_KING",
 )
-# A declared child (AGE < 14, no explicit scale) renders at 3/4
-# adult height -- the same scale_ratio mechanism as the Titan
-# scale variant, driven by the script's own AGE field. The head
-# ratio stays locked at 0.34; only the whole-figure height scales.
+# RETIRED in round 18 (R17-D2): a declared child used to get an
+# implicit 0.75 scale_ratio, which double-counted once R17-D13
+# put the template ratio into the render. Kept for reference;
+# nothing reads them anymore.
 CHILD_SCALE_RATIO = 0.75
 CHILD_AGE_MAX = 14
 
@@ -965,15 +965,13 @@ def _adapt_document(doc) -> tuple[dict, dict]:
                 and not isinstance(raw_scale, bool)
                 and SCALE_RATIO_MIN <= float(raw_scale) <= SCALE_RATIO_MAX):
             scale_value = float(raw_scale)
-        if scale_value is None and not (is_narrator or is_extra):
-            # Declared child, no explicit scale: 3/4 adult height.
-            age_match = re.search(r"\d+", _field_text(fields, "AGE"))
-            if age_match and 1 <= int(age_match.group(0)) < CHILD_AGE_MAX:
-                scale_value = CHILD_SCALE_RATIO
-                v1_notes.append(
-                    f"character {name!r}: AGE {age_match.group(0)} "
-                    f"-> child scale {CHILD_SCALE_RATIO} (no explicit "
-                    f"scale declared; head ratio stays locked)")
+        # Round 18 (R17-D2): NO implicit child scale. The old
+        # default (AGE < 14 -> 0.75) double-counted once R17-D13
+        # put the template ratio (child 400/560) into the render:
+        # children came out at 783 x 0.75 x 400/560 = 419
+        # instead of the designed 559. Child smallness is now
+        # the template ratio's job alone; an explicit
+        # scale_ratio trait still composes on top of it.
         if scale_value is not None and not (is_narrator or is_extra):
             height = int(round(SCALE_BASE_HEIGHT_PX * scale_value))
         else:
@@ -1029,6 +1027,7 @@ def _adapt_document(doc) -> tuple[dict, dict]:
             "render_traits": render_traits,
             "template": render_traits["template"],
             "body_variant": render_traits["body_variant"],
+            "stature": render_traits["stature"],
             "costume": render_traits["costume"],
             "hair_style": render_traits["hair_style"],
             "hair_color": render_traits["hair_color"],

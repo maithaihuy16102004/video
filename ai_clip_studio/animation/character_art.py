@@ -160,6 +160,11 @@ STYLE_LOCK = {
 
 VIEWS = ("front", "three_quarter", "profile", "back")
 
+# R16-2a: at or above this camera elevation (degrees) the head
+# renders from the top (hair crown, no face). Below it the face
+# still reads (high_angle is 32 deg; birds_eye is 62 deg).
+_TOP_VIEW_ELEV_DEG = 45.0
+
 # Ground kinds that bear grass (env "ground" dict). A grass
 # tuft draws only on these; every other ground gets the sketch
 # strokes alone (round 7 -- no tufts on cave rock or floors).
@@ -1081,7 +1086,7 @@ def _tapered_stroke(draw, points, widths, fill):
     draw.polygon(left + list(reversed(right)), fill=fill)
 
 
-def _draw_tail(draw, char, hip, f, ink, view, H):
+def _draw_tail(draw, char, hip, f, ink, view, H, y_scale=1.0):
     """Species tail behind the hips (generic visual profile).
 
     Called BEFORE the torso so the tail sits behind the body. Every
@@ -1097,48 +1102,55 @@ def _draw_tail(draw, char, hip, f, ink, view, H):
     hx, hy = hip
     back = -float(f)
     root = (hx - back * 0.01 * H, hy)
+    # Elevation foreshortening (R16-2a): y-offsets from the hip
+    # scale by y_scale (cos of the camera elevation); x is
+    # untouched. y_scale == 1.0 is the previous drawing exactly.
+    def _S(pts):
+        if y_scale == 1.0:
+            return pts
+        return [(x, hy + (y - hy) * y_scale) for x, y in pts]
 
     def _w(*fractions):
         return [f * H for f in fractions]
 
     if style == "monkey":
-        _tapered_stroke(draw, [
+        _tapered_stroke(draw, _S([
             root,
             (hx + back * 0.10 * H, hy + 0.10 * H),
             (hx + back * 0.20 * H, hy + 0.06 * H),
             (hx + back * 0.24 * H, hy - 0.05 * H),
             (hx + back * 0.18 * H, hy - 0.12 * H),
-        ], _w(0.045, 0.040, 0.034, 0.026, 0.014), ink)
+        ]), _w(0.045, 0.040, 0.034, 0.026, 0.014), ink)
     elif style == "curled":
-        _tapered_stroke(draw, [
+        _tapered_stroke(draw, _S([
             root,
             (hx + back * 0.10 * H, hy + 0.08 * H),
             (hx + back * 0.17 * H, hy + 0.02 * H),
             (hx + back * 0.19 * H, hy - 0.04 * H),
-        ], _w(0.044, 0.036, 0.026, 0.014), ink)
+        ]), _w(0.044, 0.036, 0.026, 0.014), ink)
     elif style == "bushy":
         # A plume: the ribbon widens toward the tip instead of ending in
         # a detached ball.
-        _tapered_stroke(draw, [
+        _tapered_stroke(draw, _S([
             root,
             (hx + back * 0.10 * H, hy + 0.07 * H),
             (hx + back * 0.17 * H, hy + 0.10 * H),
             (hx + back * 0.21 * H, hy + 0.07 * H),
-        ], _w(0.044, 0.058, 0.070, 0.030), ink)
+        ]), _w(0.044, 0.058, 0.070, 0.030), ink)
     elif style == "tuft":
-        end = (hx + back * 0.13 * H, hy + 0.09 * H)
-        _tapered_stroke(draw, [root, end], _w(0.044, 0.020), ink)
+        end = (hx + back * 0.13 * H, hy + 0.09 * H * y_scale)
+        _tapered_stroke(draw, _S([root, end]), _w(0.044, 0.020), ink)
         for dy in (-0.05, -0.01, 0.03):
             draw.line([end, (end[0] + back * 0.06 * H,
-                             end[1] + dy * H)],
+                             end[1] + dy * H * y_scale)],
                       fill=ink, width=max(3, int(0.012 * H)))
     else:  # "long"
-        _tapered_stroke(draw, [
+        _tapered_stroke(draw, _S([
             root,
             (hx + back * 0.10 * H, hy + 0.09 * H),
             (hx + back * 0.19 * H, hy + 0.03 * H),
             (hx + back * 0.22 * H, hy - 0.05 * H),
-        ], _w(0.044, 0.036, 0.026, 0.012), ink)
+        ]), _w(0.044, 0.036, 0.026, 0.012), ink)
 
 
 def _draw_ears(draw, char, hx, hy, r, f, view, ink):
@@ -1262,9 +1274,71 @@ def _draw_face_markings(draw, char, hx, hy, r, face_dx, f, ink):
                           fill=ink, width=max(3, int(0.013 * H)))
 
 
+
+def _draw_head_top(draw, char, hx, hy, r, ink, elev_sin, out_w):
+    """Head seen from above (R16-2a, camera elevation >=
+    _TOP_VIEW_ELEV_DEG): the hair crown, never a face. The disc IS
+    the hair -- from above, the crown covers the head -- with a
+    crown whorl for the part, the bun / tuft / long-hair traits
+    carried over in top-view form, and a hat rendered as a brim
+    disc + dome (a horizontal disc at elevation reads as an
+    ellipse with minor/major = sin(elevation)). Ears, horns,
+    beard, glasses and face features are occluded from above and
+    draw nothing. Known gap: horned/crowned characters lose the
+    horns in top view (no top projection for horns yet)."""
+    hair_c = _hex(getattr(char, "hair_color", None) or ink)
+    style = getattr(char, "hair_style", None) or "short"
+    # Long hair drapes toward the body (drawn +y): an extension
+    # tucked UNDER the disc, so it reads as hair over the
+    # shoulders instead of a second disc.
+    if style == "long":
+        draw.ellipse([hx - 0.85 * r, hy - 0.10 * r,
+                      hx + 0.85 * r, hy + 1.10 * r],
+                     fill=hair_c, outline=ink,
+                     width=max(2, int(out_w * 0.6)))
+    draw.ellipse([hx - r, hy - r, hx + r, hy + r],
+                 fill=hair_c, outline=ink, width=int(out_w))
+    # Crown whorl: a short arc at the centre. It needs contrast
+    # against the hair: cream on dark hair, ink on light hair.
+    _whorl = (_hex(STYLE_LOCK["face_fill"])
+              if sum(hair_c) < 300 else ink)
+    _wr = 0.22 * r
+    # A full ring: an arc reads as a mouth on the disc, a ring
+    # reads as the crown swirl from any angle.
+    draw.ellipse([hx - _wr, hy - _wr, hx + _wr, hy + _wr],
+                 outline=_whorl, width=max(2, int(out_w * 0.4)))
+    if style == "tied":
+        # The bun sits on the crown: a filled knot at the centre.
+        _br = 0.26 * r
+        draw.ellipse([hx - _br, hy - _br, hx + _br, hy + _br],
+                     fill=hair_c, outline=ink,
+                     width=max(2, int(0.02 * float(char.H))))
+    elif style == "tuft":
+        for _dx, _dy in ((-0.18, -0.18), (0.0, -0.24),
+                         (0.18, -0.18)):
+            draw.line([(hx, hy), (hx + _dx * r, hy + _dy * r)],
+                      fill=_whorl,
+                      width=max(3, int(0.006 * float(char.H))))
+    # Hat from above: brim disc + dome, both foreshortened by
+    # sin(elevation). The hat hides the hair, as it should.
+    _hat = getattr(char, "hat", None)
+    if _hat and _hat != "none":
+        _hat_c = _hex(getattr(char, "hat_color", None) or ink)
+        _brx, _bry = 1.15 * r, 1.15 * r * elev_sin
+        draw.ellipse([hx - _brx, hy - _bry, hx + _brx, hy + _bry],
+                     fill=_hat_c, outline=ink,
+                     width=max(2, int(out_w * 0.6)))
+        # The dome is a darker shade of the brim: two concentric
+        # discs in one flat colour read as a target, not a hat.
+        _drx, _dry = 0.62 * r, 0.62 * r * elev_sin
+        draw.ellipse([hx - _drx, hy - _dry, hx + _drx, hy + _dry],
+                     fill=_shade(_hat_c, 0.78), outline=ink,
+                     width=max(2, int(out_w * 0.6)))
+
 def draw_character_v4(draw, char, expression="neutral", view="profile",
                       palette=None, expression_blend=None,
-                      gaze=None, hand_grips=None, ground_kind=None):
+                      gaze=None, hand_grips=None, ground_kind=None,
+                      elevation_deg=None):
     """Draw a PREMIUM_STICKMAN v4 character from ``char.joints()``.
 
     draw: PIL ImageDraw (ideally ``ImageDraw.Draw(img, "RGBA")``).
@@ -1288,9 +1362,17 @@ def draw_character_v4(draw, char, expression="neutral", view="profile",
       grounding is the renderer's soft shadow). None = the
       previous drawing exactly (tuft drawn), so standalone
       callers keep the reference look.
+    elevation_deg: the executed camera elevation in degrees
+      (R16-2a). The drawn figure foreshortens by
+      cos(elevation) toward the feet, matching the pitched
+      environment; at or above _TOP_VIEW_ELEV_DEG the head
+      renders from the top (hair crown, no face). None = 0 =
+      the previous drawing exactly.
     Returns the joint map from ``char.joints()`` (the rig's own map --
-    the 3/4 view compresses the DRAWN x positions but does not rewrite
-    the joint map, so bone-length checks still pass on it).
+    the 3/4 view compresses the DRAWN x positions, and the
+    elevation projection compresses DRAWN y positions, but
+    neither rewrites the joint map, so bone-length checks
+    still pass on it).
     """
     if view not in VIEWS:
         view = "profile"
@@ -1317,9 +1399,40 @@ def draw_character_v4(draw, char, expression="neutral", view="profile",
     hip = J["hip"]
     shoulder = J["shoulder"]
     head = J["head"]
+    # Round 19 (front-view lean): the rig's x-axis is the
+    # sagittal plane, so in front view a forward lean must
+    # not slide the upper body sideways -- the head drops
+    # and the torso compresses vertically (the y values
+    # already carry the cos(lean) foreshortening). The head
+    # keeps its lateral sway. Drawn-space only (the _squash
+    # precedent): J is untouched, and the other views keep
+    # the exact previous drawing.
+    if view == "front":
+        shoulder = (hip[0], shoulder[1])
+        head = (hip[0] + float(
+            char.pose.get("head_sway_x", 0.0) or 0.0), head[1])
     limb_w = limb_width(char)
     out_w = outline_width(char)
     ws = float(getattr(char, "width_scale", 1.0))
+
+    # --- camera elevation (R16-2a): the environment pitches
+    # with the camera, so the character must foreshorten too --
+    # a billboard standing frontal under a 62 deg camera is
+    # the L02-D1 defect. The projection is DRAWN-space only
+    # (the _squash precedent): every drawn point's height
+    # above the character's ground line scales by
+    # cos(elevation) toward the feet, and the returned joint
+    # map is untouched. The figure stays upright (feet
+    # grounded, head above feet) -- the reference draws
+    # top-down figures upright-foreshortened, and a
+    # toward-horizon head shift without the full environment
+    # projection would break foot grounding.
+    _elev = 0.0 if elevation_deg is None else float(elevation_deg)
+    _elev = max(-90.0, min(90.0, _elev))
+    _cos = math.cos(math.radians(_elev))
+    _sin = math.sin(math.radians(_elev))
+    _top_view = _elev >= _TOP_VIEW_ELEV_DEG
+    _ground_ref = max(J["foot_l"][1], J["foot_r"][1])
 
     # --- 3/4 view: the body turns toward the viewer. Compress every
     # drawn x position toward the hip by 0.80 (the head stays a circle
@@ -1332,7 +1445,32 @@ def draw_character_v4(draw, char, expression="neutral", view="profile",
             return pt
         return (hip[0] + (pt[0] - hip[0]) * 0.80, pt[1])
 
-    hip_d, shoulder_d, head_d = _squash(hip), _squash(shoulder), _squash(head)
+    def _elev_pt(pt):
+        # Elevation only (no 3/4 squash): for points already
+        # in drawn space (tuft tips, cane foot).
+        if _cos >= 1.0:
+            return pt
+        return (pt[0], _ground_ref + (pt[1] - _ground_ref) * _cos)
+
+    # Round 19 (squash/stretch): the drawn figure compresses
+    # toward the ground line by (1 - sq) and widens around the
+    # hip by (1 + 0.6*sq). The head stays a rigid circle and
+    # rides the squash (its centre is a projected point), so
+    # the 0.34 head ratio holds at every squash value. sq = 0
+    # (the default) is the exact previous drawing.
+    _sq = max(-0.25, min(0.35, float(
+        char.pose.get("squash", 0.0) or 0.0)))
+
+    def _impact_pt(pt):
+        if _sq == 0.0:
+            return pt
+        return (hip[0] + (pt[0] - hip[0]) * (1.0 + 0.6 * _sq),
+                _ground_ref + (pt[1] - _ground_ref) * (1.0 - _sq))
+
+    def _project(pt):
+        return _impact_pt(_elev_pt(_squash(pt)))
+
+    hip_d, shoulder_d, head_d = _project(hip), _project(shoulder), _project(head)
 
     # --- limbs: front view is symmetric, other views use the rig -------
     if view == "front":
@@ -1348,9 +1486,11 @@ def draw_character_v4(draw, char, expression="neutral", view="profile",
             "hand_r": (shoulder[0] + 0.11 * H, shoulder[1] + char.u_arm + char.l_arm),
         }
     else:
-        ground_y = max(J["foot_l"][1], J["foot_r"][1])
-        limbs = {k: _squash(J[k]) for k in ("knee_l", "foot_l", "knee_r", "foot_r",
+        ground_y = _ground_ref
+        limbs = {k: J[k] for k in ("knee_l", "foot_l", "knee_r", "foot_r",
                                            "elbow_l", "hand_l", "elbow_r", "hand_r")}
+
+    limbs = {k: _project(v) for k, v in limbs.items()}
 
     # F3: separate the drawn hands when they hang close (see
     # _separate_close_hands); the rig map J is untouched.
@@ -1381,12 +1521,12 @@ def draw_character_v4(draw, char, expression="neutral", view="profile",
         for dx, dy in ((-0.030, -0.052), (-0.016, -0.068),
                        (0.0, -0.056), (0.014, -0.066),
                        (0.028, -0.046)):
-            draw.line([(tuft_x, tuft_y),
-                       (tuft_x + dx * H, tuft_y + dy * H)],
+            _tip = _elev_pt((tuft_x + dx * H, tuft_y + dy * H))
+            draw.line([(tuft_x, tuft_y), _tip],
                       fill=ink, width=2)
     # Species tail: BEHIND the body, so it is drawn before the legs and
     # torso ("none" draws nothing).
-    _draw_tail(draw, char, hip_d, f, ink, view, H)
+    _draw_tail(draw, char, hip_d, f, ink, view, H, y_scale=_cos)
 
     # --- legs: clean uniform lines + flat structured feet --------------
     # F1: the far limbs are LIGHTENED ink, not darkened. The old
@@ -1403,7 +1543,7 @@ def draw_character_v4(draw, char, expression="neutral", view="profile",
                limb_w * 0.96, col)
         fx, fy = limbs[f"foot_{side}"]
         fw = STYLE_LOCK["foot_w_frac"] * H * ws
-        fh = STYLE_LOCK["foot_h_frac"] * H
+        fh = STYLE_LOCK["foot_h_frac"] * H * _cos
         # v4: feet point OUTWARD in front view (left foot left, right
         # foot right -- the reference), toward facing in side views.
         if view == "front":
@@ -1428,6 +1568,12 @@ def draw_character_v4(draw, char, expression="neutral", view="profile",
         # narrower as well as the limbs sitting closer in.
         w_top *= 0.80
         w_bot *= 0.80
+    if getattr(char, "body_variant", "standard") == "sturdy":
+        # R17-D9: a stocky build reads broad-shouldered. The
+        # reference taper (narrow shoulders, wider hips) is
+        # inverted for sturdy bodies so the shoulders carry
+        # the width; slim/standard keep the reference taper.
+        w_top, w_bot = w_bot, w_top
     draw.polygon([
         (shoulder_d[0] + px * w_top, shoulder_d[1] + py * w_top),
         (shoulder_d[0] - px * w_top, shoulder_d[1] - py * w_top),
@@ -1437,7 +1583,10 @@ def draw_character_v4(draw, char, expression="neutral", view="profile",
     # Costume "dress": the torso EXTENDS into an A-line to mid-shin --
     # same colour, continuous with the torso, never a glued block.
     if getattr(char, "costume", "none") == "dress":
-        hem_y = hip_d[1] + 0.20 * H
+        # Hem point projected once from rig space (elevation
+        # setup above): extending the drawn hip downward
+        # would double-apply the foreshortening.
+        hem_y = _project((hip[0], hip[1] + 0.20 * H))[1]
         hem_half = 0.085 * H * ws
         draw.polygon([
             (hip_d[0] - px * w_bot, hip_d[1] - py * w_bot),
@@ -1451,7 +1600,7 @@ def draw_character_v4(draw, char, expression="neutral", view="profile",
     # (not just the colour), so a uniformed figure reads as a
     # different character with no colour and no face.
     if getattr(char, "costume", "none") == "uniform":
-        skirt_y = hip_d[1] + 0.13 * H
+        skirt_y = _project((hip[0], hip[1] + 0.13 * H))[1]
         skirt_half = 0.075 * H * ws
         draw.polygon([
             (hip_d[0] - px * w_bot, hip_d[1] - py * w_bot),
@@ -1503,7 +1652,18 @@ def draw_character_v4(draw, char, expression="neutral", view="profile",
         _ax, _ay = -ux, -uy  # down the torso
         _top = (shoulder_d[0] + (hip_d[0] - shoulder_d[0]) * 0.18,
                 shoulder_d[1] + (hip_d[1] - shoulder_d[1]) * 0.18)
-        _bot = (hip_d[0] + _ax * 0.16 * H, hip_d[1] + _ay * 0.16 * H)
+        if _cos < 1.0:
+            # Project the rig-space apron bottom once: the
+            # drawn axis is already foreshortened, so
+            # extending along it would double-apply the
+            # projection.
+            _rx, _ry = hip[0] - shoulder[0], hip[1] - shoulder[1]
+            _rl = math.hypot(_rx, _ry) or 1.0
+            _bot = _project((hip[0] + _rx / _rl * 0.16 * H,
+                             hip[1] + _ry / _rl * 0.16 * H))
+        else:
+            _bot = (hip_d[0] + _ax * 0.16 * H,
+                    hip_d[1] + _ay * 0.16 * H)
         _w_top = (w_top + (w_bot - w_top) * 0.18) * 0.80
         _w_bot = w_bot * 0.92
         draw.polygon([
@@ -1526,7 +1686,8 @@ def draw_character_v4(draw, char, expression="neutral", view="profile",
     # at the top; the hand is drawn over it so contact reads clearly.
     if getattr(char, "cane", False):
         hx0, hy0 = limbs["hand_r"]
-        draw.line([(hx0, hy0), (hx0 + f * 0.02 * H, ground_y)],
+        draw.line([(hx0, hy0),
+                   _elev_pt((hx0 + f * 0.02 * H, ground_y))],
                   fill=ink, width=max(3, int(limb_w * 0.7)))
         draw.arc([hx0 - 0.02 * H, hy0 - 0.02 * H,
                   hx0 + 0.02 * H, hy0 + 0.02 * H],
@@ -1574,53 +1735,74 @@ def draw_character_v4(draw, char, expression="neutral", view="profile",
 
     # --- head ------------------------------------------------------------
     hx, hy = head_d
-    if getattr(char, "hair_style", None) == "long" and view != "back":
-        _draw_hair(draw, char, hx, hy, view, ink, part="back")
-    draw.ellipse([hx - r, hy - r, hx + r, hy + r], fill=face_fill,
-                 outline=ink, width=int(out_w))
-    _draw_ears(draw, char, hx, hy, r, f, view, ink)
-    _draw_hair(draw, char, hx, hy, view, ink, part="cap")
-    _draw_horns(draw, char, hx, hy, r, view, ink, f)
-    # Hat: brim line + dome, same language. The dome/brim use the
-    # script-named hat colour when one exists (round-3 system 3) --
-    # an orange hat reads orange -- with an ink outline so a light
-    # colour still reads against the sky. No colour -> ink, exactly
-    # the previous drawing.
-    _hat = getattr(char, "hat", None)
-    if _hat and _hat != "none":
-        _hat_c = _hex(getattr(char, "hat_color", None) or ink)
-        draw.line([(hx - r * 1.15, hy - r * 0.95),
-                   (hx + r * 1.15, hy - r * 0.95)],
-                  fill=_hat_c, width=max(3, int(out_w * 0.8)))
-        # The pieslice diameter sits at the box CENTRE, so the
-        # box bottom must be hy-0.15r for the dome's flat edge to
-        # land on the brim line (hy-0.95r). The old box bottom
-        # (hy-0.85r) put the diameter at hy-1.30r — a 0.35r gap
-        # with the dome floating above the brim.
-        draw.pieslice([hx - r * 0.62, hy - r * 1.75,
-                       hx + r * 0.62, hy - r * 0.15],
-                      180, 360, fill=_hat_c, outline=ink,
-                      width=max(2, int(out_w * 0.6)))
-    # Glasses (elderly): two thin circles + bridge, same ink.
-    if getattr(char, "glasses", False) and view != "back":
-        face_dx = {"front": 0.0, "three_quarter": 0.5,
-                   "profile": 1.0}[view]
-        eye_dx = STYLE_LOCK["eye_dx_frac_of_r"]
-        _ex_n, _ex_f, _fc = _face_eye_xs(hx, r, f, face_dx)
-        for ex in (_ex_n, _ex_f):
-            gr = 0.14 * r
-            draw.ellipse([ex - gr, hy - 0.05 * r - gr,
-                          ex + gr, hy - 0.05 * r + gr],
-                         outline=ink, width=2)
-    if view != "back":
-        face_dx = {"front": 0.0, "three_quarter": 0.5,
-                   "profile": 1.0}[view]
-        _gaze = gaze or (0.0, 0.0)
-        _gaze = (max(-0.15, min(0.15, float(_gaze[0]))),
-                 max(-0.15, min(0.15, float(_gaze[1]))))
-        _draw_face(draw, char, hx, hy, view, face_dx, params, ink, pal,
-                   gaze=_gaze)
-        _draw_beard(draw, char, hx, hy, r, view, ink, out_w)
+    if _top_view:
+        # The camera looks down on the crown: hair, never a face.
+        _draw_head_top(draw, char, hx, hy, r, ink, _sin, out_w)
+    else:
+        if getattr(char, "hair_style", None) == "long" and view != "back":
+            _draw_hair(draw, char, hx, hy, view, ink, part="back")
+        draw.ellipse([hx - r, hy - r, hx + r, hy + r], fill=face_fill,
+                     outline=ink, width=int(out_w))
+        _draw_ears(draw, char, hx, hy, r, f, view, ink)
+        _draw_hair(draw, char, hx, hy, view, ink, part="cap")
+        _draw_horns(draw, char, hx, hy, r, view, ink, f)
+        # Hat: brim line + dome, same language. The dome/brim use the
+        # script-named hat colour when one exists (round-3 system 3) --
+        # an orange hat reads orange -- with an ink outline so a light
+        # colour still reads against the sky. No colour -> ink, exactly
+        # the previous drawing.
+        _hat = getattr(char, "hat", None)
+        if _hat and _hat != "none":
+            _hat_c = _hex(getattr(char, "hat_color", None) or ink)
+            if _hat == "straw":
+                # R17-D9: a wide-brim straw hat -- a flat brim
+                # slab far wider than the head plus a low
+                # flat-topped crown, distinct from the domed
+                # cap/bowler. The brim reads at full-frame
+                # distance; the crown sits ON the brim line.
+                draw.ellipse([hx - r * 1.62, hy - r * 1.08,
+                              hx + r * 1.62, hy - r * 0.82],
+                             fill=_hat_c, outline=ink,
+                             width=max(2, int(out_w * 0.6)))
+                draw.polygon([
+                    (hx - r * 0.52, hy - r * 0.95),
+                    (hx + r * 0.52, hy - r * 0.95),
+                    (hx + r * 0.44, hy - r * 1.50),
+                    (hx - r * 0.44, hy - r * 1.50),
+                ], fill=_shade(_hat_c, 0.88), outline=ink)
+            else:
+                draw.line([(hx - r * 1.15, hy - r * 0.95),
+                           (hx + r * 1.15, hy - r * 0.95)],
+                          fill=_hat_c, width=max(3, int(out_w * 0.8)))
+                # The pieslice diameter sits at the box CENTRE, so the
+                # box bottom must be hy-0.15r for the dome's flat edge to
+                # land on the brim line (hy-0.95r). The old box bottom
+                # (hy-0.85r) put the diameter at hy-1.30r — a 0.35r gap
+                # with the dome floating above the brim.
+                draw.pieslice([hx - r * 0.62, hy - r * 1.75,
+                               hx + r * 0.62, hy - r * 0.15],
+                              180, 360, fill=_hat_c, outline=ink,
+                              width=max(2, int(out_w * 0.6)))
+        # Glasses (elderly): two thin circles + bridge, same ink.
+        if getattr(char, "glasses", False) and view != "back":
+            face_dx = {"front": 0.0, "three_quarter": 0.5,
+                       "profile": 1.0}[view]
+            eye_dx = STYLE_LOCK["eye_dx_frac_of_r"]
+            _ex_n, _ex_f, _fc = _face_eye_xs(hx, r, f, face_dx)
+            for ex in (_ex_n, _ex_f):
+                gr = 0.14 * r
+                draw.ellipse([ex - gr, hy - 0.05 * r - gr,
+                              ex + gr, hy - 0.05 * r + gr],
+                             outline=ink, width=2)
+        if view != "back":
+            face_dx = {"front": 0.0, "three_quarter": 0.5,
+                       "profile": 1.0}[view]
+            _gaze = gaze or (0.0, 0.0)
+            _gaze = (max(-0.15, min(0.15, float(_gaze[0]))),
+                     max(-0.15, min(0.15, float(_gaze[1]))))
+            _draw_face(draw, char, hx, hy, view, face_dx, params, ink, pal,
+                       gaze=_gaze)
+            _draw_beard(draw, char, hx, hy, r, view, ink, out_w)
     return J
 
 

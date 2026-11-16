@@ -34,7 +34,7 @@ TEMPLATES = ("male", "female", "child", "elderly")
 BODY_VARIANTS = ("slim", "standard", "sturdy")
 COSTUME_GARMENTS = ("none", "dress", "uniform")
 HAIR_STYLES = ("short", "long", "tuft", "side_part", "tied", "none")
-HATS = ("none", "bowler", "cap")
+HATS = ("none", "bowler", "cap", "straw")
 BEARD_STYLES = ("none", "full")
 MOUSTACHE_STYLES = ("none", "toothbrush", "handlebar", "full")
 LOCATION_KEYWORDS = (
@@ -80,6 +80,7 @@ PROP_KINDS = frozenset({
     "bag", "key", "book", "flower", "pen", "generic",
     "bolt", "hammer", "trident", "helmet", "sword", "staff",
     "shield", "crown", "ring", "hat", "chain", "stone", "boulder",
+    "lock",
 })
 
 # The sixteen keys of animation/primitives.PRIMITIVES (authoritative
@@ -95,6 +96,7 @@ PRIMITIVE_NAMES = frozenset({
     "raise_hand", "react_event", "sign_document", "sit_at_desk",
     "stand_from_chair", "walk_mud", "write_on_paper", "seated_idle",
     "crouch", "receive_prop", "shield", "present_prop",
+    "insert_key",
 })
 
 # Face-system expression names (animation/character_art.EXPRESSIONS).
@@ -346,6 +348,12 @@ _GLASSES_MARKERS = ("đeo kính", "kính mắt", "kính cận", "kính râm",
 # Standalone "kính" is NOT a glasses marker: it is also a respectful
 # form of address ("kính thưa"). Only compounds count.
 _HAT_MARKERS = ("bowler", "mũ nồi", "mũ quả dưa", "mũ phớt")
+# R17-D9: a straw hat is named by its material phrase, not by a
+# colour word -- "Mũ rơm rộng vành" names no colour, so the
+# segment rule never fired and the hat vanished. The phrase is
+# specific enough to imply wearing, like the bowler markers.
+_STRAW_HAT_MARKERS = ("mũ rơm", "mũ cói", "straw hat")
+_STRAW_HAT_COLOR = "#D2B48C"
 
 # One-eye characters (general face trait): an explicit EYES field wins;
 # otherwise a lexical cue in the character's own text. "cyclops" is a
@@ -795,6 +803,30 @@ def _body_variant(scan_text: str, body_type_text: str) -> str:
     return "standard"
 
 
+_SMALL_STATURE_MARKERS = ("small", "nhỏ", "thấp", "lùn", "petite",
+                           "dáng nhỏ", "bé nhỏ", "short stature")
+_TALL_STATURE_MARKERS = ("tall", "cao lớn", "cao", "khổng lồ", "to cao")
+
+
+def _stature(body_type_text: str, template: str = "") -> float:
+    """Height scale from the BODY_TYPE field only (R17-D13).
+
+    The field is ABOUT the body, so bare words are safe here --
+    the whole-scan rules must never see them ("short black hair"
+    is not a short character). Small bodies render 15% shorter,
+    tall bodies 8% taller; the template scale composes with this
+    in the renderer. A "small" CHILD is the template default, not
+    an extra deviation -- the child template already encodes
+    smallness, so small markers do not stack on it. Default 1.0.
+    """
+    text = _norm(body_type_text or "")
+    if _has_any_word(text, _SMALL_STATURE_MARKERS):
+        return 1.0 if template == "child" else 0.85
+    if _has_any_word(text, _TALL_STATURE_MARKERS):
+        return 1.08
+    return 1.0
+
+
 def _template(scan_text: str, gender: str, fields) -> str:
     if _has_any_word(scan_text, _ELDERLY_MARKERS):
         return "elderly"
@@ -854,6 +886,8 @@ def derive_render_traits(name: str, role: str, appearance: str,
         _segments.append(appearance)
     if _has_any_word(scan, _HAT_MARKERS):
         hat_kind, hat_color = "bowler", None
+    elif _has_any_word(scan, _STRAW_HAT_MARKERS):
+        hat_kind, hat_color = "straw", _STRAW_HAT_COLOR
     else:
         hat_kind, hat_color = _hat_from_segments(_segments)
     scarf_color = _scarf_color_from_segments(_segments)
@@ -890,6 +924,7 @@ def derive_render_traits(name: str, role: str, appearance: str,
         fields=fields, scan_text=scan, who=name or "character")
     if notes is not None:
         notes.extend(profile_notes)
+    _tmpl = _template(scan, effective_gender, fields)
     return {
         "visual_profile": visual_profile,
         "description": " ".join(
@@ -897,9 +932,10 @@ def derive_render_traits(name: str, role: str, appearance: str,
         "voice_hint": derive_voice_hint(
             name, role, appearance, voice_style,
             gender=effective_gender),
-        "template": _template(scan, effective_gender, fields),
+        "template": _tmpl,
         "body_variant": _body_variant(
             scan, _field_text(fields, "BODY_TYPE")),
+        "stature": _stature(_field_text(fields, "BODY_TYPE"), _tmpl),
         "costume": costume,
         "hair_style": _hair_style(hair_scan),
         "hair_color": _hair_color_from_text(hair_field_text),
@@ -1029,6 +1065,7 @@ PROP_KEYWORDS: dict[str, tuple[str, ...]] = {
     "ticket": ("ticket", "vé xe", "vé"),
     "cup": ("cup", "mug", "cốc", "tách", "chén", "ly"),
     "key": ("chìa khóa", "chìa khoá", "key"),
+    "lock": ("ổ khóa", "ổ khoá", "padlock", "lock", "khóa"),
     "flower": ("flower", "bó hoa", "bouquet", "hoa"),
     "bag": ("backpack", "ba lô", "túi xách", "túi thư", "mail bag",
             "túi", "cặp", "giỏ", "bag"),

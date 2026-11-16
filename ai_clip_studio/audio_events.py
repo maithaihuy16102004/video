@@ -282,7 +282,7 @@ SYNTHESIS_MAP: dict[str, dict[str, Any]] = {
         "base_gain_db": -12.0,
         "method": "synthesised: white-noise burst (bandpass 700 Hz) "
                   "+ 140 Hz thump (ffmpeg lavfi)",
-        "inputs": ["anoisesrc=color=white:duration={dur}",
+        "inputs": ["anoisesrc=color=white:duration={dur}:seed={seed}",
                    "sine=frequency=140:duration={dur}"],
         "filter": "[0:a]bandpass=f=700:width_type=h:width=500,"
                   "afade=t=out:st={fade_st}:d={fade_d},volume=0.9[n];"
@@ -300,7 +300,7 @@ SYNTHESIS_MAP: dict[str, dict[str, Any]] = {
                    "sine=frequency=1244:duration={dur}",
                    "sine=frequency=2093:duration={dur}",
                    "sine=frequency=3520:duration={dur}",
-                   "anoisesrc=color=white:duration={dur}"],
+                   "anoisesrc=color=white:duration={dur}:seed={seed}"],
         "filter": "[0:a]afade=t=out:st=0:d={dur},volume=0.9[p0];"
                   "[1:a]afade=t=out:st=0:d={dur},volume=0.55[p1];"
                   "[2:a]afade=t=out:st=0:d={dur},volume=0.35[p2];"
@@ -314,7 +314,7 @@ SYNTHESIS_MAP: dict[str, dict[str, Any]] = {
         "base_gain_db": -12.0,
         "method": "synthesised: pink-noise swell (bandpass 350 Hz, "
                   "soft door-movement noise, ffmpeg lavfi)",
-        "inputs": ["anoisesrc=color=pink:duration={dur}"],
+        "inputs": ["anoisesrc=color=pink:duration={dur}:seed={seed}"],
         "filter": "[0:a]bandpass=f=350:width_type=h:width=300,"
                   "afade=t=in:st=0:d=0.25,"
                   "afade=t=out:st={fade_st}:d={fade_d},volume=0.5[out]",
@@ -324,7 +324,7 @@ SYNTHESIS_MAP: dict[str, dict[str, Any]] = {
         "base_gain_db": -14.0,
         "method": "synthesised: white-noise rustle (highpass 1800 Hz, "
                   "bandpass 4500 Hz, ffmpeg lavfi)",
-        "inputs": ["anoisesrc=color=white:duration={dur}"],
+        "inputs": ["anoisesrc=color=white:duration={dur}:seed={seed}"],
         "filter": "[0:a]highpass=f=1800,"
                   "bandpass=f=4500:width_type=h:width=2500,"
                   "afade=t=in:st=0:d=0.05,"
@@ -335,7 +335,7 @@ SYNTHESIS_MAP: dict[str, dict[str, Any]] = {
         "base_gain_db": -16.0,
         "method": "synthesised: soft cloth/leather rustle "
                   "(bandpass 2500 Hz noise, ffmpeg lavfi)",
-        "inputs": ["anoisesrc=color=white:duration={dur}"],
+        "inputs": ["anoisesrc=color=white:duration={dur}:seed={seed}"],
         "filter": "[0:a]bandpass=f=2500:width_type=h:width=1800,"
                   "afade=t=in:st=0:d=0.05,"
                   "afade=t=out:st={fade_st}:d={fade_d},volume=0.5[out]",
@@ -345,7 +345,7 @@ SYNTHESIS_MAP: dict[str, dict[str, Any]] = {
         "base_gain_db": -18.0,
         "method": "synthesised: soft writing scratch (highpassed "
                   "noise with 6 Hz tremolo, ffmpeg lavfi)",
-        "inputs": ["anoisesrc=color=white:duration={dur}"],
+        "inputs": ["anoisesrc=color=white:duration={dur}:seed={seed}"],
         "filter": "[0:a]highpass=f=2500,tremolo=f=6:d=0.6,"
                   "afade=t=in:st=0:d=0.05,"
                   "afade=t=out:st={fade_st}:d={fade_d},volume=0.35[out]",
@@ -357,8 +357,8 @@ SYNTHESIS_MAP: dict[str, dict[str, Any]] = {
                   "(gated bandpassed noise bursts at 11 Hz + a "
                   "sharp 50 ms transient, ffmpeg lavfi) — not a "
                   "recorded crack",
-        "inputs": ["anoisesrc=color=white:duration={dur}",
-                   "anoisesrc=color=white:duration={dur}"],
+        "inputs": ["anoisesrc=color=white:duration={dur}:seed={seed}",
+                   "anoisesrc=color=white:duration={dur}:seed={seed}"],
         "filter": "[0:a]bandpass=f=2800:width_type=h:width=2000,"
                   "tremolo=f=11:d=0.85,"
                   "afade=t=out:st={fade_st}:d={fade_d},volume=0.9[n];"
@@ -372,7 +372,7 @@ SYNTHESIS_MAP: dict[str, dict[str, Any]] = {
         "method": "synthesised: fire-crackle bed (bandpassed "
                   "noise gated at 7 Hz, ffmpeg lavfi) — not a "
                   "recorded fire",
-        "inputs": ["anoisesrc=color=pink:duration={dur}"],
+        "inputs": ["anoisesrc=color=pink:duration={dur}:seed={seed}"],
         "filter": "[0:a]bandpass=f=3000:width_type=h:width=2500,"
                   "tremolo=f=7:d=0.7,volume=0.14[out]",
     },
@@ -393,7 +393,7 @@ SYNTHESIS_MAP: dict[str, dict[str, Any]] = {
         "base_gain_db": -10.0,
         "method": "synthesised: impact burst (bandpass 500 Hz noise) "
                   "+ 90 Hz thump (ffmpeg lavfi)",
-        "inputs": ["anoisesrc=color=white:duration={dur}",
+        "inputs": ["anoisesrc=color=white:duration={dur}:seed={seed}",
                    "sine=frequency=90:duration={dur}"],
         "filter": "[0:a]bandpass=f=500:width_type=h:width=400,"
                   "afade=t=out:st={fade_st}:d={fade_d},volume=0.9[n];"
@@ -406,7 +406,7 @@ SYNTHESIS_MAP: dict[str, dict[str, Any]] = {
         "method": "synthesised: single soft footstep (85 Hz thump + "
                   "lowpassed noise, ffmpeg lavfi)",
         "inputs": ["sine=frequency=85:duration={dur}",
-                   "anoisesrc=color=white:duration={dur}"],
+                   "anoisesrc=color=white:duration={dur}:seed={seed}"],
         "filter": "[0:a]afade=t=out:st=0:d={fade_d},volume=0.8[t];"
                   "[1:a]lowpass=f=300,"
                   "afade=t=out:st=0:d={fade_d},volume=0.4[n];"
@@ -418,7 +418,7 @@ SYNTHESIS_MAP: dict[str, dict[str, Any]] = {
         "method": "synthesised: soft collective footsteps (lowpassed "
                   "noise + 70 Hz pulse at 1.8 Hz march cadence, "
                   "ffmpeg lavfi)",
-        "inputs": ["anoisesrc=color=pink:duration={dur}",
+        "inputs": ["anoisesrc=color=pink:duration={dur}:seed={seed}",
                    "sine=frequency=70:duration={dur}"],
         "filter": "[0:a]lowpass=f=250,tremolo=f=1.8:d=0.7,"
                   "volume=0.5[n];"
@@ -433,7 +433,7 @@ SYNTHESIS_MAP: dict[str, dict[str, Any]] = {
         "method": "synthesised: wet foot-in-mud impact approximation "
                   "(lowpassed noise burst with slow attack + 70 Hz "
                   "thump, ffmpeg lavfi) — not a recorded squelch",
-        "inputs": ["anoisesrc=color=white:duration={dur}",
+        "inputs": ["anoisesrc=color=white:duration={dur}:seed={seed}",
                    "sine=frequency=70:duration={dur}"],
         "filter": "[0:a]lowpass=f=350,afade=t=in:st=0:d=0.15,"
                   "afade=t=out:st={fade_st}:d={fade_d},volume=0.8[n];"
@@ -446,7 +446,7 @@ SYNTHESIS_MAP: dict[str, dict[str, Any]] = {
         "base_gain_db": -16.0,
         "method": "synthesised: muffled distant rumble (brown noise, "
                   "lowpass 180 Hz + 45 Hz tone, ffmpeg lavfi)",
-        "inputs": ["anoisesrc=color=brown:duration={dur}",
+        "inputs": ["anoisesrc=color=brown:duration={dur}:seed={seed}",
                    "sine=frequency=45:duration={dur}"],
         "filter": "[0:a]lowpass=f=180,afade=t=in:st=0:d=0.2,"
                   "afade=t=out:st={fade_st}:d={fade_d},volume=0.7[n];"
@@ -459,7 +459,7 @@ SYNTHESIS_MAP: dict[str, dict[str, Any]] = {
         "base_gain_db": -20.0,
         "method": "synthesised: rain bed (pink noise, lowpass 800 Hz, "
                   "ffmpeg lavfi) — same chain as the pipeline rain bed",
-        "inputs": ["anoisesrc=color=pink:duration={dur}"],
+        "inputs": ["anoisesrc=color=pink:duration={dur}:seed={seed}"],
         "filter": "[0:a]lowpass=f=800,volume=0.10[out]",
     },
     "crowd_bed": {
@@ -467,7 +467,7 @@ SYNTHESIS_MAP: dict[str, dict[str, Any]] = {
         "base_gain_db": -22.0,
         "method": "synthesised: crowd-murmur bed (bandpass 500 Hz "
                   "noise with slow tremolo, ffmpeg lavfi)",
-        "inputs": ["anoisesrc=color=pink:duration={dur}"],
+        "inputs": ["anoisesrc=color=pink:duration={dur}:seed={seed}"],
         "filter": "[0:a]bandpass=f=500:width_type=h:width=600,"
                   "tremolo=f=0.7:d=0.4,volume=0.18[out]",
     },
@@ -477,7 +477,7 @@ SYNTHESIS_MAP: dict[str, dict[str, Any]] = {
         "method": "synthesised: distant street-activity bed "
                   "(bandpass 700 Hz noise with slow tremolo, "
                   "ffmpeg lavfi)",
-        "inputs": ["anoisesrc=color=pink:duration={dur}"],
+        "inputs": ["anoisesrc=color=pink:duration={dur}:seed={seed}"],
         "filter": "[0:a]bandpass=f=700:width_type=h:width=1000,"
                   "tremolo=f=0.4:d=0.3,volume=0.16[out]",
     },
@@ -486,7 +486,7 @@ SYNTHESIS_MAP: dict[str, dict[str, Any]] = {
         "base_gain_db": -22.0,
         "method": "synthesised: wind bed (pink noise, lowpass 400 Hz "
                   "with slow tremolo, ffmpeg lavfi)",
-        "inputs": ["anoisesrc=color=pink:duration={dur}"],
+        "inputs": ["anoisesrc=color=pink:duration={dur}:seed={seed}"],
         "filter": "[0:a]lowpass=f=400,tremolo=f=0.3:d=0.5,"
                   "volume=0.15[out]",
     },
@@ -495,7 +495,7 @@ SYNTHESIS_MAP: dict[str, dict[str, Any]] = {
         "base_gain_db": -26.0,
         "method": "synthesised: quiet room tone (pink noise, lowpass "
                   "300 Hz at very low level, ffmpeg lavfi)",
-        "inputs": ["anoisesrc=color=pink:duration={dur}"],
+        "inputs": ["anoisesrc=color=pink:duration={dur}:seed={seed}"],
         "filter": "[0:a]lowpass=f=300,volume=0.06[out]",
     },
     "music_pad": {

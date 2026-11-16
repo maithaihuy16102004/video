@@ -645,6 +645,7 @@ ACTION:
 
 * An đi bộ dọc phố, cầm chiếc chìa khóa.
 * An nhìn quanh tìm chủ nhân của nó.
+* An quay người lại.
 
 EXPRESSION: Curious
 
