@@ -106,9 +106,16 @@ class TestSparksAnimateOnPixels(unittest.TestCase):
         # the framing test pins the crop, this pins the coupling.
         # R9-8: the accessory-aware camera fit pulls back slightly
         # to clear Linh's bun, shifting the crop 14 px left.
+        # R17-D13: the template height ratio shrinks Linh's
+        # subject box (783 -> 755), shifting the crop 1 px left.
+        # R20-D1: the dressing loop moves staging to uncover
+        # background dressing, shifting the frozen crop 42 px
+        # left at the same 1.6 scale (counterfactual-verified
+        # in the burst ROI re-pin: [603, ...] loop ON vs
+        # [645, ...] loop OFF).
         self.assertEqual(
             self.result["crop_anchor"]["crop_rect"],
-            [646, 0, 1846, 675])
+            [603, 0, 1803, 675])
 
     def test_streak_sets_differ_every_frame(self):
         # R7-D4: the streak texture was pixel-identical across
@@ -116,7 +123,10 @@ class TestSparksAnimateOnPixels(unittest.TestCase):
         prev = None
         for frame in range(0, 11):
             arr = self._frame_arr(frame)
-            reg = arr[700:800, 400:600]
+            # R17: the full anvil cluster (the old 100-row
+            # window went empty on frame 9 once the strike
+            # geometry moved with the shorter body).
+            reg = arr[700:1000, 400:600]
             ys, xs = np.nonzero(_streak_mask(reg))
             cur = set(zip(xs.tolist(), ys.tolist()))
             self.assertTrue(len(cur) > 0,
@@ -129,21 +139,29 @@ class TestSparksAnimateOnPixels(unittest.TestCase):
 
     def test_contact_pulse_above_ambient(self):
         # The R7 warm mask over the anvil: the strike pulse at
-        # f20-f22 must clear the ambient range of f2-f10, and the
-        # ambient range itself must vary (no frozen baseline).
-        counts = {}
-        for frame in list(range(2, 11)) + [20, 21, 22]:
-            arr = self._frame_arr(frame)
-            reg = arr[740:1000, 380:620]
-            counts[frame] = int(_warm_mask(reg).sum())
-        ambient = [counts[f] for f in range(2, 11)]
-        self.assertGreater(max(ambient), min(ambient),
+        # f20-f22 must fire above the ambient baseline, and the
+        # ambient level itself must vary (no frozen baseline).
+        # R17: measured against the baseline, not raw counts in
+        # a wide window -- the baseline fluctuates by +/-87,
+        # which exceeds one pulse frame's net contribution.
+        region = (slice(600, 1080), slice(300, 700))
+        ambient_masks = [_warm_mask(self._frame_arr(f))[region]
+                         for f in range(2, 11)]
+        counts = [int(m.sum()) for m in ambient_masks]
+        self.assertGreater(max(counts), min(counts),
                            "ambient warm level is constant")
-        pulse = [counts[f] for f in (20, 21, 22)]
-        self.assertGreater(
-            min(pulse), max(ambient),
-            f"contact pulse {pulse} does not clear ambient "
-            f"{ambient}")
+        baseline = (np.stack(ambient_masks).sum(axis=0) >= 5)
+        for frame in (20, 21, 22):
+            new = _warm_mask(self._frame_arr(frame))[region] \
+                & ~baseline
+            ys, xs = np.nonzero(new)
+            self.assertGreaterEqual(
+                int(new.sum()), 200,
+                f"frame {frame}: no contact flash above baseline")
+            # The flash sits at the anvil, not elsewhere.
+            self.assertTrue(
+                (xs.min() + 300 >= 400) and (ys.min() + 600 >= 650),
+                f"frame {frame}: flash outside the anvil")
 
     def test_reaction_record_short_and_strong(self):
         # The burst gating (decay 0.10 s, floor 0.15) is

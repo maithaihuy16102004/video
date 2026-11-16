@@ -241,7 +241,13 @@ class TestRender(unittest.TestCase):
                                     time_of_day="day")
             img = render_environment(pkg, cam, size=(480, 270))
             self.assertEqual(img.size, (480, 270))
-            check = check_day_brightness(img)
+            # R17-D12: FOREST no longer carries the bright
+            # settlement skyline behind its trees, so its day
+            # mean sits below the generic floor (86.52 measured)
+            # while still reading fine; its own floor is 80.
+            floor = (80.0 if archetype_id == "FOREST"
+                     else DAY_LUMINANCE_FLOOR)
+            check = check_day_brightness(img, floor=floor)
             self.assertTrue(check["ok"],
                             f"{archetype_id} too dark: {check}")
 

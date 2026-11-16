@@ -676,5 +676,7 @@ class TestDesignScaleRatio(unittest.TestCase):
         ratio = _design_scale_ratio({"scale_ratio": 0.75})
         ch = map_character({"name": "Kid", "template": "child"},
                            0, height_px=int(round(CHAR_H * ratio)))
-        self.assertEqual(int(ch.H), 587)
+        # R17-D13: the template ratio now scales the render height
+        # (587 * 400/560 = 419); the old 587 was the unscaled bug.
+        self.assertEqual(int(ch.H), 419)
         self.assertAlmostEqual(ch.head_r * 2 / ch.H, 0.34, places=2)

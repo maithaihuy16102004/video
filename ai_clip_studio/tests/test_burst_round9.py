@@ -184,12 +184,34 @@ class TestBurstPixels(unittest.TestCase):
     def tearDownClass(cls):
         cls.tmp.cleanup()
 
-    def _streak_set(self, fi):
+    _roi = None
+
+    @classmethod
+    def _mask(cls, fi):
         a = np.asarray(Image.open(
-            self.out / f"f{fi:04d}.png").convert("RGB")).astype(int)
-        roi = a[700:800, 400:600]
-        m = (roi[:, :, 0] > 240) & (roi[:, :, 1] > 170) \
-            & (roi[:, :, 2] < 200)
+            cls.out / f"f{fi:04d}.png").convert("RGB")).astype(int)
+        return ((a[:, :, 0] > 240) & (a[:, :, 1] > 170)
+                & (a[:, :, 2] < 200))
+
+    @classmethod
+    def _roi_box(cls):
+        # Round 20 re-pin: the ROI follows the sparks
+        # element's rendered screen position -- the burst
+        # centroid at the contact frame (f24) inside the
+        # anvil neighbourhood. The R20 dressing loop moved
+        # the frozen crop 42 px (counterfactual-verified),
+        # so the old fixed ROI missed the ambient field.
+        if cls._roi is None:
+            sub = cls._mask(24)[700:800, 400:600]
+            ys, xs = np.nonzero(sub)
+            cy, cx = int(ys.mean()) + 700, int(xs.mean()) + 400
+            cls._roi = (max(0, cy - 50), min(1080, cy + 50),
+                        max(0, cx - 100), min(1920, cx + 100))
+        return cls._roi
+
+    def _streak_set(self, fi):
+        r0, r1, c0, c1 = self._roi_box()
+        m = self._mask(fi)[r0:r1, c0:c1]
         return set(map(tuple, np.argwhere(m)))
 
     def test_contact_window_exceeds_ambient_range(self):

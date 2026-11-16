@@ -180,10 +180,12 @@ class TestRenderTraits(unittest.TestCase):
             # traits are part of every render_traits object.
             # apron_color (round 5, 2026-11-14): the apron trait
             # joins the same contract.
+            # stature (round 17, 2026-11-16): the BODY_TYPE-derived
+            # height multiplier is part of every object.
             {"description", "voice_hint", "template", "body_variant",
              "costume", "hair_style", "hair_color", "beard_style",
              "beard_color", "hat", "hat_color", "scarf_color",
-             "apron_color",
+             "apron_color", "stature",
              "moustache_style",
              "glasses", "jacket_color", "height_px", "eye_count",
              "visual_profile"})
@@ -700,7 +702,8 @@ class TestSyncWithEngine(unittest.TestCase):
         self.assertEqual(set(PRIMITIVE_NAMES), set(PRIMITIVES))
         # 37 = 35 + crouch + receive_prop (A2 semantic props, 2026-11-12).
         # 39 = 38 + present_prop (round-2 light payoff).
-        self.assertEqual(len(PRIMITIVE_NAMES), 39)
+        # 40 = 39 + insert_key (round 16, key-into-lock ECU).
+        self.assertEqual(len(PRIMITIVE_NAMES), 40)
 
     def test_expressions_match_face_system(self):
         from ai_clip_studio.animation.character_art import EXPRESSIONS
@@ -715,13 +718,14 @@ class TestSyncWithEngine(unittest.TestCase):
                          set(EVENT_SFX_MAP) - {"crowd murmur"})
 
     def test_prop_kinds_match_renderer_when_defined(self):
-        # 25 kinds since wiring item 7 (2026-11-12): + the 13
-        # geometry kinds, kept identical in both constants.
+        # 26 kinds: 25 since wiring item 7 (2026-11-12) + lock
+        # (round 16, key-into-lock ECU), kept identical in both
+        # constants.
         own = {"wallet", "umbrella", "newspaper", "letter", "ticket",
                "cup", "bag", "key", "book", "flower", "pen", "generic",
                "bolt", "hammer", "trident", "helmet", "sword", "staff",
                "shield", "crown", "ring", "hat", "chain", "stone",
-               "boulder"}
+               "boulder", "lock"}
         self.assertEqual(set(PROP_KINDS), own)
         try:
             import ai_clip_studio.product_renderer as renderer

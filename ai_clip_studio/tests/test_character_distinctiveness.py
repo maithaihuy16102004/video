@@ -101,10 +101,17 @@ class TestCostumeDataPath(unittest.TestCase):
                 cast[name]["render_traits"]["jacket_color"],
                 cast[name]["jacket_color"])
 
-    def test_child_scale_from_age(self):
+    def test_child_template_from_age(self):
+        # R18: the implicit child 0.75 scale_ratio is retired --
+        # it double-counted with the template ratio (R17-D13).
+        # A declared child gets scale_ratio None and the child
+        # template; smallness is the template ratio's job
+        # (asserted end-to-end in test_child_scale_round18).
         cast = {c["name"]: c for c in _cast(LOOP)}
-        self.assertEqual(cast["Bé Nam"]["scale_ratio"], 0.75)
-        self.assertEqual(cast["Bé Nam"]["height_px"], 405)
+        self.assertIsNone(cast["Bé Nam"]["scale_ratio"])
+        self.assertEqual(
+            cast["Bé Nam"]["render_traits"]["template"], "child")
+        self.assertEqual(cast["Bé Nam"]["height_px"], 560)
         self.assertIsNone(cast["Linh"]["scale_ratio"])
         self.assertIsNone(cast["Ông Ba"]["scale_ratio"])
 

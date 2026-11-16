@@ -190,7 +190,10 @@ class TestProviderManifest(unittest.TestCase):
                     voice_hints={"Adolf Hitler": "giọng nam",
                                  "Người lính Bavaria": "giọng nam"},
                     voice_ids={"Adolf Hitler": "Đức Trí",
-                               "Người lính Bavaria": "Mạnh Dũng"})
+                               "Người lính Bavaria": "Mạnh Dũng"},
+                    # Isolated cache: the fake sine audio must
+                    # never pollute the shared voice cache.
+                    cache_dir=job_dir / "tts_cache")
             finally:
                 tcp.TTS_BIN = orig
             self.assertEqual(len(wavs), 2)
