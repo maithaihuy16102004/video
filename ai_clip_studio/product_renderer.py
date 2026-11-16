@@ -58,7 +58,8 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 from .animation.character_art import (
-    EXPRESSION_NAMES, EXPRESSIONS, LEGACY_MOOD_TO_EXPRESSION, VIEWS,
+    EXPRESSION_NAMES, EXPRESSIONS, LEGACY_MOOD_TO_EXPRESSION, TEMPLATES,
+    VIEWS,
     draw_character_v4, draw_grip_fingers, make_character,
     make_character_instance, resolve_view,
 )
@@ -66,11 +67,11 @@ from .animation.landmarks import landmark_boxes
 from .animation.locomotion import footfall_times
 from .animation.scene_packages import register_scene_package
 from .animation.primitives import (
-    HAMMER_CYCLE_STRIKE_U,
+    HAMMER_CYCLE_HOLD_U, HAMMER_CYCLE_SEC, HAMMER_CYCLE_STRIKE_U,
     PRIMITIVES, bend_pick, breathe, carry_bag, close_wallet, cover_face,
     crouch, give_to, hammer_cycles, hammer_grip_angle,
     hammer_head_position, hammer_strike, hammer_strike_times,
-    hand_over, head_tilt, hold_pen, idle,
+    hand_over, head_tilt, hold_pen, idle, insert_key,
     kneel_pick, look_at_point,
     nod, open_wallet, pen_tip_position, pick_up, place_on_surface,
     point_at, present_prop,
@@ -116,8 +117,8 @@ from .effects import (
     burst_record, crack_lines, names_set_piece, strike_reaction)
 from .environment_v2 import (
     _DEBRIS_LIFETIME, _ENCLOSED_ARCHETYPES, _FLICKER_KINDS,
-    _SPARK_BURST_LIFETIME,
-    _draw_flames, _draw_sparks,
+    _SMOKE_KINDS, _SPARK_BURST_LIFETIME,
+    _draw_flames, _draw_smoke, _draw_sparks,
     build_environment,
     clear_foreground_from_subjects,
     fit_foreground_to_frustum,
@@ -219,6 +220,7 @@ PROP_KINDS = frozenset({
     "bag", "key", "book", "flower", "pen", "generic",
     "bolt", "hammer", "trident", "helmet", "sword", "staff",
     "shield", "crown", "ring", "hat", "chain", "stone", "boulder",
+    "lock",
 })
 
 # Kinds drawn from semantic geometry specs (wiring item 7). The 7
@@ -263,6 +265,9 @@ _PROP_KIND_KEYWORDS = (
     (("bag", "túi", "cặp", "balo", "ba lô", "valise",
       "suitcase"), "bag"),
     (("key", "chìa", "chìa khóa"), "key"),
+    # Lock AFTER key: first-match wins, so "chìa khóa" (a key)
+    # must claim before bare "khóa" (a lock) is ever checked.
+    (("ổ khóa", "ổ khoá", "padlock", "lock", "khóa"), "lock"),
     (("book", "sách", "quyển sách", "cuốn sách"), "book"),
     (("flower", "hoa", "bó hoa"), "flower"),
     (("pen", "bút", "cây bút", "ngòi bút"), "pen"),
@@ -912,6 +917,68 @@ def _prop_intrudes_head(point, head, head_r: float, H: float) -> bool:
             < head_r + 0.05 * float(H))
 
 
+def _clear_head(prop_xy, head_xy, head_r: float, H: float,
+                facing: int = 1):
+    """Push a drawn prop point out of a head disc.
+
+    Round 17 (R16-O1): the correction for the head-intrusion
+    audit's predicate (_prop_intrudes_head). A point inside the
+    disc + 0.05H margin moves radially outward to the disc edge
+    + margin + 8px; a point already clear is untouched. A point
+    exactly at the head centre pushes along ``facing``. The push
+    is continuous in the prop position, so no pops.
+    """
+    if head_r <= 0:
+        return prop_xy
+    _dx, _dy = prop_xy[0] - head_xy[0], prop_xy[1] - head_xy[1]
+    _dist = math.hypot(_dx, _dy)
+    _target = head_r + 0.05 * float(H) + 8.0
+    if _dist >= _target:
+        return prop_xy
+    if _dist <= 0.0:
+        return (head_xy[0] + facing * _target, head_xy[1])
+    _s = _target / _dist
+    return (head_xy[0] + _dx * _s, head_xy[1] + _dy * _s)
+
+
+def _clear_rect_radial(point, rect, margin: float = 6.0):
+    """Push a drawn prop point radially out of a rect.
+
+    Round 20 (R19-D2): the _clear_head rule generalized to
+    rects. ``rect`` is (left, top, right, bottom). A point
+    inside the margin-expanded rect moves along the ray from
+    the rect centre to the rect boundary + margin; a point
+    already clear is untouched. Continuous in the prop
+    position except exactly at the centre (falls back to
+    straight down), so no pops.
+    """
+    x, y = float(point[0]), float(point[1])
+    left, top, right, bottom = (float(v) for v in rect)
+    if not (left - margin <= x <= right + margin
+            and top - margin <= y <= bottom + margin):
+        return (x, y)
+    cx, cy = (left + right) / 2.0, (top + bottom) / 2.0
+    hw, hh = (right - left) / 2.0, (bottom - top) / 2.0
+    dx, dy = x - cx, y - cy
+    dist = math.hypot(dx, dy)
+    if dist < 1e-6:
+        dx, dy, dist = 0.0, 1.0, 1.0
+    ux, uy = dx / dist, dy / dist
+    sx = hw / abs(ux) if abs(ux) > 1e-9 else float("inf")
+    sy = hh / abs(uy) if abs(uy) > 1e-9 else float("inf")
+    s = min(sx, sy) + margin
+    return (cx + ux * s, cy + uy * s)
+
+
+def _clear_worn_bags(point, rects, margin: float = 6.0):
+    """Push a held-prop draw point out of every worn-bag
+    rect, radially, in order (bag rects rarely overlap)."""
+    x, y = float(point[0]), float(point[1])
+    for rect in rects:
+        x, y = _clear_rect_radial((x, y), rect, margin)
+    return (x, y)
+
+
 def char_metrics(cam, world_x: float, world_z: float = WORLD_Z,
                  base_scale: float = 1.0):
     """Per-character screen metrics under a shot camera.
@@ -1130,6 +1197,20 @@ def map_character(char: dict, index: int, costume_override=None,
         body = "sturdy" if _has_any_word(desc, _BODY_MARKERS["sturdy"]) \
             else "slim" if _has_any_word(desc, _BODY_MARKERS["slim"]) \
             else "standard"
+    # R17-D13: the template heights (male 560 / female 540 /
+    # child 400 / elderly 520) never reached the render -- the
+    # uniform perspective height replaced them, so every adult
+    # rendered at 783px. The rendered height composes the
+    # perspective height with the template ratio and the
+    # script-derived stature (BODY_TYPE "small" -> 0.85). The
+    # head ratio stays 0.34: the head scales WITH the height.
+    # Locked registry instances above keep their locked heights.
+    _tmpl_h = TEMPLATES[template]["height"] / TEMPLATES["male"]["height"]
+    try:
+        _stature = float(char.get("stature") or 1.0)
+    except (TypeError, ValueError):
+        _stature = 1.0
+    height = int(round(height * _tmpl_h * _stature))
     kwargs = {
         "template": template,
         "name": name,
@@ -1144,7 +1225,7 @@ def map_character(char: dict, index: int, costume_override=None,
     if char.get("hair_style") in ("short", "long", "tuft", "side_part",
                                      "tied"):
         kwargs["hair_style"] = char["hair_style"]
-    if char.get("hat") in ("bowler", "cap", "none"):
+    if char.get("hat") in ("bowler", "cap", "straw", "none"):
         kwargs["hat"] = char["hat"]
     # Worn traits (round-3 system 3): colours pass through only when
     # the script named them (None = the art's ink default); the beard
@@ -2659,6 +2740,21 @@ _INSERT_SHOT_TYPES = frozenset(
 _INSERT_IDLE_PRIMITIVES = frozenset(
     {"present_prop", "reach_to", "point_at", "raise_hand", "wave"})
 
+# Round 16 (L02-D2): primitives whose execution centres on a
+# prop at the hands -- an extreme close-up on one of these
+# frames the hands + prop (telemetry-deferred, like an insert),
+# never the face. CARRY is excluded on purpose: a carried bag
+# hangs at the hip, and a hip-centred ECU is unproven -- the
+# face framing stays for carries until a script proves
+# otherwise. "put_away" stays: the hand + prop mid-transfer
+# is the subject even as the prop leaves the hands.
+_PROP_ACTION_PRIMITIVES = frozenset({
+    "pick_up", "hold_pen", "insert_key", "open_wallet",
+    "close_wallet", "write_on_paper", "sign_document",
+    "hand_over", "receive_prop", "present_prop", "bend_pick",
+    "kneel_pick", "put_away",
+})
+
 
 def _merge_short_shots(shots):
     """Merge short synthesized shots into their predecessor.
@@ -3878,6 +3974,43 @@ def _draw_prop(draw, x, y, kind="wallet", w=None, h=None, open_u=0.0,
                            (x + w / 2 - 4, y + 9)), 3)):
             draw.line(_ln, fill=ink, width=_wd + 2)
             draw.line(_ln, fill=brass, width=_wd)
+    elif kind == "lock":
+        # Round 16 (L02-D2): a padlock -- brass body, keyhole,
+        # and a shackle arc that pivots on its left hinge by
+        # open_u (the wallet open_u precedent): 0 = closed
+        # half-ring, 1 = swung open. Drawn relative to w/h so
+        # it fits any footprint.
+        brass = (203, 160, 72)
+        _bw, _bh = 0.62 * w, 0.52 * h
+        _bcx, _bcy = x, y + 0.16 * h
+        draw.rounded_rectangle(
+            [_bcx - _bw / 2, _bcy - _bh / 2,
+             _bcx + _bw / 2, _bcy + _bh / 2],
+            radius=8, fill=brass, outline=ink, width=3)
+        _kr = max(2.0, 0.06 * h)
+        draw.ellipse([_bcx - _kr, _bcy - _kr - 0.06 * h,
+                      _bcx + _kr, _bcy + _kr - 0.06 * h],
+                     fill=ink)
+        draw.polygon([(_bcx - _kr * 0.7, _bcy - 0.02 * h),
+                      (_bcx + _kr * 0.7, _bcy - 0.02 * h),
+                      (_bcx + _kr, _bcy + 0.14 * h),
+                      (_bcx - _kr, _bcy + 0.14 * h)], fill=ink)
+        # Shackle: a half-ring arc above the body, rotated
+        # around its left foot (the hinge) by -55 deg * open_u
+        # so the right foot lifts clear of the body.
+        _hx, _hy = _bcx - _bw / 2, _bcy - _bh / 2
+        _sr = _bw / 2
+        _th = -math.radians(55.0) * max(0.0, min(1.0, open_u))
+        _ct, _st = math.cos(_th), math.sin(_th)
+        _pts = []
+        for _i in range(17):
+            _a = math.pi * _i / 16.0
+            _px = _bcx + _sr * math.cos(_a)
+            _py = _hy - _sr * math.sin(_a)
+            _dx, _dy = _px - _hx, _py - _hy
+            _pts.append((_hx + _dx * _ct - _dy * _st,
+                         _hy + _dx * _st + _dy * _ct))
+        draw.line(_pts, fill=ink, width=5, joint="curve")
     elif kind == "book":
         draw.rectangle([x - w / 2, y - h / 2, x + w / 2, y + h / 2],
                        fill=(140, 50, 50), outline=ink, width=3)
@@ -4685,6 +4818,152 @@ def _incoming_holder(all_events, pid, t0):
     return holder
 
 
+def _worn_bag_owner(all_events, pid, t, id_to_name):
+    """Owner NAME possessing a bag at time ``t``, or None.
+
+    Round 17 (L02-D3): possession for the worn-bag presentation.
+    Like _incoming_holder, but CARRY counts: carrying/wearing a
+    bag IS possessing it, while the grasp-hold tracking behind
+    the state machine only follows hand grasps. A bag the owner
+    puts down (PUT_AWAY/RELEASE/PLACE) stops being worn; a
+    handover transfers possession to the receiver. When the
+    earliest event for the bag is a CARRY/HOLD (an ongoing state
+    the script describes, not an acquisition), the carrier owns
+    it from the start -- before any event has ended, the default
+    governs; once events have ended, the walk governs. A bag
+    first acquired by PICK_UP/TAKE_OUT has no default owner.
+    """
+    evs = sorted(
+        (e for e in all_events if isinstance(e, dict)
+         and e.get("prop_id") == pid and _event_time_trusted(e)),
+        key=lambda e: float(e.get("start_time", 0.0)))
+    if not evs:
+        return None
+    default = None
+    if evs[0].get("action_type") in ("CARRY", "HOLD", "HOLD_PEN"):
+        default = id_to_name.get(str(evs[0].get("actor_id")))
+    owner = None
+    any_ended = False
+    for event in sorted(
+            evs, key=lambda e: float(e.get("end_time", 0.0))):
+        if float(event.get("end_time", 0.0)) > t + 1e-9:
+            break
+        any_ended = True
+        action = event.get("action_type")
+        if action == "HAND_OVER":
+            owner = event.get("target_id")
+        elif action in ("PICK_UP", "TAKE_OUT", "HOLD", "HOLD_PEN",
+                        "CARRY"):
+            owner = event.get("actor_id")
+        elif action in ("PUT_AWAY", "RELEASE", "PLACE"):
+            owner = None
+    if any_ended:
+        return id_to_name.get(str(owner)) if owner is not None             else None
+    return default
+
+
+# Round 16 (L02-D8): POSE_HELD body poses that persist across the
+# segment/cut boundary within a scene. ONLY primitives whose
+# completion pose is itself the held state belong here:
+# - sit_down: ends seated (root lowered, knees bent) -- the Loop 02
+#   defect (An's sit vanished in the next segment of the same
+#   directive shot, because _shot_action_events clips the sit event
+#   out of every segment after its span ends).
+# Deliberately EXCLUDED:
+# - crouch: returns to standing by the end of its duration, so its
+#   completion pose IS standing; persisting it would be a no-op.
+# - shield: a reactive within-event hold ("holds to the end of the
+#   duration"); a guard frozen across later shots reads wrong once
+#   the threat moment passes. Within-shot hold is unchanged.
+# - sit_at_desk: owned by the _seated_at_start mechanism (furniture
+#   staging); a later sit_at_desk CLEARS a floor sit here.
+# - gestures (reach/point/raise/wave/nod/turn): ambiguous across a
+#   cut; left for a future defect with frame evidence.
+_HELD_POSE_PRIMITIVES = frozenset({"sit_down"})
+_HELD_POSE_CLEARING_PRIMITIVES = frozenset({
+    "stand_up", "stand_from_chair", "walk_to", "run_to", "walk_mud",
+    "sit_at_desk"})
+
+
+def _lock_events_at_start(all_events, scene_no, t0, id_to_name):
+    """Last INSERT_KEY event per character at time ``t0``.
+
+    Same cross-shot memory shape as ``_held_poses_at_start``:
+    events ending at or before ``t0``, trusted times only, same
+    scene only (the SC number of the event's shot_id must equal
+    ``scene_no``), in end-time order. A lock opened in an
+    earlier segment/shot of the scene stays staged (and open)
+    in later segments -- there is no lock-closing verb yet, so
+    nothing clears it. Returns {character NAME: event}.
+    """
+    opened: dict[str, dict] = {}
+    try:
+        scene_no = int(scene_no)
+    except (TypeError, ValueError):
+        return opened
+    ordered = sorted(
+        (e for e in (all_events or []) if isinstance(e, dict)
+         and _event_time_trusted(e)),
+        key=lambda e: float(e.get("end_time", 0.0)))
+    for event in ordered:
+        if float(event.get("end_time", 0.0)) > float(t0) + 1e-9:
+            break
+        sid = str(event.get("shot_id") or "")
+        m = re.match(r"SC(\d+)_", sid)
+        if m is None or int(m.group(1)) != scene_no:
+            continue
+        name = id_to_name.get(str(event.get("actor_id"))) \
+            if event.get("actor_id") else None
+        if name is None:
+            continue
+        prim = (event.get("required_pose") or {}).get("primitive")
+        if prim == "insert_key":
+            opened[name] = event
+    return opened
+
+
+def _held_poses_at_start(all_events, scene_no, t0, id_to_name):
+    """Last POSE_HELD body pose per character at time ``t0``.
+
+    Same cross-shot memory shape as ``_incoming_holder`` and the
+    ``_seated_at_start`` scan: events ending at or before ``t0``,
+    trusted times only, same scene only (the SC number of the
+    event's shot_id must equal ``scene_no``), in end-time order.
+    A held-primitive event sets the character's held pose; a
+    clearing-primitive event (stand/walk/sit-at-desk) clears it;
+    anything else leaves it alone (a gesture while seated does not
+    stand the character up). Returns {character NAME: event}.
+    """
+    held: dict[str, dict] = {}
+    try:
+        scene_no = int(scene_no)
+    except (TypeError, ValueError):
+        return held
+    ordered = sorted(
+        (e for e in (all_events or []) if isinstance(e, dict)
+         and _event_time_trusted(e)),
+        key=lambda e: float(e.get("end_time", 0.0)))
+    for event in ordered:
+        if float(event.get("end_time", 0.0)) > float(t0) + 1e-9:
+            break
+        sid = str(event.get("shot_id") or "")
+        m = re.match(r"SC(\d+)_", sid)
+        if m is None or int(m.group(1)) != scene_no:
+            continue
+        name = id_to_name.get(str(event.get("actor_id"))) \
+            if event.get("actor_id") else None
+        if name is None:
+            continue
+        prim = (event.get("required_pose") or {}).get("primitive")
+        if prim in _HELD_POSE_CLEARING_PRIMITIVES:
+            held.pop(name, None)
+        elif prim in _HELD_POSE_PRIMITIVES and \
+                (event.get("completion_state") or {}).get("state") \
+                == "POSE_HELD":
+            held[name] = event
+    return held
+
+
 def _effective_cues(shot: dict, package: dict) -> list:
     """Shot cues minus cues that lost a semantic conflict.
 
@@ -4913,6 +5192,25 @@ def _build_shot_prop_machine(package, shot, shot_events, rests,
     grasped_in_shot = {str(e.get("prop_id")) for e in shot_events
                        if e.get("action_type") in (
                            "PICK_UP", "TAKE_OUT", "HOLD", "HOLD_PEN")}
+    # Round 16 (L02-D2): a grasp/use event starting at (or
+    # spanning) the shot start governs the prop from frame 0 --
+    # the seeded hold's ATTACHED marker (t0 + 0.006) would
+    # otherwise shadow the event's first marker (at t0) for the
+    # whole window and draw the prop at the PREVIOUS holder's
+    # hand (the ECU key drew at Ba Tu's hand while An's hand
+    # drove empty to the lock). Transfers/releases keep the
+    # seed: their markers interpolate from the incoming hold,
+    # and their current behaviour is tested. Mid-shot uses keep
+    # the seed for the pre-event frames (the seed window ends
+    # before the event starts, so no shadowing there).
+    _USE_AT_START_TYPES = (
+        "BEND_PICK", "KNEEL_PICK", "SHIELD", "OPEN_WALLET",
+        "CLOSE_WALLET", "OPEN", "CLOSE", "WRITE", "SIGN",
+        "HAMMER_STRIKE", "INSERT_KEY")
+    used_at_start = {
+        str(e.get("prop_id")) for e in shot_events
+        if e.get("action_type") in _USE_AT_START_TYPES
+        and float(e.get("start_time", t0 + 1.0)) <= t0 + 0.01}
     # A shot event naming the prop's home rest -- a resting
     # sentence ("Viên đá nằm trên đe") or a take from a support
     # -- overrides the incoming hold for this shot: the script
@@ -4938,7 +5236,8 @@ def _build_shot_prop_machine(package, shot, shot_events, rests,
     event_pids = {str(e.get("prop_id")) for e in all_events
                   if isinstance(e, dict) and e.get("prop_id")}
     for pid in pids:
-        if pid in grasped_in_shot or pid in resting_pids:
+        if (pid in grasped_in_shot or pid in resting_pids
+                or pid in used_at_start):
             continue
         holder_id = _incoming_holder(all_events, pid, t0)
         if holder_id is None:
@@ -5053,6 +5352,176 @@ def _walk_direction(ctx, event):
     return direction
 
 
+_LOCOMOTION_STEP_PX = {"walk_to": 320.0, "run_to": 380.0,
+                       "walk_mud": 300.0}
+
+
+def _swept_x_for_actor(windows, start_x, direction):
+    """Min/max root x a character occupies during a shot.
+
+    Replays the locomotion resolution of _event_fn in window
+    order: each walk_to/run_to/walk_mud advances the root by its
+    step size along the shot direction (flipped for retreat
+    events, matching _walk_direction). Non-locomotion windows
+    leave the root alone. The framing path (_walk_path_box,
+    round 8) and the FG clearance (round 17, L02-D11) share
+    this replay so neither can drift from the rendered path:
+    a foreground cleared against the static staging box is
+    re-covered the moment a runner leaves that box (Loop 02
+    shot #3: An ran 380 px right, straight behind the FG
+    trunk the clearer had parked beside her staging mark).
+    """
+    _pos = float(start_x)
+    _lo = _hi = _pos
+    for _s, _e, _ev in windows:
+        _rp = _ev.get("required_pose") or {}
+        _step = _LOCOMOTION_STEP_PX.get(_rp.get("primitive"))
+        if _step is None:
+            continue
+        _d = direction
+        if ((_rp.get("params") or {}).get("retreat")):
+            _d = -_d
+        _pos += _step * _d
+        _lo = min(_lo, _pos)
+        _hi = max(_hi, _pos)
+    return _lo, _hi
+
+
+_HEAD_LEAN_ALLOWANCE_FRAC = 0.09
+
+
+# Round 20 (R19-D1): dressing elements worth keeping visible
+# when the head-separation pass moves a character. Small
+# midground/background dressing (a lamp, a hanging pot, a
+# stove pipe) can hide entirely behind one head disc; walls,
+# floors and furniture are excluded by the width filter or by
+# sitting below the head discs. Sky/atmosphere kinds are never
+# protected: a head in front of a cloud is correct staging.
+_DRESSING_LAYERS = frozenset({"MG", "BG"})
+_DRESSING_SKIP_KINDS = frozenset({
+    "cloud", "smoke", "steam",
+    # Distant backdrop (z ~ -20): horizon houses/towers.
+    "distant_house", "house_roof", "house_chimney",
+    "house_window", "distant_tower", "tower_spire",
+    "tower_window"})
+# Wall trim is architecture, not dressing: characters SHOULD
+# stand in front of it. An element is trim when it or any
+# attachment ancestor is one of these kinds (a window's
+# mullions inherit trim-ness from the window, the hanging
+# pots from the wall -- the pots are a known follow-up for a
+# builder-set keep_visible flag).
+_DRESSING_TRIM_KINDS = frozenset(
+    {"room_wall", "wall", "window", "pilaster", "mullion",
+     "facade"})
+_DRESSING_MAX_WIDTH_FRAC = 0.15
+_DRESSING_MIN_AREA_PX2 = 1000.0
+_DRESSING_RECT_MARGIN = 1.2
+
+
+def _dressing_rects(pkg, camera, W, H):
+    """Projected rects of small dressing elements, in staging
+    pixels: {"id", "cx", "cy", "left", "right", "top",
+    "bottom"}. Skipped: other layers, sky kinds, wall trim
+    (self or any attachment ancestor), off-frame elements,
+    elements wider than 15% of the frame, and specks under
+    1000 px^2 of projected area."""
+    elements = pkg.get("elements") or []
+    by_id = {el.get("id"): el for el in elements}
+
+    def _is_trim(el):
+        seen = set()
+        cur = el
+        for _ in range(6):
+            if cur is None or id(cur) in seen:
+                return False
+            seen.add(id(cur))
+            if cur.get("kind") in _DRESSING_TRIM_KINDS:
+                return True
+            att = cur.get("attachment") or {}
+            parent = att.get("parent")
+            cur = by_id.get(parent) if parent else None
+        return False
+
+    rects = []
+    for el in elements:
+        if el.get("layer") not in _DRESSING_LAYERS:
+            continue
+        if el.get("kind") in _DRESSING_SKIP_KINDS:
+            continue
+        if _is_trim(el):
+            continue
+        try:
+            x, y, scale, vis = camera.project(el["center"], W, H)
+        except Exception:
+            continue
+        if not vis:
+            continue
+        size = el.get("size") or (0.0, 0.0, 0.0)
+        w_px = float(size[0]) * scale
+        h_px = float(size[1]) * scale
+        if w_px >= _DRESSING_MAX_WIDTH_FRAC * W:
+            continue
+        if w_px * h_px < _DRESSING_MIN_AREA_PX2:
+            continue
+        hw = w_px / 2.0 * _DRESSING_RECT_MARGIN
+        hh = h_px / 2.0 * _DRESSING_RECT_MARGIN
+        rects.append({"id": el.get("id", ""), "cx": x, "cy": y,
+                      "left": x - hw, "right": x + hw,
+                      "top": y - hh, "bottom": y + hh})
+    return rects
+
+
+def _drawn_height_factor(char: dict) -> float:
+    """Drawn height / char_metrics height for one character.
+
+    Mirrors map_character's height composition (R17-D13):
+    generic characters render at perspective height x
+    template ratio x stature; locked registry instances keep
+    the conservative factor 1.0 (their heights are locked,
+    and no loop script uses a registry name)."""
+    key = str(char.get("name", "")).strip().lower()
+    try:
+        make_character_instance(key, height=CHAR_H)
+        return 1.0
+    except (ValueError, KeyError):
+        pass
+    template = char.get("template")
+    if template not in VALID_TEMPLATES:
+        template = infer_template(char)
+    try:
+        stature = float(char.get("stature") or 1.0)
+    except (TypeError, ValueError):
+        stature = 1.0
+    return (TEMPLATES[template]["height"]
+            / TEMPLATES["male"]["height"] * stature)
+
+
+def _swept_head_range(windows, start_x, direction, gh,
+                      legacy_end=None):
+    """Swept head-centre x-range (lo, hi) for one character.
+
+    Round 19 (R18-D1): the R6-D4 head-clearance pass separated
+    STATIC standing boxes, but locomotion carries the head up
+    to 380 px from the staging mark (Loop 02 #17: a 320 px
+    legacy walk; #19: a 380 px compiled run -- both into the
+    neighbour's face). Compiled windows replay through
+    _swept_x_for_actor; legacy_end is the absolute end x of a
+    legacy cue walk/run (no compiled motion in the span).
+    Whenever the character travels, both ends grow by the
+    gait-lean allowance: the head leads the root by up to
+    sin(0.40) x torso during a run.
+    """
+    lo, hi = _swept_x_for_actor(windows, start_x, direction)
+    if legacy_end is not None:
+        lo = min(lo, legacy_end)
+        hi = max(hi, legacy_end)
+    if hi > lo:
+        allow = _HEAD_LEAN_ALLOWANCE_FRAC * gh
+        lo -= allow
+        hi += allow
+    return lo, hi
+
+
 def _grasp_target(ctx, target, flank_px):
     """Grasp point for pick_up/bend_pick/kneel_pick, pulled inside
     the actor's arm reach when the prop's rest is beyond it.
@@ -5144,17 +5613,17 @@ def _event_fn(primitive, params, event, ctx, window_dur):
 
     if primitive == "walk_to":
         from_x = ctx["pos"]["x"]
-        to_x = from_x + 320.0 * _walk_direction(ctx, event)
+        to_x = from_x + _LOCOMOTION_STEP_PX["walk_to"] * _walk_direction(ctx, event)
         ctx["pos"]["x"] = to_x
         return walk_to(char, from_x, to_x, dur, ground_y)
     if primitive == "run_to":
         from_x = ctx["pos"]["x"]
-        to_x = from_x + 380.0 * _walk_direction(ctx, event)
+        to_x = from_x + _LOCOMOTION_STEP_PX["run_to"] * _walk_direction(ctx, event)
         ctx["pos"]["x"] = to_x
         return run_to(char, from_x, to_x, dur, ground_y)
     if primitive == "walk_mud":
         from_x = ctx["pos"]["x"]
-        to_x = from_x + 300.0 * _walk_direction(ctx, event)
+        to_x = from_x + _LOCOMOTION_STEP_PX["walk_mud"] * _walk_direction(ctx, event)
         ctx["pos"]["x"] = to_x
         return walk_mud(char, from_x, to_x, dur, ground_y)
     if primitive == "idle":
@@ -5167,6 +5636,16 @@ def _event_fn(primitive, params, event, ctx, window_dur):
         else:
             new_facing = -ctx["facing"]
         return turn_to(char, new_facing, dur)
+    if primitive == "insert_key":
+        # Round 16 (L02-D2): the hand drives the key INTO the
+        # staged lock, not toward the key's own rest -- the
+        # generic _target() would return the key rest, and the
+        # key is already in the hand. The lock anchor is solved
+        # reachable by _render_shot; without one (unit probes)
+        # fall back to the generic target.
+        _lock = ctx.get("lock_anchor")
+        return insert_key(char, _lock if _lock else _target(),
+                          dur, hand=hand)
     if primitive == "sit_down":
         return sit_down(char, dur, ground_y)
     if primitive == "stand_up":
@@ -5408,6 +5887,142 @@ def _insert_anchor_from_telemetry(telemetry: list[dict]):
     _my = (_ys[_n // 2] if _n % 2
            else (_ys[_n // 2 - 1] + _ys[_n // 2]) / 2.0)
     return (_mx, _my, _kind, _n)
+
+
+def _median_bystander_heads(telemetry: list[dict]):
+    """Median (name, head_x, head_y, head_r) for characters who
+    never hold a drawn prop in ``telemetry``.
+
+    Round 17 (R16-D1): the crop-level bystander exclusion needs
+    every non-subject head. Holders (any draw's holder) are the
+    shot's subjects -- their faces are the insert's context, and
+    the holder lean already handles them. Heads come from the
+    telemetry "hands" entries, which carry all characters' joints.
+    """
+    _holders = set()
+    _heads: dict[str, list[tuple[float, float]]] = {}
+    _head_rs: dict[str, list[float]] = {}
+    for _entry in telemetry or []:
+        for _draw in _entry.get("draws") or []:
+            if _draw.get("holder"):
+                _holders.add(_draw.get("holder"))
+        for _nm, _jn in ((_entry.get("hands") or {}).items()):
+            _hp = _jn.get("head")
+            if _hp is not None:
+                _heads.setdefault(_nm, []).append(
+                    (float(_hp[0]), float(_hp[1])))
+            _hr = _jn.get("head_r")
+            if isinstance(_hr, (int, float)) and _hr > 0:
+                _head_rs.setdefault(_nm, []).append(float(_hr))
+
+    def _med(_pts):
+        _xs = sorted(q[0] for q in _pts)
+        _ys = sorted(q[1] for q in _pts)
+        _n = len(_pts)
+        return ((_xs[_n // 2] if _n % 2
+                 else (_xs[_n // 2 - 1] + _xs[_n // 2]) / 2.0),
+                (_ys[_n // 2] if _n % 2
+                 else (_ys[_n // 2 - 1] + _ys[_n // 2]) / 2.0))
+
+    _out = []
+    for _nm, _pts in _heads.items():
+        if _nm in _holders:
+            continue
+        _hx, _hy = _med(_pts)
+        _hrs = sorted(_head_rs.get(_nm, []))
+        _hr = _hrs[len(_hrs) // 2] if _hrs else 120.0
+        _out.append((_nm, _hx, _hy, _hr))
+    return _out
+
+
+def _exclude_heads_from_crop(crop_rect, prop_xy, heads, margin,
+                             frame_w, frame_h):
+    """Shift ``crop_rect`` (same size) away from intruding head
+    discs. The prop anchor stays inside the rect with ``margin``,
+    and the rect stays inside the frame. Heads are processed
+    nearest-first; each disc is pushed out in up to 4 steps, and
+    the shift stops at the first head the slack cannot clear.
+    Returns (new_rect, record) or (crop_rect, None) when nothing
+    intrudes or no shift is possible. The shift is computed once
+    from median positions, so the crop stays frozen in the shot.
+    """
+    _x0, _y0, _x1, _y1 = (float(v) for v in crop_rect)
+    _w, _h = _x1 - _x0, _y1 - _y0
+    _px, _py = float(prop_xy[0]), float(prop_xy[1])
+    _shifts = []
+    _cleared = []
+    _remaining = []
+    _step = max(24.0, 0.2 * min(_w, _h))
+    for _nm, _hx, _hy, _hr in sorted(
+            heads, key=lambda hd: math.hypot(
+                hd[1] - _px, hd[2] - _py)):
+        _done = False
+        for _attempt in range(4):
+            _nx = min(max(_hx, _x0), _x1)
+            _ny = min(max(_hy, _y0), _y1)
+            if math.hypot(_hx - _nx, _hy - _ny) >= _hr:
+                _done = True
+                break
+            _dx, _dy = _px - _hx, _py - _hy
+            _dist = math.hypot(_dx, _dy)
+            if _dist <= 0.0:
+                break
+            _sx = _dx / _dist * _step
+            _sy = _dy / _dist * _step
+            # Clamp: prop inside with margin, rect inside frame.
+            _sx = max(_px + margin - _x1,
+                      min(_px - margin - _x0, _sx))
+            _sx = max(-_x0, min(frame_w - _x1, _sx))
+            _sy = max(_py + margin - _y1,
+                      min(_py - margin - _y0, _sy))
+            _sy = max(-_y0, min(frame_h - _y1, _sy))
+            if _sx == 0.0 and _sy == 0.0:
+                break
+            _x0 += _sx
+            _x1 += _sx
+            _y0 += _sy
+            _y1 += _sy
+            _shifts.append({"name": _nm, "shift_x": round(_sx, 1),
+                            "shift_y": round(_sy, 1)})
+        if not _done:
+            # The final shift may have cleared the disc; the loop
+            # only checks at the top of each attempt.
+            _nx = min(max(_hx, _x0), _x1)
+            _ny = min(max(_hy, _y0), _y1)
+            _done = math.hypot(_hx - _nx, _hy - _ny) >= _hr
+        (_cleared if _done else _remaining).append(_nm)
+    if not _shifts:
+        return list(crop_rect), None
+    _record = {"shifts": _shifts, "cleared": _cleared,
+               "remaining": _remaining,
+               "crop_rect": [round(_x0, 1), round(_y0, 1),
+                             round(_x1, 1), round(_y1, 1)]}
+    return [_x0, _y0, _x1, _y1], _record
+
+
+def _deferred_insert_shot(shot, shot_events):
+    """True when the shot's crop defers to the prop + hands.
+
+    Round 21 (R20-D1): object_insert shots and extreme
+    close-ups on a prop-manipulation event frame the PROP +
+    HANDS (telemetry pass 2 / frame-0 insert box), never the
+    room -- the anchor branches leave subjects unset for
+    exactly these shots (see _defer_framing). Staging moves
+    in such a shot decouple the holder's hands from a
+    world-static prop, so the dressing loop must not run
+    here. The ECU branch below is the single definition of
+    the prop-action test; _ecu_prop_action calls this helper.
+    """
+    st = shot.get("shot_type")
+    if st == "object_insert":
+        return True
+    if st != "extreme_close_up":
+        return False
+    return any(
+        ((_ev.get("required_pose") or {}).get("primitive")
+         in _PROP_ACTION_PRIMITIVES)
+        and _ev.get("prop_id")
+        for _ev in shot_events)
 
 
 def _insert_anchor_subjects(telemetry: list[dict],
@@ -5975,6 +6590,13 @@ def _render_shot(args: dict) -> dict:
     _seated_at_start: dict[str, bool] = {}
     _compiled_all = (package.get("compiled_actions") or {}).get(
         "events") or []
+    # Round 16 (L02-D8): POSE_HELD body poses carried across the
+    # segment/cut boundary within a scene (a sit_down persists into
+    # later segments of the same directive shot and later shots of
+    # the scene until the character stands, walks, or sits at a
+    # desk). All staged characters, not just the shot's actor.
+    _held_at_start = _held_poses_at_start(
+        _compiled_all, shot.get("scene"), _t0, _id_to_name)
     if _compiled_all and actor is not None:
         _furn_prims = {"sit_at_desk", "write_on_paper",
                        "sign_document", "hold_pen"}
@@ -6284,6 +6906,13 @@ def _render_shot(args: dict) -> dict:
         radius_scale=_radius_scale,
         azimuth_side=shot.get("viewpoint_azimuth_side"),
         elevation_deg=_exec_elev)
+    # R16-2a: the character elevation projection uses the
+    # EXECUTED elevation -- the same elevation the
+    # environment camera renders with (the establishing cap
+    # and map-frontal rules already folded into _exec_elev
+    # / _angle above).
+    _char_elev_deg = (_exec_elev if _exec_elev is not None
+                      else elevation_for_angle(_angle))
     # OTS foreground fit (Stage 3 / F9): the shoulder azimuth swings
     # the listener toward the frame edge, and the unadjusted staging
     # slot put their head ~60% out of frame (F9 probe). Pull the
@@ -6738,8 +7367,17 @@ def _render_shot(args: dict) -> dict:
     # supposed to stand close and are exempt. A push blocked
     # by the 40 px frame margin reverts and the pair is
     # recorded unresolved -- never silently left overlapping.
+    # Round 19 (R18-D1): the boxes above are STATIC, but
+    # locomotion carries the head up to 380 px from the staging
+    # mark, so a pair that clears standing still collides
+    # mid-shot. The gap below is computed on SWEPT head ranges
+    # (compiled replay + legacy cue travel + lean allowance),
+    # re-projected every round like the static boxes were.
     _head_clearance: dict = {"moved": {}, "exempt": [],
                              "unresolved": []}
+    # Round 20 (R19-D1): default for OTS shots, whose
+    # pass block (and its staging package build) is skipped.
+    _dress_pkg = None
     if shot.get("shot_type") != "over_the_shoulder":
         _hc_anchored = (set(_anvil_staging)
                         | set(_furniture_staging)
@@ -6757,6 +7395,44 @@ def _render_shot(args: dict) -> dict:
                     _interact_pairs.add(frozenset((_n, _tname)))
         _hc_blocked: set = set()
         _hc_start = dict(world_xs)
+        # Round 20 (R19-D1): staging-time environment package
+        # for the dressing-occlusion check below, mirroring
+        # the furniture/anvil staging probes. A failed build
+        # (or a shot without v1_location) skips the check and
+        # leaves the pair separation exactly as before.
+        _dress_pkg = None
+        if isinstance(shot.get("v1_location"), dict):
+            try:
+                _dress_pkg = build_environment(
+                    shot["v1_location"],
+                    time_of_day=shot.get("time_of_day", "day"),
+                    style={"mood": shot.get("mood", "warm")})
+            except Exception:
+                _dress_pkg = None
+        # Round 19 (R18-D1): locomotion replay inputs, mirroring
+        # the pose section below. The shot direction runs toward
+        # the other character; legacy cue travel fires only for
+        # the actor, only when no compiled event covers the
+        # span, with the pose section's own steps (walk 320 /
+        # run 380 / board to the bus door).
+        _hc_dir = 1
+        if actor is not None and other is not None:
+            _hc_dir = 1 if world_xs[other] > world_xs[actor] \
+                else -1
+        _hc_legacy: dict = {}
+        if shot.get("kind") == "action" and actor is not None \
+                and not _shot_events:
+            _hc_cues = _effective_cues(shot, package)
+            if "board" in _hc_cues:
+                _hc_legacy[actor] = ("abs", float(sx(
+                    BUS_DOOR_X, shot_cam)))
+            elif "run" in _hc_cues:
+                _hc_legacy[actor] = (
+                    "dx", 380.0 * _hc_dir)
+            elif any(c in _hc_cues
+                     for c in ("walk", "walk_fast")):
+                _hc_legacy[actor] = (
+                    "dx", 320.0 * _hc_dir)
         for _round in range(40):
             _boxes = {}
             for _n in names:
@@ -6765,15 +7441,25 @@ def _render_shot(args: dict) -> dict:
                     base_scale=char_scales[_n])
                 if _gh > 0:
                     _hw = max(0.34 * _gh / 2.0 + 20.0, 0.15 * _gh)
-                    _boxes[_n] = (_gx, _gh, _hw)
-            _ordered = sorted(_boxes, key=lambda _n: _boxes[_n][0])
+                    _legacy_end = None
+                    if _n in _hc_legacy:
+                        _kind, _val = _hc_legacy[_n]
+                        _legacy_end = _val if _kind == "abs" \
+                            else _gx + _val
+                    _lo, _hi = _swept_head_range(
+                        _per_actor.get(_n, []), _gx, _hc_dir,
+                        _gh, _legacy_end)
+                    _boxes[_n] = (_lo, _hi, _gh, _hw)
+            _ordered = sorted(
+                _boxes,
+                key=lambda _n: (_boxes[_n][0] + _boxes[_n][1]) / 2.0)
             _pushed = False
             for _a, _b in zip(_ordered, _ordered[1:]):
                 if frozenset((_a, _b)) in _interact_pairs:
                     continue
-                _ax, _ah, _ahw = _boxes[_a]
-                _bx, _bh, _bhw = _boxes[_b]
-                _gap = (_bx - _bhw) - (_ax + _ahw)
+                _alo, _ahi, _ah, _ahw = _boxes[_a]
+                _blo, _bhi, _bh, _bhw = _boxes[_b]
+                _gap = (_blo - _bhw) - (_ahi + _ahw)
                 _need = 0.2 * min(0.34 * _ah / 2.0,
                                   0.34 * _bh / 2.0)
                 if _gap >= _need:
@@ -6840,6 +7526,194 @@ def _render_shot(args: dict) -> dict:
             radius_scale=_radius_scale,
             azimuth_side=shot.get("viewpoint_azimuth_side"),
             elevation_deg=_exec_elev)
+    # Round 20 (R19-D1): dressing occlusion runs AFTER the
+    # headroom re-fit so corridors and element rects use the
+    # FINAL camera. The pre-fit camera overestimates head
+    # discs (764 px vs 602 px rendered in Loop 02 #17) and
+    # invents wedges between elements that are actually
+    # clear. Lateral-only moves: the re-fit's vertical
+    # headroom is unaffected, and metrics/staging below read
+    # the final world_xs.
+    _dressing_moves: dict = {}
+    _unresolved_dressing: list = []
+    # Round 21 (R20-D1): deferred-insert shots frame the prop
+    # + hands, not the room -- staging moves decouple the
+    # hands from a world-static prop and break the insert
+    # anchor, while the dressing the loop chases sits outside
+    # the insert crop anyway. Skip the loop for those shots.
+    if (shot.get("shot_type") != "over_the_shoulder"
+            and _dress_pkg is not None
+            and not _deferred_insert_shot(shot, _shot_events)):
+        _dress_rects = []
+        try:
+            _dress_rects = _dressing_rects(
+                _dress_pkg, shot_cam, W, H)
+        except Exception:
+            _dress_rects = []
+        # Round 20 (R19-D1): corridors use DRAWN heights
+        # (template ratio x stature), not the pre-template
+        # char_metrics heights -- see _drawn_height_factor.
+        _drawn_factors = {}
+        for _n in names:
+            _cd = _char_by_name.get(_n)
+            _drawn_factors[_n] = (
+                _drawn_height_factor(_cd[1]) if _cd else 1.0)
+        if _dress_rects:
+            _dress_seen: set = set()
+            # 10 push rounds + 1 evaluation-only round: the
+            # unresolved record reflects the FINAL staging.
+            for _dround in range(11):
+                _corridors = {}
+                for _n in names:
+                    _gx, _gy, _gh = char_metrics(
+                        shot_cam, world_xs[_n], world_zs[_n],
+                        base_scale=char_scales[_n])
+                    if _gh <= 0:
+                        continue
+                    _gh = _gh * _drawn_factors.get(_n, 1.0)
+                    _legacy_end = None
+                    if _n in _hc_legacy:
+                        _kind, _val = _hc_legacy[_n]
+                        _legacy_end = (_val if _kind == "abs"
+                                       else _gx + _val)
+                    _lo, _hi = _swept_head_range(
+                        _per_actor.get(_n, []), _gx, _hc_dir,
+                        _gh, _legacy_end)
+                    _r = 0.17 * _gh
+                    _corridors[_n] = (
+                        _lo - _r, _hi + _r,
+                        _gy - _gh, _gy - _gh + 2.0 * _r, _gh)
+                _ordered_d = sorted(
+                    _corridors,
+                    key=lambda _n: (_corridors[_n][0]
+                                    + _corridors[_n][1]) / 2.0)
+                _covered = []
+                for _n in _ordered_d:
+                    _clo, _chi, _ctop, _cbot, _gh = \
+                        _corridors[_n]
+                    for _rect in _dress_rects:
+                        if (_clo <= _rect["cx"] <= _chi
+                                and _ctop <= _rect["cy"] <= _cbot):
+                            _covered.append((_n, _rect))
+                            break
+                # Oscillation guard: a corridor wedged
+                # between two elements ping-pongs forever
+                # (Ba Tu, rounds 0-9 of the first version).
+                # A repeated state ends the loop with the
+                # elements recorded unresolved.
+                _state = (
+                    tuple(round(world_xs[_n], 3)
+                          for _n in names),
+                    tuple(sorted((_n, _r["id"])
+                                 for _n, _r in _covered)))
+                if _state in _dress_seen:
+                    for _n, _rect in _covered:
+                        if _rect["id"] not in _unresolved_dressing:
+                            _unresolved_dressing.append(_rect["id"])
+                    break
+                _dress_seen.add(_state)
+                if _dround == 10:
+                    # Evaluation-only round: whatever 10 push
+                    # rounds could not clear stays unresolved.
+                    for _n, _rect in _covered:
+                        if _rect["id"] not in _unresolved_dressing:
+                            _unresolved_dressing.append(_rect["id"])
+                    break
+                _movable_covered = [
+                    (_n, _r) for _n, _r in _covered
+                    if _n not in _hc_anchored
+                    and _n not in _hc_blocked]
+                if not _movable_covered:
+                    # Nothing movable left to push; elements
+                    # still covered by anchored/blocked
+                    # characters are unresolved.
+                    for _n, _rect in _covered:
+                        if _rect["id"] not in _unresolved_dressing:
+                            _unresolved_dressing.append(_rect["id"])
+                    break
+                _dpushed = False
+                for _n, _rect in _movable_covered:
+                    _clo, _chi, _ctop, _cbot, _gh = \
+                        _corridors[_n]
+                    _mid = (_clo + _chi) / 2.0
+                    _dirs = ((-1.0, 1.0) if _mid <= _rect["cx"]
+                             else (1.0, -1.0))
+                    for _dir in _dirs:
+                        _cand = world_xs[_n] + _dir * 0.1
+                        _cgx, _cgy, _cgh = char_metrics(
+                            shot_cam, _cand, world_zs[_n],
+                            base_scale=char_scales[_n])
+                        _cgh = _cgh * _drawn_factors.get(_n, 1.0)
+                        _chw = max(0.34 * _cgh / 2.0 + 20.0,
+                                   0.15 * _cgh)
+                        if not (40.0 + _chw <= _cgx
+                                <= W - 40.0 - _chw):
+                            continue
+                        _clegacy = None
+                        if _n in _hc_legacy:
+                            _kind, _val = _hc_legacy[_n]
+                            _clegacy = (_val if _kind == "abs"
+                                        else _cgx + _val)
+                        _clo2, _chi2 = _swept_head_range(
+                            _per_actor.get(_n, []), _cgx,
+                            _hc_dir, _cgh, _clegacy)
+                        _idx = _ordered_d.index(_n)
+                        _neighbours = []
+                        if _idx > 0:
+                            _neighbours.append(
+                                (_ordered_d[_idx - 1], -1))
+                        if _idx + 1 < len(_ordered_d):
+                            _neighbours.append(
+                                (_ordered_d[_idx + 1], 1))
+                        _ok = True
+                        for _nb, _side in _neighbours:
+                            if frozenset((_n, _nb)) \
+                                    in _interact_pairs:
+                                continue
+                            (_nlo, _nhi, _ntop, _nbot,
+                             _ngh) = _corridors[_nb]
+                            _nhw = max(0.34 * _ngh / 2.0 + 20.0,
+                                       0.15 * _ngh)
+                            _need = 0.2 * min(
+                                0.34 * _cgh / 2.0,
+                                0.34 * _ngh / 2.0)
+                            _nr = 0.17 * _ngh
+                            _nlo_s = _nlo + _nr
+                            _nhi_s = _nhi - _nr
+                            if _side < 0:
+                                _gap = ((_clo2 - _chw)
+                                        - (_nhi_s + _nhw))
+                            else:
+                                _gap = ((_nlo_s - _nhw)
+                                        - (_chi2 + _chw))
+                            if _gap < _need:
+                                _ok = False
+                                break
+                        if not _ok:
+                            continue
+                        world_xs[_n] = _cand
+                        _dpushed = True
+                        _rec = _head_clearance["moved"].setdefault(
+                            _n, {"steps": 0, "moved_world": 0.0})
+                        _rec["steps"] += 1
+                        _rec["moved_world"] = round(
+                            world_xs[_n] - _hc_start[_n], 3)
+                        _drec = _dressing_moves.setdefault(
+                            _n, {"steps": 0, "moved_world": 0.0})
+                        _drec["steps"] += 1
+                        _drec["moved_world"] = round(
+                            _drec["moved_world"] + _dir * 0.1, 3)
+                        break
+                if not _dpushed:
+                    # No feasible push this round; positions
+                    # are final, so the current coverage is
+                    # the unresolved record.
+                    for _n, _rect in _covered:
+                        if _rect["id"] not in _unresolved_dressing:
+                            _unresolved_dressing.append(_rect["id"])
+                    break
+    _head_clearance["dressing_moves"] = _dressing_moves
+    _head_clearance["unresolved_dressing"] = _unresolved_dressing
     metrics = {n: char_metrics(shot_cam, world_xs[n], world_zs[n],
                               base_scale=char_scales[n])
                for n in names}
@@ -7007,30 +7881,18 @@ def _render_shot(args: dict) -> dict:
     # and safe_frame steps down honestly only when the path truly
     # cannot fit. A walking bystander no longer widens the shot
     # (he may exit the frozen crop -- natural for a retreat).
-    # Step sizes match _event_fn (walk_to 320, run_to 380,
-    # walk_mud 300); the retreat flip matches _walk_direction.
-    # The cue fallback (no compiled events) keeps the old
-    # full-body behaviour for legacy shots.
-    _WALK_STEP_PX = {"walk_to": 320.0, "run_to": 380.0,
-                     "walk_mud": 300.0}
+    # The swept-path replay is shared with the FG clearance
+    # (_swept_x_for_actor): step sizes and the retreat flip live
+    # in one place, matching _event_fn. The cue fallback (no
+    # compiled events) keeps the old full-body behaviour for
+    # legacy shots.
     _shot_dir = 1
     if actor is not None and other is not None:
         _shot_dir = 1 if staging[other] > staging[actor] else -1
 
     def _walk_path_box(_box, _n):
-        _pos = float(staging[_n])
-        _lo = _hi = _pos
-        for _s, _e, _ev in _per_actor.get(_n, []):
-            _rp = _ev.get("required_pose") or {}
-            _step = _WALK_STEP_PX.get(_rp.get("primitive"))
-            if _step is None:
-                continue
-            _d = _shot_dir
-            if ((_rp.get("params") or {}).get("retreat")):
-                _d = -_d
-            _pos += _step * _d
-            _lo = min(_lo, _pos)
-            _hi = max(_hi, _pos)
+        _lo, _hi = _swept_x_for_actor(
+            _per_actor.get(_n, []), staging[_n], _shot_dir)
         if _hi <= _lo:
             return _box
         _box = dict(_box)
@@ -7038,6 +7900,18 @@ def _render_shot(args: dict) -> dict:
         _box["half_w"] = float(_box["half_w"]) + (_hi - _lo) / 2.0
         return _box
 
+    # Round 16 (L02-D2): an extreme close-up on a prop-manipulation
+    # event frames the HANDS + PROP, never the face -- the face
+    # defined the R15 ECU of the key going into the lock. Like
+    # object_insert, the crop defers to telemetry (pass 2) or the
+    # mid-shot frame (stills); the anchor branch below leaves the
+    # subjects unset so the freeze path can do its job.
+    # Round 21 (R20-D1): the prop-action test lives in
+    # _deferred_insert_shot (single definition); the ECU
+    # conjunction keeps this flag ECU-only, as before.
+    _ecu_prop_action = (
+        _anchor_st == "extreme_close_up"
+        and _deferred_insert_shot(shot, _shot_events))
     _locomotion_widened = (
         not _shot_events
         and _shot_has_locomotion(_shot_events, shot)
@@ -7056,24 +7930,42 @@ def _render_shot(args: dict) -> dict:
     elif _anchor_st == "close_up":
         _anchor_subjects = [_walk_path_box(
             _standing_box(_anchor_lead, _head_kind), _anchor_lead)]
-        _anchor_others = [_standing_box(n, "full")
-                          for n in names if n != _anchor_lead]
+        _anchor_others = [_walk_path_box(
+            _standing_box(n, "full"), n)
+            for n in names if n != _anchor_lead]
     elif _anchor_st == "medium_close_up":
         _anchor_subjects = [_walk_path_box(_standing_box(
             _anchor_lead, "full" if _anchor_tier == "full" else "mcu"),
             _anchor_lead)]
-        _anchor_others = [_standing_box(n, "head")
-                          for n in names if n != _anchor_lead]
+        _anchor_others = [_walk_path_box(
+            _standing_box(n, "head"), n)
+            for n in names if n != _anchor_lead]
     elif _anchor_st == "extreme_close_up":
-        _anchor_subjects = [_walk_path_box(
-            _standing_box(_anchor_lead, "tight"), _anchor_lead)]
-        _anchor_others = [_standing_box(n, "head")
-                          for n in names if n != _anchor_lead]
+        if _ecu_prop_action:
+            # Deferred: the prop-action framing freezes from
+            # telemetry (see _defer_framing) / the mid-shot
+            # frame. No standing-box subjects: the face must
+            # not define this frame.
+            _anchor_subjects = None
+            _anchor_others = [_standing_box(n, "head")
+                              for n in names]
+        else:
+            _anchor_subjects = [_walk_path_box(
+                _standing_box(_anchor_lead, "tight"), _anchor_lead)]
+            _anchor_others = [_walk_path_box(
+                _standing_box(n, "head"), n)
+                for n in names if n != _anchor_lead]
     elif _anchor_st == "shot_reverse_shot":
         _anchor_subjects = [_walk_path_box(
             _standing_box(_anchor_lead, _head_kind), _anchor_lead)]
-        _anchor_others = [_standing_box(n, "head")
-                          for n in names if n != _anchor_lead]
+        # Round 19 (R18-D1 follow-up): the others' boxes are
+        # walk-path-widened like the lead's -- safe_frame's
+        # fully-in-or-fully-out rule must judge the TRAVELLED
+        # extent, not the staging mark, or a runner judged OUT
+        # runs into the crop and ends half-cut.
+        _anchor_others = [_walk_path_box(
+            _standing_box(n, "head"), n)
+            for n in names if n != _anchor_lead]
     elif _anchor_st == "over_the_shoulder":
         _anchor_subjects = [_standing_box(n, "full") for n in names]
         _anchor_others = []
@@ -7110,7 +8002,8 @@ def _render_shot(args: dict) -> dict:
                                           _anchor_others)
         _frozen = (_safe_shot_a, _safe_focus_a, _frozen_crop_a)
     # The frozen crop rect the FG passes target (None for
-    # object_insert: the crop defers to telemetry in pass 2,
+    # object_insert / ECU prop-action: the crop defers to
+    # telemetry in pass 2,
     # so no early estimate is trusted — FG keeps full-frame
     # behaviour there, recorded in provenance).
     _frozen_crop_rect = (
@@ -7132,6 +8025,13 @@ def _render_shot(args: dict) -> dict:
     # env-less shots never assign it in the elif below).
     _env_fitted = None
     _flame_els: list = []
+    # Round 20: _smoke_els follows the _flame_els precedent --
+    # _build_frame reads it on EVERY path, but the elif below
+    # assigns it only for env shots, so env-less shots raised
+    # NameError (21 suite errors). Bound empty here; the elif
+    # overwrites it with the rising-smoke elements when an
+    # environment exists.
+    _smoke_els: list = []
     if _is_map:
         # W2b: the map IS the background (real polygons, never a
         # rectangular card). Fails loudly without a usable dataset.
@@ -7171,10 +8071,16 @@ def _render_shot(args: dict) -> dict:
             _hr = float(getattr(chars[_n], "head_r", 133.0))
             _hw = max(_hr + 20.0,
                       0.15 * float(char_heights[_n]))
+            # Round 17 (L02-D11): the box covers the character's
+            # whole swept path in the shot, not just the staging
+            # mark -- clearing against the static mark parks the
+            # FG trunk exactly where a runner ends up.
+            _lo, _hi = _swept_x_for_actor(
+                _per_actor.get(_n, []), staging[_n], _shot_dir)
             _subject_boxes.append(
-                (float(staging[_n]) - _hw,
+                (_lo - _hw,
                  float(ground_ys[_n] - char_heights[_n]),
-                 float(staging[_n]) + _hw,
+                 _hi + _hw,
                  float(ground_ys[_n])))
             # Round 15 (L02-D6): head boxes for sun/moon
             # placement -- the disc must not sit behind a head.
@@ -7202,12 +8108,22 @@ def _render_shot(args: dict) -> dict:
         # fire/flame elements join the animated set (flame
         # flicker): they are drawn per frame by _draw_flames
         # in _build_frame, never baked into the background.
+        # Round 20: rising smoke (flagged ``rises`` by the
+        # builder -- chimney/hearth smoke only; distant
+        # artillery smoke and steam keep the static blob)
+        # joins the animated set, drawn per frame by
+        # _draw_smoke in _build_frame.
+        _smoke_els = [e for e in _env_fitted.get("elements", [])
+                      if isinstance(e, dict)
+                      and e.get("kind") in _SMOKE_KINDS
+                      and (e.get("extra") or {}).get("rises")]
         _animated_ids = [e["id"] for e in
                          _env_fitted.get("elements", [])
                          if isinstance(e, dict)
                          and (e.get("kind") == "sparks"
                               or e.get("geometry") == "sparks"
                               or e.get("kind") in _FLICKER_KINDS)]
+        _animated_ids += [e["id"] for e in _smoke_els]
         _flame_els = [e for e in _env_fitted.get("elements", [])
                       if isinstance(e, dict)
                       and e.get("kind") in _FLICKER_KINDS]
@@ -7359,6 +8275,35 @@ def _render_shot(args: dict) -> dict:
     _anchors = {n: _furniture_anchors(
         _env_pkg, shot_cam, (W, H), staging[n], ground_ys[n],
         chars[n].H, facings[n]) for n in names}
+    # Round 16 (L02-D2): lock anchors for INSERT_KEY events.
+    # The lock is a staged target assembly (a coop-door panel +
+    # a padlock), not a script prop: its position is solved from
+    # the actor's staged shoulder and arm reach so the insert
+    # is reachable BY CONSTRUCTION (the IK clamp is the
+    # backstop, not the plan). In-segment insert events come
+    # from _per_actor; locks opened earlier in the scene come
+    # from the cross-segment scan (same shape as the held-pose
+    # memory). The panel + lock draw in _build_frame; the open
+    # articulation keys off the event window (see _lock_open_u).
+    _lock_events: dict[str, dict] = {}
+    for _an, _wins in _per_actor.items():
+        for _ws, _we, _ev in _wins:
+            if ((_ev.get("required_pose") or {}).get("primitive")
+                    == "insert_key" and _an in chars):
+                _lock_events[_an] = _ev
+                break
+    for _an, _ev in _lock_events_at_start(
+            _compiled_all, shot.get("scene"), _t0,
+            _id_to_name).items():
+        if _an in chars and _an not in _lock_events:
+            _lock_events[_an] = _ev
+    _lock_anchors: dict[str, tuple[float, float]] = {}
+    for _an in _lock_events:
+        _sh = joints0[_an]["shoulder"]
+        _reach = float(chars[_an].u_arm) + float(chars[_an].l_arm)
+        _lock_anchors[_an] = (
+            _sh[0] + facings[_an] * 0.82 * _reach,
+            _sh[1] + 0.12 * char_heights[_an])
     # Round-8 (R2-V1): named support tops for surface placements
     # (the place_on_surface primitive reaches to the support the
     # script names). Same structural selection as the prop-rest
@@ -7372,6 +8317,10 @@ def _render_shot(args: dict) -> dict:
     # the ground line instead (ground rule, §7).
     _prop_dicts = {str(p["id"]): p for p in package.get("props") or []
                    if isinstance(p, dict) and p.get("id")}
+    # Round 17 (L02-D3): bag-kind props get the worn presentation
+    # when no event stages them this frame (see _build_frame).
+    _worn_bag_pids = [str(_pid) for _pid, _pd in _prop_dicts.items()
+                      if infer_prop_kind(_pd) == "bag"]
     _first_actor_for_pid: dict[str, str] = {}
     for _e in _shot_events:
         _pid = _e.get("prop_id")
@@ -7431,6 +8380,10 @@ def _render_shot(args: dict) -> dict:
     # head was extended to the anvil top at the contact instant.
     # Closure-appended by _build_frame; reported on the shot result.
     _contact_snaps: list[dict] = []
+    # Round 20: previous frame's hammer screen position, for the
+    # impact speed lines (the trail follows the hammer head's
+    # own motion, never an invented path).
+    _prev_hammer_xy: list = [None]
     _activate_events = [
         e for e in _shot_events
         if e.get("action_type") == "ACTIVATE"
@@ -7479,6 +8432,23 @@ def _render_shot(args: dict) -> dict:
         # no compiled events, so the legacy path runs unchanged
         # there.
         _compiled_motion = bool(_shot_events)
+        # Round 18 (R17-D1): the round-7 _compiled_motion guard
+        # covered locomotion only, so a scene-leaked "give" cue
+        # staged a phantom handover in a split shot whose
+        # handover event belongs to a later span (Loop 02 #15:
+        # the key sat at the unreachable meeting point while
+        # An's hand never contacted it). A prop-affecting legacy
+        # pose stages only when an event of the same family
+        # covers THIS span -- or when the package has no compiled
+        # actions at all (free-form, where cues are the only
+        # motion source). When an event covers the span, the W4
+        # loop owns the pose anyway, so the gate changes nothing
+        # there.
+        _shot_types = {e.get("action_type") for e in _shot_events}
+        _give_covered = (not _compiled_all) or (
+            "HAND_OVER" in _shot_types)
+        _pick_covered = (not _compiled_all) or bool(
+            {"BEND_PICK", "KNEEL_PICK"} & _shot_types)
         if "board" in cues and not _compiled_motion:
             # Lan boards: walk to the bus door.
             fns[actor] = walk_to(chars[actor], ax, sx(BUS_DOOR_X, shot_cam),
@@ -7490,11 +8460,12 @@ def _render_shot(args: dict) -> dict:
               and not _compiled_motion):
             fns[actor] = walk_to(chars[actor], ax, ax + 320 * direction,
                                  duration, ground_ys[actor])
-        elif "bend_pick" in cues:
+        elif "bend_pick" in cues and _pick_covered:
             prop_x, prop_y = ax + 220, ground_ys[actor] - 6
             prop.update(x=prop_x, y=prop_y)
             fns[actor] = kneel_pick(chars[actor], (prop_x, prop_y), duration, ground_ys[actor])
-        elif "give" in cues and other is not None:
+        elif "give" in cues and other is not None \
+                and _give_covered:
             standing(chars[actor], ax, ground_ys[actor],
                      facing=1 if staging[other] > ax else -1)
             standing(chars[other], staging[other], ground_ys[other],
@@ -7529,35 +8500,75 @@ def _render_shot(args: dict) -> dict:
     _insert_idle_windows: list[str] = []
     _pair_blocks: dict[str, list] = {}
     _pair_windows: dict[str, list] = {}
+
+    def _make_event_ctx(_name):
+        # One construction for the _event_fn context, shared by the
+        # _per_actor loop and the Round-16 held-pose fallback so the
+        # two can never drift. "pos" is fresh per call: movers update
+        # it so chained events start where the previous one ended.
+        return {
+            "name": _name, "char": chars[_name],
+            "gaze_seed": _gaze_seeds.get(_name, 0),
+            "other_name": other,
+            "other_char": chars.get(other) if other else None,
+            "staging_x": staging[_name],
+            "ground_y": ground_ys[_name],
+            "direction": _direction, "facing": facings[_name],
+            "prop": prop, "paper": _anchors[_name]["paper"],
+            "desk": _anchors[_name]["desk"],
+            "anvil": _anchors[_name]["anvil"],
+            "supports": _support_tops,
+            "chair_x": _anchors[_name]["chair"]["x"],
+            "seat_y": _anchors[_name]["chair"]["seat_y"],
+            "rests": _rests, "pos": {"x": staging[_name]},
+            "joints0": joints0, "id_to_name": _id_to_name,
+            "lock_anchor": _lock_anchors.get(_name),
+            "name_to_id": _name_to_id,
+        }
+
     if _per_actor:
         for _name, _wins in _per_actor.items():
             if _name not in chars:
                 continue
-            _ctx = {
-                "name": _name, "char": chars[_name],
-                "gaze_seed": _gaze_seeds.get(_name, 0),
-                "other_name": other,
-                "other_char": chars.get(other) if other else None,
-                "staging_x": staging[_name],
-                "ground_y": ground_ys[_name],
-                "direction": _direction, "facing": facings[_name],
-                "prop": prop, "paper": _anchors[_name]["paper"],
-                "desk": _anchors[_name]["desk"],
-                "anvil": _anchors[_name]["anvil"],
-                "supports": _support_tops,
-                "chair_x": _anchors[_name]["chair"]["x"],
-                "seat_y": _anchors[_name]["chair"]["seat_y"],
-                "rests": _rests, "pos": {"x": staging[_name]},
-                "joints0": joints0, "id_to_name": _id_to_name,
-                "name_to_id": _name_to_id,
-            }
+            _ctx = _make_event_ctx(_name)
             _base_windows = []
             _overlays = []
             _has_sit = any(
                 ((_ev.get("required_pose") or {}).get("primitive")
                  == "sit_at_desk")
                 for _ws, _we, _ev in _wins)
-            if _seated_at_start.get(_name) and not _has_sit:
+            _held_ev = _held_at_start.get(_name)
+            _held_prim = ((_held_ev or {}).get("required_pose")
+                          or {}).get("primitive") \
+                if _held_ev is not None else None
+            _has_held_here = _held_prim is not None and any(
+                ((_ev.get("required_pose") or {}).get("primitive")
+                 == _held_prim)
+                for _ws, _we, _ev in _wins)
+            if _held_ev is not None and not _has_held_here:
+                # Round 16 (L02-D8): the character entered this shot
+                # in a held body pose (sat down in an earlier
+                # segment/shot of the scene). Seat them in the first
+                # instant (a 1 ms hold window at the completion
+                # pose, like the seated prefix below) so the
+                # following windows act on the held body and gaps
+                # hold the pose instead of standing idle. The shot
+                # that carries the establishing event itself skips
+                # this: its own window animates the sit.
+                _held_dur = max(
+                    0.05,
+                    float(_held_ev.get("end_time", 0.0))
+                    - float(_held_ev.get("start_time", 0.0)))
+                _held_fn = _event_fn(
+                    _held_prim,
+                    (_held_ev.get("required_pose") or {}).get(
+                        "params") or {},
+                    _held_ev, _ctx, _held_dur)
+                if _held_fn is not None:
+                    _base_windows.append((
+                        0.0, 0.001,
+                        lambda _t, _f=_held_fn, _d=_held_dur: _f(_d)))
+            elif _seated_at_start.get(_name) and not _has_sit:
                 # Seated state carried across the CUT: seat the
                 # character in the first instant of the shot (a
                 # 1 ms hold window at the sit completion pose) so
@@ -7648,6 +8659,42 @@ def _render_shot(args: dict) -> dict:
             # The event fn owns the actor: the legacy give_fn must not
             # override it in the frame loop.
             give_fn = None
+    # Round 16 (L02-D8): characters with a held pose but NO events in
+    # this shot never enter the _per_actor loop above, so without this
+    # they idle standing -- the Loop 02 shot-13 defect (An's sit
+    # vanished in the segment after the sit event's span ended).
+    # Give them a sequenced fn whose only window is the 1 ms
+    # completion-pose hold: the body holds the pose for the shot
+    # while the face stays alive (expression/blink/gaze and the
+    # talk/listen nods run as overlays in the frame loop).
+    # Seated-at-desk characters are NOT covered here: the seated path
+    # stages them at furniture, which this fallback cannot reproduce;
+    # that gap is recorded as a follow-up.
+    _held_override = set(_pair_windows) | set(_pair_blocks)
+    for _name, _held_ev in _held_at_start.items():
+        if _name not in chars or _name in _held_override:
+            continue
+        _held_prim = ((_held_ev or {}).get("required_pose")
+                      or {}).get("primitive")
+        _held_dur = max(
+            0.05,
+            float(_held_ev.get("end_time", 0.0))
+            - float(_held_ev.get("start_time", 0.0)))
+        _held_fn = _event_fn(
+            _held_prim,
+            (_held_ev.get("required_pose") or {}).get("params") or {},
+            _held_ev, _make_event_ctx(_name), _held_dur)
+        if _held_fn is None:
+            continue
+        _base_fn = fns.get(_name)
+        fns[_name] = _sequence_fns(
+            [(0.0, 0.001,
+              lambda _t, _f=_held_fn, _d=_held_dur: _f(_d))],
+            [], _base_fn)
+        try:
+            fns[_name](0.0)
+        except Exception:
+            pass
     talk_nod = None
     # Round-4 "hon": listeners react while someone else speaks --
     # a slow nod each, phase-offset per character (deterministic
@@ -7655,7 +8702,21 @@ def _render_shot(args: dict) -> dict:
     # head_look-overlay mechanism as the speaker's talk_nod.
     listen_nods: dict[str, tuple] = {}
     if shot["kind"] in ("narration", "dialogue") and actor is not None:
-        talk_nod = nod(chars[actor], duration, freq=1.1, amp=0.08)
+        # Round 16 (R15-D1): the talk nod runs on the
+        # speaker's gaze grid (the seed shared with the idle
+        # and the eyes) at 0.5 Hz. A 1.1 Hz sine sampled on
+        # the 0.25 s grid jumps up to 0.12 rad per boundary
+        # (99 deg phase steps) -- measured 8.6M rim-diff pops
+        # on delivered frames; at 0.5 Hz the 45 deg steps
+        # glide inside the 2-frame ease.
+        # Round 19: the talk nod is gated by the real voice
+        # segment -- the same span the mouth envelope uses --
+        # so the head nods while speech is happening and holds
+        # still through the post-voice beat.
+        talk_nod = nod(chars[actor], duration, freq=0.5, amp=0.08,
+                       gaze_seed=_gaze_seeds.get(actor, 0),
+                       speech_gate=(0.0, float(shot.get(
+                           "voice_duration", duration))))
         talk_nod(0.0)
         for _ln in names:
             if _ln == actor or _ln not in chars:
@@ -7663,8 +8724,10 @@ def _render_shot(args: dict) -> dict:
             _phase = (zlib.crc32(
                 f"{shot.get('directive_shot_id')}:{_ln}".encode(
                     "utf-8")) % 1000) / 1000.0 * 3.0
-            _lfn = nod(chars[_ln], duration, freq=0.33, amp=0.05)
-            _lfn(_phase)
+            _lfn = nod(chars[_ln], duration, freq=0.33, amp=0.05,
+                       gaze_seed=_gaze_seeds.get(_ln, 0),
+                       phase=_phase)
+            _lfn(0.0)
             listen_nods[_ln] = (_lfn, _phase)
     # ---- subtitles for this shot ------------------------------------
     phrases = split_subtitle(shot.get("text", "")) if shot.get("text") else []
@@ -7772,6 +8835,33 @@ def _render_shot(args: dict) -> dict:
     _shadow_key = (rig_for(_env_light).key if _env_light
                    else bg_scene.lights.key)
 
+    def _lock_open_u(_t, _name):
+        # 0 through the approach + insert, ramping during the
+        # turn phase (the last 40% of the event window -- the
+        # same phase split the insert_key primitive uses), 1
+        # after the window closes (the lock stays open for the
+        # rest of the shot, including later segments). The
+        # clipped window wins when the event runs inside this
+        # segment (exact, no trust assumption); else the
+        # absolute event times (trusted: the cross-segment scan
+        # only admits trusted events).
+        _ev = _lock_events.get(_name)
+        if _ev is None:
+            return 0.0
+        for _ws, _we, _wev in _per_actor.get(_name, []):
+            if _wev is _ev:
+                _s, _e = _ws, _we
+                break
+        else:
+            _s = float(_ev.get("start_time", 0.0)) - _t0
+            _e = float(_ev.get("end_time", _s)) - _t0
+        if _t <= _s + 0.6 * (_e - _s):
+            return 0.0
+        if _t >= _e:
+            return 1.0
+        return (_t - (_s + 0.6 * (_e - _s))) / max(
+            0.4 * (_e - _s), 1e-6)
+
     def _build_frame(t, fi, expr_overrides, *, paint_glow=True):
         # paint_glow=False defers the energy halo to the pass-2
         # re-frame (deferred inserts): a halo painted pre-crop is
@@ -7802,10 +8892,50 @@ def _render_shot(args: dict) -> dict:
         # with the same flicker value (see _draw_flames).
         for _fel in _flame_els:
             _draw_flames(img, d, _fel, shot_cam, W, H, frame=fi)
+        # Round 20: rising smoke draws per frame on the
+        # background copy, before the characters, like the
+        # flames -- a character in front of the chimney
+        # correctly occludes the plume.
+        for _sel in _smoke_els:
+            _draw_smoke(img, d, _sel, shot_cam, W, H, frame=fi)
         # Poses are set: the live joints give heads (gaze targets),
         # hips (pocket rests) and hands (prop attachment) for this
         # exact frame.
         joints_pre = {n: chars[n].joints() for n in names}
+        # Round 20 (R19-D2): worn-bag presentations, computed
+        # once per frame from the pre-draw joints. The held-
+        # prop clearance (machine + legacy paths below) and
+        # the worn draw block share these positions, so the
+        # clearance rects exactly match the drawn bags. The
+        # rect covers the bag body plus the handle arc above
+        # it (the _draw_prop "bag" branch geometry).
+        _worn_draws: list[dict] = []
+        if _worn_bag_pids and _char_elev_deg < 45.0:
+            for _pid in _worn_bag_pids:
+                _owner = _worn_bag_owner(
+                    _compiled_all, _pid, _t0 + t, _id_to_name)
+                if _owner is None or _owner not in joints_pre:
+                    continue
+                _jn = joints_pre[_owner]
+                _sc = float(chars[_owner].H) / 560.0
+                _facing = chars[_owner].pose.get(
+                    "facing", facings.get(_owner, 1))
+                _shx, _shy = _jn["shoulder"]
+                _hpx, _hpy = _jn["hip"]
+                _bx = _hpx + _facing * 52.0 * _sc
+                _by = _hpy + 26.0 * _sc
+                _fw, _fh = geometry_footprint("bag")
+                _w, _h = _fw * _sc, _fh * _sc
+                _worn_draws.append({
+                    "pid": _pid, "bx": _bx, "by": _by,
+                    "w": _w, "h": _h,
+                    "strap_from": (_shx, _shy),
+                    "strap_to": (_bx, _by - 20.0 * _sc),
+                    "strap_w": max(3, int(6 * _sc)),
+                    "rect": (_bx - _w / 2.0, _by - _h / 2.0 - 6.0,
+                             _bx + _w / 2.0, _by + _h / 2.0),
+                })
+        _worn_rects = [_wd["rect"] for _wd in _worn_draws]
         # Joints keyed by both display name and character id: the
         # state machine resolves holders by id, the frame loop by
         # name. Built once, shared by the machine draws and the
@@ -7928,6 +9058,40 @@ def _render_shot(args: dict) -> dict:
                         and _holder_name in chars:
                     # A carried bag hangs below the holding hand.
                     _my += 68.0 * chars[_holder_name].H / 560.0
+                # Round 17 (R16-O1): held-prop head clearance.
+                # A small prop centred on a hand raised beside a
+                # face draws across the eye/cheek (Loop 02: the
+                # key over Ba Tu's eye, An's temple). Push the
+                # DRAW position radially out of every head disc
+                # it intrudes; the hand never moves. Shield /
+                # hammer / bag keep their choreographed
+                # presentations. Before the tip: tips follow the
+                # cleared position.
+                if _mstate in ("GRASPED", "ATTACHED_TO_HAND",
+                               "IN_USE") \
+                        and _machine_kinds[_pid] not in (
+                            "shield", "hammer", "bag"):
+                    for _nm2, _jj2 in joints_pre.items():
+                        if _nm2 not in chars:
+                            continue
+                        _hc2 = _jj2.get("head")
+                        if _hc2 is None:
+                            continue
+                        _mx, _my = _clear_head(
+                            (_mx, _my), _hc2,
+                            float(getattr(chars[_nm2], "head_r",
+                                          0.0)),
+                            float(chars[_nm2].H))
+                    # Round 20 (R19-D2): a held prop whose
+                    # hand swings over the owner's worn bag
+                    # hides behind the bag (the bag draws
+                    # after the props). Push the DRAW position
+                    # radially out of every worn-bag rect;
+                    # the hand never moves. Same gating as
+                    # the head clearance above.
+                    if _worn_rects:
+                        _mx, _my = _clear_worn_bags(
+                            (_mx, _my), _worn_rects)
                 _tip = None
                 if _holder_name in chars and _mstate in (
                         "GRASPED", "ATTACHED_TO_HAND", "IN_USE"):
@@ -8092,6 +9256,30 @@ def _render_shot(args: dict) -> dict:
                 _effect_peak[_eid] = max(
                     _effect_peak.get(_eid, 0.0), _rec["intensity"])
                 _effect_frames[_eid] = _effect_frames.get(_eid, 0) + 1
+        # Round 16 (L02-D2): the lock target assembly -- a
+        # grounded coop-door panel + padlock at each staged
+        # lock anchor, on the MG layer (before the characters,
+        # so the actor occludes the panel). The panel is the
+        # door the script names ("chuồng gà"); the lock opens
+        # on the insert event's turn phase. Flat fills, like
+        # the props (no tod bake on staged elements).
+        for _ln, _la in _lock_anchors.items():
+            _gy = ground_ys[_ln]
+            _pw, _pt = 170.0, _la[1] - 90.0
+            d.rectangle([_la[0] - _pw / 2, _pt,
+                         _la[0] + _pw / 2, _gy],
+                        fill=(150, 110, 70),
+                        outline=(30, 25, 20), width=4)
+            for _sx in (-_pw / 6, _pw / 6):
+                d.line([(_la[0] + _sx, _pt),
+                        (_la[0] + _sx, _gy)],
+                       fill=(30, 25, 20), width=3)
+            d.line([(_la[0] - _pw / 2, _pt + 26),
+                    (_la[0] + _pw / 2, _pt + 26)],
+                   fill=(30, 25, 20), width=3)
+            _draw_prop(d, _la[0], _la[1], kind="lock",
+                       w=64, h=56,
+                       open_u=_lock_open_u(t, _ln))
         joints_now: dict[str, dict] = {}
         for n in names:
             ch = chars[n]
@@ -8242,7 +9430,8 @@ def _render_shot(args: dict) -> dict:
                 view=_view, gaze=_gaze,
                 hand_grips=_grips.get(n),
                 ground_kind=((_env_fitted or {}).get("ground")
-                            or {}).get("kind"))
+                            or {}).get("kind"),
+                elevation_deg=_char_elev_deg)
         if fg_layer is not None:
             # Foreground boxes occlude the characters behind them.
             img.paste(fg_layer, (0, 0), fg_layer)
@@ -8255,13 +9444,17 @@ def _render_shot(args: dict) -> dict:
         # actor exists, else the shot ground line).
         _prop_ground_y = ground_ys[actor] if actor in ground_ys \
             else shot_ground_y
-        if "bend_pick" in cues and prop.get("x"):
+        # R17-D15: the puddle is a RAIN element, not a bend_pick
+        # element -- without the rainy gate, the scene-leaked
+        # bend_pick cue drew a rain puddle on sunny streets.
+        if rainy and "bend_pick" in cues and prop.get("x"):
             _draw_puddle(d, prop["x"], _prop_ground_y)
         # prop: at the actor's hand once picked up / at the handover
         # midpoint during give, on the ground before that. In dialogue
         # shots the current holder (tracked in plan_shots) holds it.
         # Empty-cast shots have no hands: the prop is skipped.
         wx, wy = None, None
+        _legacy_drew = False
         _home_x = staging[actor] + 220 if actor in staging else W // 2
         if _prop_machine is not None:
             # W4: held/moving props draw at their state-machine
@@ -8368,6 +9561,7 @@ def _render_shot(args: dict) -> dict:
             elif _behind_draws:
                 wx, wy = _behind_draws[0][1], _behind_draws[0][2]
         elif has_prop and joints_now:
+            _legacy_drew = True
             d = ImageDraw.Draw(img, "RGBA")
             if give_fn is not None:
                 wx, wy = prop["x"], prop["y"]
@@ -8379,17 +9573,186 @@ def _render_shot(args: dict) -> dict:
                     and other in joints_now:
                 hx, hy = joints_now[other]["hand_r"]
                 wx, wy = hx + 10, hy + 14
-            elif shot["kind"] != "action":
-                holder = shot.get("prop_holder")
-                if holder in joints_now:
-                    hx, hy = joints_now[holder]["hand_r"]
+            else:
+                # Round 17 (L02-D7): a held prop stays in the
+                # holder's hand in EVERY shot kind. The old
+                # action-kind branch dropped the prop on the
+                # ground even when the shot declared a holder
+                # and the event history said it was held (Loop
+                # 02 #11/#17: the key on the ground / at the
+                # frame corner while An held it). Event history
+                # wins over the plan_shots holder: the handover
+                # event, not the shot plan, decides who holds
+                # the prop at this instant.
+                _holder = None
+                _pids0 = shot.get("props") or []
+                if _pids0:
+                    _hid = _incoming_holder(
+                        _compiled_all, str(_pids0[0]), _t0)
+                    if _hid is not None:
+                        _holder = _id_to_name.get(str(_hid))
+                if _holder is None:
+                    _holder = shot.get("prop_holder")
+                if _holder in joints_now:
+                    hx, hy = joints_now[_holder]["hand_r"]
                     wx, wy = hx + 10, hy + 14
                 else:
                     wx, wy = prop["x"] or _home_x, _prop_ground_y - 6
-            else:
-                wx, wy = prop["x"] or _home_x, _prop_ground_y - 6
+            # Round 17 (R16-O1): head clearance for the
+            # legacy draw too (same rule as the machine path;
+            # the disc test gates it, so ground rests only move
+            # when a head is at ground level beside them).
+            if (shot.get("prop_kind") or "wallet") not in (
+                    "shield", "hammer", "bag"):
+                for _nm2, _jj2 in joints_now.items():
+                    if _nm2 not in chars:
+                        continue
+                    _hc2 = _jj2.get("head")
+                    if _hc2 is None:
+                        continue
+                    wx, wy = _clear_head(
+                        (wx, wy), _hc2,
+                        float(getattr(chars[_nm2], "head_r", 0.0)),
+                        float(chars[_nm2].H))
+                # Round 20 (R19-D2): worn-bag clearance for
+                # the legacy draw too (same rule as the
+                # machine path).
+                if _worn_rects:
+                    wx, wy = _clear_worn_bags((wx, wy), _worn_rects)
             _draw_prop(d, wx, wy,
                        kind=shot.get("prop_kind") or "wallet")
+        # Round 17 (L02-D3): worn bags. A bag the owner possesses
+        # but no event stages this frame is pocket-hidden by the
+        # machine -- invisible for whole shots (Loop 02: An's
+        # letter bag). Draw it worn: a diagonal strap over the
+        # torso + the bag at the hip, following the owner's live
+        # joints. Skipped when the machine or the legacy path
+        # drew the prop this frame (an actively staged bag keeps
+        # its staged presentation), and at top-view elevations
+        # (rig joints do not project there -- the R16-2a gap).
+        if _worn_draws and _char_elev_deg < 45.0:
+            _drawn_pids = {d[0] for d in _machine_draws}
+            if _legacy_drew:
+                _lp = (shot.get("props") or [None])[0]
+                if _lp is not None:
+                    _drawn_pids.add(str(_lp))
+            for _wd in _worn_draws:
+                if _wd["pid"] in _drawn_pids:
+                    continue
+                _d2 = ImageDraw.Draw(img, "RGBA")
+                _d2.line([_wd["strap_from"], _wd["strap_to"]],
+                         fill=INK_RGB, width=_wd["strap_w"])
+                _draw_prop(_d2, _wd["bx"], _wd["by"], kind="bag",
+                           w=_wd["w"], h=_wd["h"])
+        # Round 20 (effects richness): the strike impact
+        # overlay -- an expanding ring at the contact point for
+        # 3 frames after each strike moment, plus speed lines
+        # trailing the hammer through the STRIKE phase
+        # ([HOLD_U, STRIKE_U] of the cycle). Both anchor on
+        # real state only: the sparks element's projected
+        # centre (no sparks element / off-camera -> nothing)
+        # and the hammer's own drawn position (machine draw,
+        # else the striker's hammer hand). The overlay draws
+        # last, over the characters, like a comic impact beat.
+        _sparks_xy = _reactive_anchors.get("sparks_xy")
+        _now = _t0 + t
+        if _sparks_xy is not None and _strike_moments:
+            _sx, _sy = _sparks_xy
+            # Round 21: one most-recent strike drives the
+            # whole impact beat -- glow pulse (8f) + dust puff
+            # (10f) + ring (3f) + star (2f). The ring/star
+            # drawing below is unchanged; the wider search
+            # window only adds the glow and dust. No camera
+            # shake: the camera stays FIXED within the shot.
+            _age_f = None
+            for _sm in _strike_moments:
+                _a = (_now - _sm) * FPS
+                if 0 <= _a < 10:
+                    _age_f = _a
+                    break
+            if _age_f is not None:
+                _glow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+                _gd = ImageDraw.Draw(_glow)
+                if _age_f < 8:
+                    _fade = 1.0 - _age_f / 8.0
+                    _grow = 1.0 + 0.08 * _age_f
+                    for _gr, _ga in ((54, 45), (36, 75), (20, 110)):
+                        _r = _gr * _grow
+                        _gd.ellipse(
+                            [_sx - _r, _sy - _r * 0.62,
+                             _sx + _r, _sy + _r * 0.62],
+                            fill=(255, 190, 110, int(_ga * _fade)))
+                # Dust: five dots fanning out and down from the
+                # contact, expanding and fading over 10 frames.
+                _dust_a = int(150 * (1.0 - _age_f / 10.0))
+                if _dust_a > 0:
+                    for _ang in (20.0, 60.0, 90.0, 120.0, 160.0):
+                        _rad = math.radians(_ang)
+                        _dist = 16.0 + 7.0 * _age_f
+                        _dx = _sx + math.cos(_rad) * _dist
+                        _dy = (_sy + 8.0
+                               + math.sin(_rad) * _dist * 0.55)
+                        _dr = 5.0 + 1.6 * _age_f
+                        _gd.ellipse(
+                            [_dx - _dr * 1.6, _dy - _dr,
+                             _dx + _dr * 1.6, _dy + _dr],
+                            fill=(205, 188, 155, _dust_a // 2))
+                        _gd.ellipse(
+                            [_dx - _dr, _dy - _dr * 0.7,
+                             _dx + _dr, _dy + _dr * 0.7],
+                            fill=(205, 188, 155, _dust_a))
+                img.paste(_glow, (0, 0), _glow)
+                if _age_f < 3:
+                    _rr = 12.0 + 11.0 * _age_f
+                    d.ellipse([_sx - _rr, _sy - _rr * 0.62,
+                               _sx + _rr, _sy + _rr * 0.62],
+                              outline=(255, 250, 235), width=3)
+                    if _age_f < 2:
+                        _sl = 30.0 - 8.0 * _age_f
+                        d.line([(_sx - _sl, _sy), (_sx + _sl, _sy)],
+                               fill=(255, 250, 235), width=2)
+                        d.line([(_sx, _sy - _sl), (_sx, _sy + _sl)],
+                               fill=(255, 250, 235), width=2)
+            _strike_window = (HAMMER_CYCLE_STRIKE_U
+                              - HAMMER_CYCLE_HOLD_U) \
+                * HAMMER_CYCLE_SEC
+            _in_strike = any(
+                _sm - _strike_window <= _now < _sm
+                for _sm in _strike_moments)
+            _hammer_xy = None
+            for (_pid, _dx, _dy, _dkind, _ou, _st, _tip) \
+                    in _machine_draws:
+                if _dkind == "hammer":
+                    _hammer_xy = (_dx, _dy)
+                    break
+            if _hammer_xy is None:
+                for (_nm, _ss, _se) in _strike_spans:
+                    if _ss <= _now <= _se and _nm in joints_now:
+                        _hammer_xy = joints_now[_nm].get("hand_r")
+                        break
+            _prev = _prev_hammer_xy[0]
+            if (_in_strike and _hammer_xy is not None
+                    and _prev is not None):
+                _vx = _hammer_xy[0] - _prev[0]
+                _vy = _hammer_xy[1] - _prev[1]
+                if _vy > 6.0 and (_vx * _vx + _vy * _vy) ** 0.5 > 8.0:
+                    _sp = (_vx * _vx + _vy * _vy) ** 0.5
+                    _ux, _uy = _vx / _sp, _vy / _sp
+                    _px, _py = -_uy, _ux
+                    # Round 21: longer trails (1.2x speed
+                    # span, was 0.7x) and thicker strokes -- the
+                    # lines already fire on f16-f18; they must
+                    # READ at full-frame distance.
+                    for _off, _wd in ((-12.0, 3), (0.0, 4),
+                                      (12.0, 3)):
+                        _bx = _hammer_xy[0] + _px * _off
+                        _by = _hammer_xy[1] + _py * _off
+                        d.line([(_bx - _ux * _sp * 1.5,
+                                 _by - _uy * _sp * 1.5),
+                                (_bx - _ux * _sp * 0.3,
+                                 _by - _uy * _sp * 0.3)],
+                               fill=(255, 248, 230), width=_wd)
+            _prev_hammer_xy[0] = _hammer_xy
         # Grip telemetry draws (sprint section 10): every prop draw
         # this frame, with its state-machine holder/hand/angle and
         # whether the grip fan was repainted over it. The frame
@@ -8463,7 +9826,7 @@ def _render_shot(args: dict) -> dict:
             if talk_nod is not None:
                 talk_nod(_st)
             for _lfn, _lph in listen_nods.values():
-                _lfn(_st + _lph)
+                _lfn(_st)  # phase rides inside the nod now
     # The D2 frozen crop (_frozen, _crop_notes, _standing_box)
     # was computed before the environment build above (round 6)
     # and is reused here unchanged.
@@ -8478,7 +9841,9 @@ def _render_shot(args: dict) -> dict:
     # one frozen crop at build time). The camera stays FIXED
     # within the shot: one rect, chosen from measured data.
     _defer_framing = (
-        shot["shot_type"] == "object_insert"
+        (shot["shot_type"] == "object_insert"
+         or (shot["shot_type"] == "extreme_close_up"
+             and _ecu_prop_action))
         and not still_only
         and _split is None
         and (_prop_machine is not None or has_prop))
@@ -8644,7 +10009,7 @@ def _render_shot(args: dict) -> dict:
         # camera_at() in camera_planner.py holds the tested
         # camera-path geometry for tooling use only.
         if _frozen is None and not _defer_framing:
-            # object_insert (stills / split-screen only — the
+            # object_insert / ECU prop-action (stills / split-screen only — the
             # multi-frame path defers to pass 2): the prop
             # position is only known once a frame is built.
             # Anchor from THIS first frame's prop position (or
@@ -8813,6 +10178,31 @@ def _render_shot(args: dict) -> dict:
                 _insert_anchor["prop_w"] / _cw2, 4)
         _insert_anchor["applied_scale"] = float(
             safe_shot["camera"]["scale"])
+        # Round 17 (R16-D1): bystander-head exclusion for the
+        # deferred crop. The subject box is small (180x120 floor)
+        # but the ECU crop at the 3.4x scale cap is 565x318, so a
+        # bystander staged near the insert point lands inside the
+        # crop even though no subject box touches them (Loop 02
+        # ECU: Ba Tu's face top-right in every frame). Shift the
+        # crop rect away from intruding non-subject heads; the
+        # prop anchor stays inside with margin and the rect stays
+        # in frame. Computed once from medians: the crop stays
+        # frozen within the shot (the RicksClips rule).
+        if _insert_anchor.get("x") is not None:
+            _heads2 = _median_bystander_heads(_grip_telemetry)
+            _rect2, _excl2 = _exclude_heads_from_crop(
+                list(_frozen_crop2["crop_rect"]),
+                (_insert_anchor["x"], _insert_anchor["y"]),
+                _heads2, 40.0, W, H)
+            if _excl2 is not None:
+                _frozen_crop2["crop_rect"] = _rect2
+                _frozen = (_safe_shot2, _safe_focus2, _frozen_crop2)
+                safe_shot, safe_focus, _frozen_crop = _frozen
+                _insert_anchor["bystander_crop_exclusion"] = _excl2
+                _crop_notes.append(
+                    "bystander crop exclusion: "
+                    f"cleared={_excl2['cleared']} "
+                    f"remaining={_excl2['remaining']}")
         _crop_notes.extend(_notes2)
         _crop_notes.append(
             "insert two-pass: crop frozen from "
@@ -9072,6 +10462,10 @@ def _render_shot(args: dict) -> dict:
         "crop_notes": list(_crop_notes),
         "insert_two_pass": _defer_framing,
         "insert_anchor": _insert_anchor,
+        "lock_anchors": {n: [float(a[0]), float(a[1])]
+                         for n, a in _lock_anchors.items()},
+        "lock_open_u_end": {n: round(_lock_open_u(duration, n), 3)
+                            for n in _lock_events},
         "camera_directive": {
             "mode": _directive.mode.value,
             "anchor": _directive.anchor,
@@ -9135,6 +10529,8 @@ def _render_shot(args: dict) -> dict:
         "anchor_tier": _anchor_tier,
         "anchor_tier_capped": _tier_capped,
         "seated_at_start": dict(_seated_at_start),
+        "held_at_start": {n: str(e.get("action_id"))
+                          for n, e in _held_at_start.items()},
         # Last built frame's prop draws (pid, state) and joints:
         # for stills this IS the frame; for videos it is the final
         # frame. P9 consumes the event ids + diagnostics for the
