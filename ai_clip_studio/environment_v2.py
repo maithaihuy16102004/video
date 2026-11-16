@@ -999,13 +999,27 @@ def _sky_dressing(rng, light, sky_rgb=None):
         cloud_white = _blend(
             cloud_white,
             tuple(light.get("sky_top", (18, 24, 44))),
-            _night_haze * 0.85)
+            _night_haze * 0.95)
     for i in range(4):
+        # R17-D5: the 4:1 cloud ellipse is a saucer silhouette
+        # at night, when the dark shape reads against the sky
+        # and the moon halo. Night clouds puff up toward a
+        # rounder aspect (haze-gated; day/dusk clouds keep
+        # their wide drift). The rng draws stay in the SAME
+        # order as before (position, then size), so every
+        # downstream layout is untouched.
+        _cx = rng.uniform(-11.0, 11.0)
+        _cy = rng.uniform(5.5, 7.5)
+        _cz = rng.uniform(-30.0, -26.0)
+        _cw = rng.uniform(3.5, 6.0)
+        _ch = rng.uniform(0.9, 1.4)
+        if _night_haze > 0.0:
+            _cw *= (1.0 - 0.4 * _night_haze)
+            _ch *= (1.0 + 0.6 * _night_haze)
         elements.append(_el(
             f"sky_cloud_{i}", "cloud", "BG", "blob",
-            (rng.uniform(-11.0, 11.0), rng.uniform(5.5, 7.5),
-             rng.uniform(-30.0, -26.0)),
-            (rng.uniform(3.5, 6.0), rng.uniform(0.9, 1.4), 1.0),
+            (_cx, _cy, _cz),
+            (_cw, _ch, 1.0),
             cloud_white, "silhouette",
             extra={"suspension": "cloud: floats in the sky"}))
     return elements
@@ -1413,7 +1427,10 @@ def _build_mediterranean_island(rng, ctx):
         elements.append(_el(
             f"house{i}_win", "window", "BG", "box",
             (x + w * 0.24, lift + h * 0.62, z + 0.84),
-            (0.55, 0.7, 0.06), (40, 70, 120), "glass",
+            # R17-D16: the lit-window rule (ambient < 0.40 -> warm
+            # glass) via ctx, like every other facade -- the hardcoded
+            # dark glass left the night huts' windows unlit.
+            (0.55, 0.7, 0.06), ctx["window_color"], "glass",
             attachment={"parent": f"house{i}", "relation": "on_wall",
                         "local_rect": (win_u_mid - 0.275 / w,
                                        win_v_mid - 0.35 / h,
@@ -1687,12 +1704,17 @@ def _build_forest(rng, ctx):
     # Depth-graded trees: far (small, hazy) to near (large).
     positions = [(-8.0, -14.0, 1.0), (-4.5, -12.0, 1.1), (0.5, -13.0, 1.0),
                  (4.8, -11.5, 1.15), (8.2, -13.5, 1.0), (-6.2, -7.0, 1.25),
-                 (-1.8, -6.0, 1.3), (3.0, -6.6, 1.25), (6.6, -7.4, 1.2)]
+                 (-1.8, -6.0, 1.3), (3.0, -6.6, 1.25), (6.6, -7.4, 1.2),
+                 # R17-D12: a mid row so the treeline reads
+                 # continuous instead of sparse gaps to the hills.
+                 (-9.0, -9.5, 1.2), (-5.4, -9.8, 1.2), (-1.2, -9.2, 1.25),
+                 (3.2, -9.6, 1.2), (7.6, -9.4, 1.2)]
     for i, (x, z, scale) in enumerate(positions):
         elements.extend(_tree(f"tree{i}", rng, x, z, "BG", scale=scale,
                               leaf_color=leaf))
     # Undergrowth blobs + path slab.
-    for i, (x, z) in enumerate([(-3.0, -4.0), (1.2, -3.4), (4.4, -4.6)]):
+    for i, (x, z) in enumerate([(-3.0, -4.0), (1.2, -3.4), (4.4, -4.6),
+                               (-6.8, -4.2), (7.0, -3.8)]):
         elements.append(_el(
             f"under{i}", "undergrowth", "MG", "blob", (x, 0.35, z),
             (1.6, 0.7, 1.2), (74, 96, 58), "foliage"))
@@ -1906,15 +1928,23 @@ def _build_interior(rng, ctx):
     elements.append(_el("room_rug", "rug", "MG", "box",
                         (0.6, 0.03, -0.8), (4.5, 0.06, 3.0),
                         (118, 58, 52), "cloth"))
-    # Floor lamp.
+    # R17-D12 gate, hoisted: the lamp placement below depends
+    # on whether this room is a kitchen.
+    has_kitchen = any(w in trait_text for w in (
+        "bếp", "kitchen", "stove"))
+    # Floor lamp. Round 18 (D12): in kitchens it stands beside
+    # the table (x -0.5) instead of x -2.5, where it projected
+    # exactly onto the stove from subject-framed cameras and
+    # hid the flue pipe and kettle.
+    _lamp_x = -0.5 if has_kitchen else -2.5
     elements.append(_el("room_lamp_pole", "lamp_post", "MG", "box",
-                        (-2.5, 0.85, -2.0), (0.08, 1.7, 0.08),
+                        (_lamp_x, 0.85, -2.0), (0.08, 1.7, 0.08),
                         (40, 36, 32), "iron",
                         attachment={"parent": None,
                                     "relation": "on_ground",
                                     "local_rect": None}))
     elements.append(_el("room_lamp_shade", "lamp_shade", "MG", "box",
-                        (-2.5, 1.85, -2.0), (0.4, 0.3, 0.4),
+                        (_lamp_x, 1.85, -2.0), (0.4, 0.3, 0.4),
                         (255, 220, 140), "cloth",
                         attachment={"parent": "room_lamp_pole",
                                     "relation": "on_top",
@@ -1923,7 +1953,88 @@ def _build_interior(rng, ctx):
         "bàn", "desk", "viết", "write", "bureau", "writing"))
     has_cabinet = any(w in trait_text for w in (
         "tủ", "cabinet", "hồ sơ", "filing", "shelf", "kệ"))
-    if has_desk:
+    # R17-D12: a kitchen is not a study -- "Bàn gỗ" matched
+    # has_desk and the kitchen got a writing desk + ink bottle.
+    # Kitchen words draw a plain table + low stools, a corner
+    # stove (+ kettle when named) and hanging pots; the writing
+    # desk is skipped when the room is a kitchen.
+    has_pots = any(w in trait_text for w in (
+        "nồi", "niêu", "chảo", "pot", "pan"))
+    has_kettle = any(w in trait_text for w in (
+        "ấm nước", "ấm đun", "kettle"))
+    if has_kitchen:
+        # Kitchen table: top + four legs, same footprint as the
+        # desk so staging stays clear behind the characters.
+        for j, (lx, lz) in enumerate(((0.3, -1.6), (2.1, -1.6),
+                                      (0.3, -0.8), (2.1, -0.8))):
+            elements.append(_el(
+                f"kitchen_table_leg_{j}", "table_leg", "MG", "box",
+                (lx, 0.36, lz), (0.09, 0.72, 0.09), (96, 62, 36),
+                "wood",
+                attachment={"parent": None, "relation": "on_ground",
+                            "local_rect": None}))
+        elements.append(_el(
+            "kitchen_table_top", "table", "MG", "box",
+            (1.2, 0.76, -1.2), (2.2, 0.08, 1.0), (122, 74, 43),
+            "wood",
+            attachment={"parent": "kitchen_table_leg_0",
+                        "relation": "on_top", "local_rect": None}))
+        for j, sx in enumerate((0.5, 1.9)):
+            elements.append(_el(
+                f"kitchen_stool_{j}", "stool", "MG", "box",
+                (sx, 0.175, -0.35), (0.42, 0.35, 0.42),
+                (96, 62, 36), "wood",
+                attachment={"parent": None, "relation": "on_ground",
+                            "local_rect": None}))
+        # Wood stove: brick body + firebox + flue pipe. Round 18
+        # (D12): at x -6.2 it sat outside every subject-framed
+        # shot; at -4.6 the left-staged subject occluded it.
+        # At -3.9 it reads beside the subject in medium framings
+        # while staying on the left half of the back wall, and
+        # the cabinet takes the corner (below).
+        elements.append(_el(
+            "kitchen_stove", "stove", "MG", "box",
+            (-3.9, 0.5, -4.8), (1.4, 1.0, 0.9), (74, 58, 52),
+            "brick",
+            attachment={"parent": None, "relation": "on_ground",
+                        "local_rect": None}))
+        elements.append(_el(
+            "kitchen_stove_firebox", "firebox", "MG", "box",
+            (-3.9, 0.35, -4.32), (0.5, 0.4, 0.06), (28, 20, 16),
+            "iron",
+            attachment={"parent": "kitchen_stove",
+                        "relation": "on_wall",
+                        "local_rect": (0.32, 0.45, 0.68, 0.85)}))
+        elements.append(_el(
+            "kitchen_stove_pipe", "stove_pipe", "MG", "box",
+            (-3.9, 2.2, -5.1), (0.16, 2.4, 0.16), (52, 48, 44),
+            "iron",
+            attachment={"parent": "kitchen_stove",
+                        "relation": "on_top", "local_rect": None}))
+        if has_kettle:
+            elements.append(_el(
+                "kitchen_kettle", "kettle", "MG", "box",
+                (-3.9, 1.15, -4.8), (0.34, 0.3, 0.3), (40, 40, 44),
+                "iron",
+                attachment={"parent": "kitchen_stove",
+                            "relation": "on_top",
+                            "local_rect": None}))
+    if has_pots:
+        # Pots/pans hanging on the back wall: dark blobs between
+        # the windows, the picture and the pilasters (x -4.6 /
+        # -2.6 / +2.6, y 3.0 -- clear of every wall feature).
+        for j, px in enumerate((-4.6, -2.6, 2.6)):
+            elements.append(_el(
+                f"hanging_pot_{j}", "hanging_pot", "BG", "blob",
+                (px, 3.0, front_z), (0.55, 0.55, 0.1),
+                (45, 45, 50), "iron",
+                attachment={"parent": wall_id, "relation": "on_wall",
+                            "local_rect": (
+                                (px + 8.0 - 0.275) / 16.0,
+                                (4.5 - 3.0 - 0.275) / 4.5,
+                                (px + 8.0 + 0.275) / 16.0,
+                                (4.5 - 3.0 + 0.275) / 4.5)}))
+    if has_desk and not has_kitchen:
         # Desk: two pedestals + top; chair facing it.
         for j, px in enumerate((0.35, 2.05)):
             elements.append(_el(
@@ -1968,14 +2079,19 @@ def _build_interior(rng, ctx):
             attachment={"parent": "chair_seat", "relation": "overlaps",
                         "local_rect": None}))
     if has_cabinet:
+        # Round 18 (D12): in kitchens the cabinet takes the
+        # corner the stove vacated, so the two never overlap.
+        _cabinet_x = -6.2 if has_kitchen else -4.6
         elements.append(_el(
             "room_cabinet", "cabinet", "MG", "box",
-            (-4.6, 0.9, -5.4), (1.4, 1.8, 0.5), (88, 58, 34), "wood",
+            (_cabinet_x, 0.9, -5.4), (1.4, 1.8, 0.5), (88, 58, 34),
+            "wood",
             attachment={"parent": None, "relation": "on_ground",
                         "local_rect": None}))
         elements.append(_el(
             "cabinet_papers", "paper_stack", "MG", "box",
-            (-4.6, 1.85, -5.4), (0.5, 0.1, 0.35), (238, 234, 222),
+            (_cabinet_x, 1.85, -5.4), (0.5, 0.1, 0.35),
+            (238, 234, 222),
             "paper",
             attachment={"parent": "room_cabinet", "relation": "on_top",
                         "local_rect": None}))
@@ -2175,9 +2291,15 @@ def _build_forge(rng, ctx):
         attachment={"parent": "furnace_cap", "relation": "on_top",
                     "local_rect": None}))
     elements.append(_el(
-        "forge_smoke", "smoke", "BG", "blob", (-3.2, 5.3, -6.5),
+        # Round 20: the centre is the chimney mouth -- the
+        # animated puffs are born here (the static blob is
+        # the fallback for non-animated paths). ``rises``
+        # flags it for the per-frame smoke animator; distant
+        # artillery smoke has no flag and stays static.
+        "forge_smoke", "smoke", "BG", "blob", (-3.2, 4.7, -6.5),
         (1.4, 0.9, 0.8), (120, 112, 104), "smoke",
-        extra={"suspension": "forge smoke rises from the chimney"}))
+        extra={"suspension": "forge smoke rises from the chimney",
+               "rises": True}))
     # Anvil centre-stage: base + body + top, all stacked.
     elements.append(_el(
         "anvil_base", "anvil", "MG", "box", (0.6, 0.15, -3.2),
@@ -3288,7 +3410,10 @@ def build_environment(location_traits: dict, period: str = "",
     # Distant skyline + near-camera foliage (round 12): the
     # horizon settlement layer and the blurred-foreground layer.
     # Same position as the dressing: negative constraints apply.
-    elements.extend(_distant_skyline(rng, light, spec))
+    # R17-D12: no distant settlement behind a wild forest -- the
+    # houses + tower read as a village through the trees.
+    if archetype_id != "FOREST":
+        elements.extend(_distant_skyline(rng, light, spec))
     elements.extend(_fg_foliage(rng, ctx, archetype_id))
     # Negative constraints drop matching elements, loudly reported.
     constraint_texts = _constraint_field_texts(traits)
@@ -3927,6 +4052,32 @@ def _draw_dome_blob(draw, x, y, rx, ry, colour, outline):
     draw.ellipse([x - rx, y - ry, x + rx, y + ry], outline=outline)
 
 
+def _draw_hanging_pot(draw, x, y, rx, ry, colour, outline):
+    """A hanging pot: body + rim + handle + highlight.
+
+    Round 18 (D12): the old flat iron ellipse read as a dark
+    disc on the wall, not a pot. The rim is a light arc across
+    the upper belly, the handle a semicircle above the body,
+    the highlight a small light ellipse on the upper-left.
+    Below 8px radius the structure would be noise: flat fill.
+    """
+    draw.ellipse([x - rx, y - ry, x + rx, y + ry], fill=colour,
+                 outline=outline)
+    if rx < 8:
+        return
+    rim = _blend(colour, (255, 255, 255), 0.4)
+    width = max(2, int(round(0.09 * ry)))
+    draw.arc([x - 0.85 * rx, y - 0.95 * ry,
+              x + 0.85 * rx, y - 0.15 * ry],
+             start=180, end=360, fill=rim, width=width)
+    draw.arc([x - 0.7 * rx, y - 1.7 * ry,
+              x + 0.7 * rx, y - 0.3 * ry],
+             start=180, end=360, fill=outline, width=width)
+    hi = _blend(colour, (255, 255, 255), 0.5)
+    draw.ellipse([x - 0.62 * rx, y - 0.5 * ry,
+                  x - 0.28 * rx, y + 0.05 * ry], fill=hi)
+
+
 def _draw_cloud_blob(draw, x, y, rx, ry, colour, outline):
     """A puffy cloud: base ellipse + light puffs + a shaded base.
 
@@ -3941,9 +4092,24 @@ def _draw_cloud_blob(draw, x, y, rx, ry, colour, outline):
     # it into a cloud; the base ellipse drawn over them keeps
     # their centers hidden. Round 14: the bumps grow ~30% so the
     # top edge reads broken-up at full-frame distance.
-    for fx, fy, prx, pry in ((-0.55, -0.75, 0.58, 0.52),
-                             (0.05, -0.90, 0.65, 0.55),
-                             (0.60, -0.70, 0.55, 0.50)):
+    # Round 20: WIDE clouds (aspect > 2, the sky dressing) kept
+    # reading as flat ellipses -- bumps scaled by ry alone are
+    # tiny against the width. Wide clouds get five bumps whose
+    # height floors at a fraction of rx, so the top edge breaks
+    # up at full-frame distance; round clouds keep the exact
+    # historical layout.
+    _aspect = rx / max(ry, 1.0)
+    if _aspect > 2.0:
+        _bumps = ((-0.70, -0.80, 0.34, max(0.55, 0.16 * _aspect)),
+                  (-0.35, -0.90, 0.36, max(0.60, 0.18 * _aspect)),
+                  (0.00, -0.85, 0.38, max(0.60, 0.18 * _aspect)),
+                  (0.35, -0.90, 0.36, max(0.60, 0.18 * _aspect)),
+                  (0.70, -0.80, 0.34, max(0.55, 0.16 * _aspect)))
+    else:
+        _bumps = ((-0.55, -0.75, 0.58, 0.52),
+                  (0.05, -0.90, 0.65, 0.55),
+                  (0.60, -0.70, 0.55, 0.50))
+    for fx, fy, prx, pry in _bumps:
         px, py = x + fx * rx, y + fy * ry
         draw.ellipse([px - prx * rx, py - pry * ry,
                       px + prx * rx, py + pry * ry], fill=light)
@@ -3959,11 +4125,20 @@ def _draw_cloud_blob(draw, x, y, rx, ry, colour, outline):
     # what separates a cloud from a blob at a glance. Corners
     # stay inside the silhouette (half-chord 0.95rx at 0.30ry,
     # 0.71rx at 0.70ry).
+    # R17-D5: at night the hazed cloud colour is dark, and the
+    # fixed 0.72 underside re-darkened into a solid saucer disc
+    # (worst crossing the moon halo). The shade factor blends
+    # toward 1.0 as the colour darkens, so night clouds keep the
+    # puffy ellipse silhouette and lose the flat-bottomed disc;
+    # day clouds (mean >= 160) keep exactly 0.72.
+    _mean = sum(colour) / 3.0
+    _darkness = max(0.0, min(1.0, 1.0 - _mean / 160.0))
+    _shade = 0.72 + 0.26 * _darkness
     draw.polygon([(x - 0.62 * rx, y + 0.30 * ry),
                   (x + 0.62 * rx, y + 0.30 * ry),
                   (x + 0.55 * rx, y + 0.70 * ry),
                   (x - 0.55 * rx, y + 0.70 * ry)],
-                 fill=_scale_color(colour, 0.72))
+                 fill=_scale_color(colour, _shade))
     # No outline: a hard edge turns steam/smoke into a grey
     # sphere. The puffs + shaded base carry the soft shape.
 
@@ -4131,6 +4306,9 @@ def _draw_blob(img, draw, el, camera, rig, width, height):
         draw.ellipse([x - 0.3 * rx, y + 0.3 * ry,
                       x + 0.3 * rx, y + 0.85 * ry], fill=core)
         return
+    if kind == "hanging_pot":
+        _draw_hanging_pot(draw, x, y, rx, ry, colour, outline)
+        return
     if (kind not in _BLOB_FOLIAGE_KINDS
             and kind not in _BLOB_CLOUD_KINDS
             and kind not in _BLOB_DOME_KINDS
@@ -4254,7 +4432,16 @@ def spark_positions(el, frame: int):
     return out
 
 
-def burst_positions(el, age_frames: int, strike_index: int = 0):
+_SECONDARY_BURST_DELAY = 6  # frames after contact: the second spray
+_SECONDARY_BURST_COUNT = 6
+# Round 21: embers outlive the 12-frame primary by 12 frames,
+# so the second spray has a persistence window (burst ages
+# 13-29) where it is the only burst left in the frame.
+_SECONDARY_BURST_LIFETIME = 24  # frames
+
+
+def burst_positions(el, age_frames: int, strike_index: int = 0,
+                    secondary: bool = False):
     """Flying contact-burst sparks ``age_frames`` after a strike.
 
     Same ``(position, age_frac, velocity)`` shape as
@@ -4263,32 +4450,52 @@ def burst_positions(el, age_frames: int, strike_index: int = 0):
     paths ~3x faster than the ambient field, cooling with age.
     Deterministic per (element, strike_index, age): each strike
     gets its own seeded spray, so repeated strikes do not replay
-    the same pattern. Ages outside [0, _SPARK_BURST_LIFETIME)
-    return [] (the burst is dead).
+    the same pattern. Ages outside the burst's own lifetime
+    return [] (the burst is dead): 12 frames for the primary,
+    24 for the secondary (round 21).
+
+    Round 20: ``secondary=True`` is the second spray -- the
+    ricochet burst a strike throws a beat later: slower, lower
+    and wider than the primary, seeded separately so it never
+    replays the primary's pattern. Round 21: it renders as
+    embers (see _draw_ember), not streaks.
     """
     age = int(age_frames)
-    if age < 0 or age >= _SPARK_BURST_LIFETIME:
+    _life = (_SECONDARY_BURST_LIFETIME if secondary
+             else _SPARK_BURST_LIFETIME)
+    if age < 0 or age >= _life:
         return []
     extra = el.get("extra", {}) or {}
-    count = int(extra.get("burst_count", _SPARK_BURST_COUNT))
     seed = int(extra.get("spark_seed", 1))
     ox, oy, oz = (float(v) for v in el["center"])
+    if secondary:
+        count = int(extra.get("burst2_count",
+                              _SECONDARY_BURST_COUNT))
+        salt = seed * 31337 + strike_index * 104729 + 3
+        speed_scale, spread, lift = 0.55, 1.3, 0.5
+    else:
+        count = int(extra.get("burst_count", _SPARK_BURST_COUNT))
+        salt = seed * 7919 + strike_index * 104729
+        speed_scale, spread, lift = 1.0, 1.0, 1.0
     out = []
     for i in range(count):
-        rng = random.Random(seed * 7919 + strike_index * 104729 + i)
+        # Primary keeps its historical stream exactly; the
+        # secondary steps by 7 so it never replays it.
+        rng = random.Random(salt + (i * 7 if secondary else i))
         ang = rng.uniform(0.0, 2.0 * math.pi)
-        speed = rng.uniform(0.5, 1.0) * _SPARK_BURST_SPEED
-        vx = math.cos(ang) * _SPARK_VX_MAX * speed
-        vz = math.sin(ang) * _SPARK_VZ_MAX * speed
+        speed = rng.uniform(0.5, 1.0) * _SPARK_BURST_SPEED \
+            * speed_scale
+        vx = math.cos(ang) * _SPARK_VX_MAX * speed * spread
+        vz = math.sin(ang) * _SPARK_VZ_MAX * speed * spread
         # Upward-biased: every burst spark rises (a strike throws
         # sparks UP off the anvil; none dive into the floor).
         vy = rng.uniform(_SPARK_VY_MIN, _SPARK_VY_MAX) * speed \
-            * rng.uniform(1.0, 1.6)
+            * rng.uniform(1.0, 1.6) * lift
         t = float(age)
         pos = (ox + vx * t,
                oy + vy * t - 0.5 * _SPARK_GRAVITY * t * t,
                oz + vz * t)
-        out.append((pos, age / _SPARK_BURST_LIFETIME, (vx, vy, vz)))
+        out.append((pos, age / _life, (vx, vy, vz)))
     return out
 
 
@@ -4336,11 +4543,36 @@ def debris_positions(el, age_frames: int, strike_index: int = 0):
     return out
 
 
+def _burst_streak_styles(positions):
+    """Per-streak draw styles for one burst, from its own
+    velocity spread (round 20: no two streaks in a burst share
+    a shape). Returns ``(tail_mult, width_boost, head_dot)`` per
+    streak: faster sparks draw longer, thicker streaks, and the
+    fastest third carries a bright head dot. Relative to the
+    burst's own min/max speed, so every strike -- primary or
+    secondary -- gets a spread. Deterministic: a pure function
+    of the positions list."""
+    speeds = [math.sqrt(vel[0] ** 2 + vel[1] ** 2 + vel[2] ** 2)
+              for (_p, _a, vel) in positions]
+    if not speeds:
+        return []
+    lo, hi = min(speeds), max(speeds)
+    span = hi - lo if hi > lo else 1.0
+    out = []
+    for speed in speeds:
+        frac = (speed - lo) / span
+        out.append((0.7 + 0.6 * frac,
+                    1 if frac > 0.66 else 0,
+                    frac > 0.66))
+    return out
+
+
 def _draw_streak(draw, camera, pos, vel, tail_frames, age_frac,
-                 width, height, line_w):
+                 width, height, line_w, head_dot: bool = False):
     """One emissive motion streak: ``tail_frames`` back along
     ``vel`` from ``pos``, cooling hot -> ember with ``age_frac``.
-    Skipped when both endpoints fall outside the frame."""
+    Skipped when both endpoints fall outside the frame. With
+    ``head_dot`` the fastest sparks carry a bright head dot."""
     tail = (pos[0] - vel[0] * tail_frames,
             pos[1] - vel[1] * tail_frames,
             pos[2] - vel[2] * tail_frames)
@@ -4353,16 +4585,80 @@ def _draw_streak(draw, camera, pos, vel, tail_frames, age_frac,
                   + _SPARK_EMBER[ch] * age_frac))
         for ch in range(3))
     draw.line([(x0, y0), (x1, y1)], fill=colour, width=line_w)
+    if head_dot:
+        r = 2 if width >= 1280 else 1
+        draw.ellipse([x1 - r, y1 - r, x1 + r, y1 + r], fill=colour)
+
+
+_EMBER_HOT = (255, 205, 130)
+_EMBER_COOL = (190, 60, 15)
+
+
+def _ember_radii(positions, width):
+    """Per-ember dot radius from the burst's own speed spread.
+
+    Round 21: the fastest ember draws the biggest dot. Relative
+    to the burst's own min/max speed (the _burst_streak_styles
+    precedent), so every secondary spray gets a spread.
+    Deterministic: a pure function of the positions list."""
+    speeds = [math.sqrt(vel[0] ** 2 + vel[1] ** 2 + vel[2] ** 2)
+              for (_p, _a, vel) in positions]
+    if not speeds:
+        return []
+    lo, hi = min(speeds), max(speeds)
+    span = hi - lo if hi > lo else 1.0
+    r_lo, r_hi = (2.0, 5.0) if width >= 1280 else (1.0, 3.0)
+    return [r_lo + (r_hi - r_lo) * (s - lo) / span for s in speeds]
+
+
+def _draw_ember(draw, camera, pos, age_frac, width, height, radius):
+    """One secondary-burst ember: a round cooling dot.
+
+    Round 21: embers are DOTS, not streaks -- the second spray
+    must read as its own event, not as a denser primary. The
+    dot cools hot amber -> deep ember with ``age_frac`` and
+    carries a bright core while young. Skipped off-frame."""
+    x, y, _, vis = camera.project(pos, width, height)
+    if not vis:
+        return
+    colour = tuple(
+        int(round(_EMBER_HOT[ch] * (1.0 - age_frac)
+                  + _EMBER_COOL[ch] * age_frac))
+        for ch in range(3))
+    r = max(1.0, float(radius))
+    draw.ellipse([x - r, y - r, x + r, y + r], fill=colour)
+    if age_frac < 0.5:
+        draw.ellipse([x - 1, y - 1, x + 1, y + 1],
+                     fill=(255, 240, 200))
+
+
+def _debris_style(di, strike_index):
+    """(radius_boost, cool_scale) for debris fragment ``di``.
+
+    Round 21: WIDE steps -- radius boost {0, 2, 4} (dot radius
+    4/6/8 px at full frame) and cool scale {0.5, 0.75, 1.0,
+    1.25} (the fastest-cooling fragments go dark early) --
+    shifted per strike so repeated strikes do not repeat the
+    same assignment. Deterministic: a pure function of the
+    fragment ordinal and strike index."""
+    _boosts = (0, 2, 4)
+    _cools = (0.5, 0.75, 1.0, 1.25)
+    return (_boosts[(di + strike_index) % 3],
+            _cools[(di + 2 * strike_index) % 4])
 
 
 def _draw_debris(img, draw, camera, pos, cool_frac, landed,
-                 width, height):
+                 width, height, radius_boost: int = 0,
+                 cool_scale: float = 1.0):
     """One debris fragment: a bright dot, cooling hot -> ember ->
     dark with ``cool_frac``. Landed fragments still hot paint a
     small squashed glow on the floor beneath them (nested discs
     blended toward the floor tone sampled beside the ember), so
     the light lives on the floor the characters stand on. Skipped
-    outside the frame or fully cooled."""
+    outside the frame or fully cooled. Round 20: ``radius_boost``
+    / ``cool_scale`` vary fragment size and cooling rate within
+    a strike, so the debris is not six identical dots."""
+    cool_frac = max(0.0, min(1.0, cool_frac * cool_scale))
     if cool_frac >= 1.0:
         return
     x, y, _, vis = camera.project(pos, width, height)
@@ -4377,8 +4673,11 @@ def _draw_debris(img, draw, camera, pos, cool_frac, landed,
     colour = tuple(
         int(round(hot[ch] * (1.0 - fade) + dark[ch] * fade))
         for ch in range(3))
-    r = 4 if width >= 1280 else 3
+    r = (4 if width >= 1280 else 3) + radius_boost
     if landed and cool_frac < 0.6:
+        # Round 21: the floor glow scales with the fragment
+        # radius -- a uniform glow swamped the size variety.
+        _glow_scale = r / (4.0 if width >= 1280 else 3.0)
         try:
             floor = img.getpixel((
                 max(0, min(width - 1, int(x) + 14)),
@@ -4389,8 +4688,9 @@ def _draw_debris(img, draw, camera, pos, cool_frac, landed,
             glow = tuple(
                 int(round(colour[ch] * frac + floor[ch] * (1.0 - frac)))
                 for ch in range(3))
-            draw.ellipse([x - ring, y - ring * 0.45,
-                          x + ring, y + ring * 0.45], fill=glow)
+            _ring = ring * _glow_scale
+            draw.ellipse([x - _ring, y - _ring * 0.45,
+                          x + _ring, y + _ring * 0.45], fill=glow)
     draw.ellipse([x - r, y - r, x + r, y + r], fill=colour)
     if cool_frac < 0.4:
         draw.ellipse([x - 1, y - 1, x + 1, y + 1],
@@ -4404,6 +4704,98 @@ def _draw_debris(img, draw, camera, pos, cool_frac, landed,
 # sitting frozen. No background re-render: the per-frame draw
 # follows the sparks precedent exactly.
 _FLICKER_KINDS = frozenset(("fire", "flame"))
+# Round 20: smoke elements animate per frame like flames (see
+# _draw_smoke); the renderer excludes them from the baked
+# background and draws them in _build_frame.
+_SMOKE_KINDS = frozenset(("smoke",))
+
+
+def smoke_positions(el, frame: int):
+    """World positions + ages of a smoke element's puffs.
+
+    Returns ``(position, age_frac, radius, alpha)`` per puff:
+    puffs rise from the element centre, drift downwind (+x),
+    expand and fade. Each puff has its OWN lifetime in
+    [lifetime-6, lifetime+6] (the R9 sparks precedent), so the
+    combined pattern is aperiodic in any shot. Deterministic:
+    same (element, frame) -> same list. ``frame`` must be >= 0.
+    ``extra`` carries ``smoke_count`` (default 5),
+    ``smoke_lifetime`` (frames, default 48) and ``smoke_seed``
+    (default: a stable hash of the element id, so different
+    chimneys smoke differently).
+    """
+    extra = el.get("extra", {}) or {}
+    count = int(extra.get("smoke_count", 5))
+    lifetime = int(extra.get("smoke_lifetime", 48))
+    seed = int(extra.get(
+        "smoke_seed", _stable_seed(str(el.get("id", "")))))
+    if count < 0 or lifetime <= 0:
+        raise ValueError(
+            f"smoke element {el.get('id')!r}: smoke_count must be "
+            f">= 0 and smoke_lifetime > 0, got {count}/{lifetime}")
+    frame_f = float(frame)
+    if not math.isfinite(frame_f) or frame_f < 0:
+        raise ValueError(f"smoke frame must be >= 0, got {frame!r}")
+    frame_i = int(math.floor(frame_f))
+    cx, cy, cz = (float(v) for v in el["center"])
+    out = []
+    for i in range(count):
+        rng = random.Random(seed * 100003 + i * 31 + 7)
+        life_i = max(1, lifetime + ((i * 5) % 13) - 6)
+        birth = rng.randrange(life_i)
+        ox = cx + rng.uniform(-0.15, 0.15)
+        oz = cz + rng.uniform(-0.15, 0.15)
+        vy = rng.uniform(0.012, 0.022)
+        vx = rng.uniform(0.004, 0.012)
+        vz = rng.uniform(-0.003, 0.003)
+        wobble = rng.uniform(0.0, 2.0 * math.pi)
+        radius0 = rng.uniform(0.32, 0.50)
+        growth = rng.uniform(0.008, 0.014)
+        alpha0 = rng.uniform(0.45, 0.62)
+        age = (frame_i - birth) % life_i
+        t = float(age)
+        pos = (ox + vx * t + 0.08 * math.sin(wobble + t * 0.15),
+               cy + vy * t,
+               oz + vz * t)
+        out.append((pos, age / life_i, radius0 + growth * t,
+                    alpha0))
+    return out
+
+
+def _draw_smoke(img, draw, el, camera, width, height,
+                frame: int = 0):
+    """Draw one smoke element for ``frame``: soft grey puffs
+    rising from the element centre, expanding and fading with
+    age. Puffs draw on one shared layer, blurred once, so the
+    smoke reads as a single soft plume rather than hard discs.
+    The projection matches _draw_blob (centre + scale)."""
+    puffs = smoke_positions(el, frame)
+    if not puffs:
+        return
+    layer = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    ldraw = ImageDraw.Draw(layer)
+    colour = tuple(el["color"])[:3]
+    drawn = False
+    for pos, age_frac, radius, alpha0 in puffs:
+        x, y, scale, vis = camera.project(pos, width, height)
+        if not vis or scale <= 0:
+            continue
+        r = radius * scale
+        if r < 2.0:
+            continue
+        # Fade in at birth, out at death; the middle of life
+        # is the most opaque.
+        alpha = alpha0 * min(1.0, age_frac * 4.0) \
+            * (1.0 - age_frac)
+        if alpha <= 0.02:
+            continue
+        ldraw.ellipse([x - r, y - r * 0.75, x + r, y + r * 0.75],
+                      fill=colour + (int(255 * alpha),))
+        drawn = True
+    if not drawn:
+        return
+    layer = layer.filter(ImageFilter.GaussianBlur(6))
+    img.paste(layer, (0, 0), layer)
 
 
 def flame_flicker(frame: int, seed: int) -> float:
@@ -4519,24 +4911,47 @@ def _draw_sparks(img, draw, el, camera, rig, width, height,
     burst_age = extra.get("burst_age_frames")
     if burst_age is not None:
         strike_index = int(extra.get("burst_strike_index", 0))
-        for pos, age_frac, vel in burst_positions(
-                el, int(burst_age), strike_index):
-            # Fast sparks draw long streaks; the streak shrinks as
-            # the burst cools, so the burst fades instead of
-            # vanishing mid-flight at the lifetime cut.
-            _draw_streak(draw, camera, pos, vel,
-                         3.5 - 2.5 * age_frac, age_frac,
-                         width, height, line_w)
+        # Round 20: the primary burst, drawn with per-streak
+        # styles from its own velocity spread. Fast sparks draw
+        # long streaks; the streak shrinks as the burst cools,
+        # so the burst fades instead of vanishing mid-flight
+        # at the lifetime cut.
+        _primary = burst_positions(el, int(burst_age), strike_index)
+        _styles = _burst_streak_styles(_primary)
+        for (_pos, _age_frac, _vel), (_mult, _boost, _dot) \
+                in zip(_primary, _styles):
+            _draw_streak(draw, camera, _pos, _vel,
+                         (3.5 - 2.5 * _age_frac) * _mult,
+                         _age_frac, width, height,
+                         line_w + _boost, head_dot=_dot)
+        # Round 21: the secondary ricochet spray (derived from
+        # the primary's age/index -- no new renderer keys)
+        # draws as EMBERS -- round cooling dots, not streaks --
+        # so it reads as its own event and persists 12 frames
+        # past the primary's death.
+        _age2 = int(burst_age) - _SECONDARY_BURST_DELAY
+        if _age2 >= 0:
+            _secondary = burst_positions(
+                el, _age2, strike_index, secondary=True)
+            for (_pos, _age_frac, _vel), _r in zip(
+                    _secondary, _ember_radii(_secondary, width)):
+                _draw_ember(draw, camera, _pos, _age_frac,
+                            width, height, _r)
     # Round 11: debris outlives the burst (44 frames vs 12), so it
     # has its own age window. Without the extra keys there is no
     # debris and static renders are unchanged.
     debris_age = extra.get("debris_age_frames")
     if debris_age is not None:
         strike_index = int(extra.get("debris_strike_index", 0))
-        for pos, cool_frac, landed in debris_positions(
-                el, int(debris_age), strike_index):
+        for _di, (pos, cool_frac, landed) in enumerate(
+                debris_positions(el, int(debris_age), strike_index)):
+            # Round 21: fragment size + cooling vary WIDELY per
+            # fragment (see _debris_style) -- the round-20 steps
+            # (1 px, 0.1) were swamped by the uniform landed glow.
+            _boost, _cool = _debris_style(_di, strike_index)
             _draw_debris(img, draw, camera, pos, cool_frac, landed,
-                         width, height)
+                         width, height, radius_boost=_boost,
+                         cool_scale=_cool)
 
 
 # ---------------------------------------------------------------------------
