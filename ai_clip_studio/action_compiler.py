@@ -122,7 +122,7 @@ ACTION_TYPES = (
     "SIT_DOWN", "STAND_UP", "SIT_AT_DESK", "STAND_FROM_CHAIR",
     "BEND_PICK", "KNEEL_PICK",
     "PICK_UP", "TAKE_OUT", "PUT_AWAY", "RELEASE", "OPEN_WALLET",
-    "CLOSE_WALLET", "OPEN", "CLOSE",
+    "CLOSE_WALLET", "OPEN", "CLOSE", "INSERT_KEY",
     "HOLD", "HOLD_PEN", "WRITE", "SIGN", "HAND_OVER", "RECEIVE_PROP",
     "CARRY", "CROUCH", "BOARD",
     "HAMMER_STRIKE",
@@ -159,6 +159,7 @@ PRIMITIVE_MAP = {
     # the object articulation is the prop/environment's job.
     "OPEN": ("open_wallet", 1.0, "OBJECT_STATE_CHANGED"),
     "CLOSE": ("close_wallet", 0.8, "OBJECT_STATE_CHANGED"),
+    "INSERT_KEY": ("insert_key", 1.2, "OBJECT_STATE_CHANGED"),
     "HOLD": ("pick_up", 1.0, "PROP_GRASPED"),
     "HOLD_PEN": ("hold_pen", 1.0, "PROP_GRASPED"),
     "WRITE": ("write_on_paper", 2.0, "OBJECT_STATE_CHANGED"),
@@ -480,6 +481,18 @@ _CLASSIFICATION_RULES: list[tuple[str, tuple[str, ...]]] = [
                "cổ tay chuyển động", "write", "writing")),    ("SIT_AT_DESK", ("ngồi trước bàn", "ngồi ở bàn", "ngồi vào bàn",
                      "ngồi trước", "ngồi bên bàn", "sit at the desk",
                      "sit at a desk")),
+    # Key into a lock (Round 16, L02-D2): inserting / turning a
+    # key is its own verb -- "mở khóa" must not fall through to
+    # the generic OPEN rule (a lock is not a door). The "khóa
+    # học" guard in _classify vetoes course-opening sentences.
+    ("INSERT_KEY", ("tra vào ổ khóa", "tra chìa khóa vào",
+                    "cắm chìa khóa vào", "tra khóa vào",
+                    "vặn chìa khóa", "xoay chìa khóa",
+                    "vặn khóa", "mở khóa", "mở ổ khóa",
+                    "insert the key", "inserts the key",
+                    "insert a key", "turn the key",
+                    "turns the key", "unlock the",
+                    "unlocks the", "unlock with")),
     ("OPEN_WALLET", ("mở ví", "mở bóp", "open the wallet",
                      "open wallet")),
     ("CLOSE_WALLET", ("đóng ví", "gấp ví", "đậy ví", "close the wallet",
@@ -609,6 +622,11 @@ _CLASSIFICATION_RULES: list[tuple[str, tuple[str, ...]]] = [
     ("WAIT", ("im lặng", "đợi", "chờ", "wait", "pause")),
     ("IDLE", ("đứng yên", "đứng im", "đứng", "stand still", "idle")),
 ]
+
+# "mở khóa" false friends: opening a course / thesis, never a lock.
+_INSERT_KEY_EXCLUSIONS = (
+    "khóa học", "khoá học", "khóa luận", "khoá luận",
+)
 
 # "nhận" false friends: cognition / admission, never a prop receive.
 _RECEIVE_EXCLUSIONS = (
@@ -1416,6 +1434,11 @@ def _classify(normed: str, context: dict):
             if action_type == "RECEIVE_PROP" and _has_any(
                     normed, _RECEIVE_EXCLUSIONS):
                 continue
+            # "mở khóa học" (open a course) is not a key: veto
+            # the match and let later rules / UNCLEAR handle it.
+            if action_type == "INSERT_KEY" and _has_any(
+                    normed, _INSERT_KEY_EXCLUSIONS):
+                continue
             info.update(mechanism="rule", phrase=phrase,
                         detail=f"classification rule {action_type}")
             # "ngồi" + desk/chair word is sitting AT A DESK, not a
@@ -1488,7 +1511,8 @@ def _contact_points(action_type: str, hand: str, prop_id, target_id,
                         "target_kind": "prop_surface",
                         "target_id": paper_id, "tolerance_px": 12.0})
     elif action_type in ("PICK_UP", "TAKE_OUT", "HOLD", "HOLD_PEN",
-                         "BEND_PICK", "KNEEL_PICK", "OPEN", "CLOSE"):
+                         "BEND_PICK", "KNEEL_PICK", "OPEN", "CLOSE",
+                         "INSERT_KEY"):
         if prop_id:
             for joint in joints:
                 pts.append({"joint": joint, "target_kind": "prop",

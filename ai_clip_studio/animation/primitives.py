@@ -172,6 +172,13 @@ def _locomote(char, from_x, to_x, duration, ground_y, gait, *,
         return (arm_amp * cyc, -arm_amp * cyc,
                 0.25 + 0.25 * max(0.0, cyc),
                 0.25 + 0.25 * max(0.0, -cyc))
+    # Round 16 (Mai: walking "bi ngua"): the rig applies
+    # torso_lean and the FK arm/elbow angles as ABSOLUTE +x
+    # offsets, so every FORWARD-intent value in this core is
+    # multiplied by ``direction`` -- a facing-blind lean tilted
+    # left-walkers backward (shoulder +21 px behind the hip)
+    # and swung their arms backwards. The feet are absolute IK
+    # targets and already follow ``direction``.
     direction = 1 if to_x >= from_x else -1
     dist = abs(to_x - from_x)
     # Visible turn (v6, backwards-walk audit 2026-11-11): if the
@@ -314,19 +321,19 @@ def _locomote(char, from_x, to_x, duration, ground_y, gait, *,
             ant_l, ant_r, ant_el, ant_er = _arms(1.0)
             _pose(char, root_x=from_x, root_y=lerp(stand_root_y, walk_root_y, a),
                   facing=facing_now, turn_u=turn_u,
-                  torso_lean=gait["lean"] * a,
+                  torso_lean=gait["lean"] * a * direction,
                   bob=-_s(char, 6) * math.sin(math.pi * a),
-                  arm_l=lerp(0.08, ant_l, a),
-                  arm_r=lerp(0.08, ant_r, a),
-                  elbow_l=lerp(0.15, ant_el, a),
-                  elbow_r=lerp(0.15, ant_er, a),
+                  arm_l=lerp(0.08, ant_l * direction, a),
+                  arm_r=lerp(0.08, ant_r * direction, a),
+                  elbow_l=lerp(0.15, ant_el * direction, a),
+                  elbow_r=lerp(0.15, ant_er * direction, a),
                   head_look=0.0,
                   # v8: head ANTICIPATION -- the head dips back a few
                   # px before the body moves (secondary motion). The
                   # v7 head was rigid on the torso (0 frames of lag).
                   # D1: the sway damps with head_stability.
                   head_sway_x=(-_s(char, 6) * math.sin(math.pi * a)
-                               * sway_scale))
+                               * sway_scale * direction))
             for side, stand_xy in (("l", stand_fl), ("r", stand_fr)):
                 sx, sy = _turn["foot_" + side]
                 gx = lerp(sx, stand_xy[0], a)
@@ -366,19 +373,19 @@ def _locomote(char, from_x, to_x, duration, ground_y, gait, *,
             set_l, set_r, set_el, set_er = _arms(cyc_end)
             _pose(char, root_x=to_x, root_y=lerp(walk_root_y, stand_root_y, b),
                   facing=direction, turn_u=0.0,
-                  torso_lean=gait["lean"] * (1.0 - b),
+                  torso_lean=gait["lean"] * (1.0 - b) * direction,
                   bob=bob_end * (1.0 - b),
-                  arm_l=lerp(set_l, 0.08, b),
-                  arm_r=lerp(set_r, 0.08, b),
-                  elbow_l=lerp(set_el, 0.15, b),
-                  elbow_r=lerp(set_er, 0.15, b),
+                  arm_l=lerp(set_l * direction, 0.08, b),
+                  arm_r=lerp(set_r * direction, 0.08, b),
+                  elbow_l=lerp(set_el * direction, 0.15, b),
+                  elbow_r=lerp(set_er * direction, 0.15, b),
                   head_look=0.0,
                   # v8: head FOLLOW-THROUGH -- the head overshoots
                   # forward a few px as the body stops and settles
                   # back. The v7 head stopped dead with the hips.
                   # D1: the sway damps with head_stability.
                   head_sway_x=_s(char, 8) * math.sin(math.pi * b)
-                  * sway_scale)
+                  * sway_scale * direction)
             # (named gather_* -- assigning to stand_fl/stand_fr here
             # would make them locals of fn() and shadow the closure
             # variables the anticipation branch uses; the v7 settle
@@ -443,10 +450,11 @@ def _locomote(char, from_x, to_x, duration, ground_y, gait, *,
         cyc = math.cos(math.pi * s / step)
         trav_l, trav_r, trav_el, trav_er = _arms(cyc)
         _pose(char, root_x=root_x, root_y=walk_root_y,
-              facing=direction, turn_u=0.0, torso_lean=gait["lean"], bob=bob,
-              arm_l=trav_l, arm_r=trav_r,
-              elbow_l=trav_el,
-              elbow_r=trav_er,
+              facing=direction, turn_u=0.0,
+              torso_lean=gait["lean"] * direction, bob=bob,
+              arm_l=trav_l * direction, arm_r=trav_r * direction,
+              elbow_l=trav_el * direction,
+              elbow_r=trav_er * direction,
               head_look=0.0)
         char.foot_target_l = (fl_x, fl_y)
         char.foot_target_r = (fr_x, fr_y)
@@ -999,7 +1007,22 @@ def give_to(giver, receiver, prop, duration, receive_hand="l"):
                 setattr(receiver, "hand_target_" + _side, _tgt)
                 _start["last_recv_" + _side] = _tgt
         _start["last_g"] = giver.hand_target_r
-        prop["x"], prop["y"] = mid_x, mid_y + _s(giver, 10)
+        # Round 20 (R18-F1): the prop travels from the giver's
+        # DRAWN hand to the receiver's DRAWN hand, lerped by u
+        # -- the state machine's TRANSFERRED rule, mirrored
+        # here for the legacy path. The old code parked the
+        # prop at the meeting point from u=0 while the hands
+        # were still travelling to it. Drawn hands (not
+        # targets): when staging exceeds combined arm reach
+        # no meeting point exists (A-S7) and the targets
+        # over-claim; the joints are what the renderer draws.
+        _gh = giver.joints()["hand_r"]
+        _rh = [receiver.joints()["hand_" + _side]
+               for _side, _sgn in _recv_sides]
+        _rx = sum(_p[0] for _p in _rh) / len(_rh)
+        _ry = sum(_p[1] for _p in _rh) / len(_rh)
+        prop["x"] = lerp(_gh[0], _rx, u)
+        prop["y"] = lerp(_gh[1], _ry, u) + _s(giver, 10)
         return giver, receiver, prop
     return fn
 
@@ -1182,7 +1205,11 @@ def bend_pick(char, target, duration, ground_y, hand="r",
         f = char.pose.get("facing", 1)
         waist = (char.pose["root_x"] + f * _s(char, 40),
                  ground_y - leg * 0.93 - _s(char, 60))
-        char.set_pose(root_y=root_y, torso_lean=lean)
+        # R16: the stoop leans toward the facing side (the
+        # facing-blind lean stooped left-facers 77 deg AWAY
+        # from the prop). head_track below reads the absolute
+        # tilt from the pose, so it stays correct.
+        char.set_pose(root_y=root_y, torso_lean=lean * f)
         # head tracks the prop (clamped by head_track)
         head_track(char, (tx, ty))
         # Round 9 (R8-D1): same self-head grasp guard as kneel_pick
@@ -1401,7 +1428,10 @@ def kneel_pick(char, target, duration, ground_y, hand="r",
         tx, ty = target
         waist = (rx + f * _s(char, 40),
                  ground_y - leg * 0.93 - _s(char, 60))
-        char.set_pose(root_x=root_x, root_y=root_y, torso_lean=lean)
+        # R16: the kneel leans toward the facing side (same
+        # facing-blind defect as bend_pick).
+        char.set_pose(root_x=root_x, root_y=root_y,
+                      torso_lean=lean * f)
         # head tracks the prop -- CAPPED at 0.25 rad (v7): the default
         # 0.6 clamp let the head point down-forward and dropped it to
         # 35% of standing height; 0.25 keeps the head ~42% up.
@@ -1661,11 +1691,59 @@ def present_prop(char, duration, hand="r", flank_px=None):
     return fn
 
 
-def nod(char, duration, freq=1.1, amp=0.10):
-    """Repeated head nod (agreement / counting)."""
-    def fn(t):
-        char.set_pose(head_look=amp * math.sin(t * 2 * math.pi * freq))
-        return char
+def nod(char, duration, freq=1.1, amp=0.10, gaze_seed=None,
+        ease_sec=0.083, phase=0.0, speech_gate=None):
+    """Repeated head nod (agreement / counting).
+
+    With ``gaze_seed`` given (round 16, R15-D1), the sine is
+    evaluated at the gaze fixation grid shared with the idle
+    and the eyes, so the head holds pixel-flat between
+    saccades instead of drifting every frame: the continuous
+    talk nod overwrote the quantized idle's head_look on
+    every frame (spy-logged on Loop 01 shot #14: the idle
+    changed 28 times across 87 calls, the nod 85). The head
+    ease (default 2 frames) is longer than the eye saccade
+    ease (1 frame): a head jump inside a single frame pops.
+    ``phase`` shifts the sine without shifting the grid, so
+    listeners desync from the speaker while each head stays
+    on its own gaze grid. Without ``gaze_seed`` the behaviour
+    is exactly the historical raw-time sine (the compilable
+    nod action and every other caller).
+
+    ``speech_gate`` (round 19): a (start, end) voice segment
+    gating the amplitude -- the head nods only while speech
+    is happening, still during the post-voice beat, with the
+    same 80 ms attack/release ramps ``speech_mouth_envelope``
+    uses. The gate runs on RAW time (it is a speech signal:
+    the quantized clock lags real time by up to one dwell,
+    which would drag the nod a quarter-second into the beat)
+    while the sine stays on the gaze grid. ``None`` (default)
+    is ungated, exactly the historical behaviour.
+    """
+    def _gate(t):
+        if speech_gate is None:
+            return 1.0
+        start, end = speech_gate
+        ramp = 0.08
+        attack = min(1.0, max(0.0, (t - start) / ramp))
+        release = min(1.0, max(0.0, (end - t) / ramp))
+        return min(attack, release)
+
+    if gaze_seed is None:
+        def fn(t):
+            t = float(t)
+            char.set_pose(head_look=_gate(t) * amp * math.sin(
+                (t + phase) * 2 * math.pi * freq))
+            return char
+    else:
+        from ..expression_library import fixation_time
+
+        def fn(t):
+            t_q = fixation_time(float(t), gaze_seed,
+                                ease_sec=ease_sec)
+            char.set_pose(head_look=_gate(float(t)) * amp * math.sin(
+                (t_q + phase) * 2 * math.pi * freq))
+            return char
     return fn
 
 
@@ -1763,6 +1841,9 @@ HAMMER_HEAD_HALF_FRAC = 0.035
 HAMMER_CYCLE_RAISE_U = 0.35   # hammer_strike: raise ends, hold begins
 HAMMER_CYCLE_HOLD_U = 0.45    # hammer_strike: hold ends, strike begins
 HAMMER_CYCLE_STRIKE_U = 0.60  # hammer_strike: head contacts surface
+# Round 19: impact squash magnitude for hammer_strike (fraction
+# of the figure height above the ground line).
+_HAMMER_SQUASH = 0.08
 HAMMER_CYCLE_SEC = 0.9        # default duration of one strike cycle
 # Carry angle: the hammer cocks up-back of the hand on the raise, so
 # the head clears the face (a fixed strike angle puts the head ON the
@@ -2161,6 +2242,57 @@ def pick_up(char, target, duration, ground_y, hand="r",
     return fn
 
 
+def insert_key(char, target, duration, hand="r"):
+    """Drive a held key into a lock and turn it (Round 16, L02-D2).
+
+    Phases: reach (0-45%, the hand travels from its start to the
+    lock face), push-in (45-60%, the hand presses a few px past
+    the lock face along the facing direction -- the key slides
+    in), turn (60-100%, the hand traces one small circle around
+    the inserted point and returns to it -- the wrist turning
+    the key). The head tracks the lock through the whole event:
+    the character watches the key go in. Completion pose: the
+    hand at the inserted point, the key in the lock (the lock's
+    open articulation is the renderer's job, keyed to this
+    event's window -- see _lock_open_u). ``target`` is the lock
+    face position, solved reachable by the renderer.
+    """
+    if hand not in ("l", "r"):
+        hand = "r"
+    _start = {}
+
+    def fn(t):
+        u = min(1.0, max(0.0, t / max(duration, 0.01)))
+        if "root_y" not in _start:
+            _start["root_y"] = char.pose["root_y"]
+        reach = smoothstep(min(1.0, u / 0.45))
+        push = smoothstep(max(0.0, (u - 0.45) / 0.15))
+        turn = smoothstep(max(0.0, (u - 0.60) / 0.40))
+        f = char.pose.get("facing", 1)
+        sx, sy = _hand_start(char, hand, _start, t)
+        ix = target[0] + f * _s(char, 10)
+        iy = target[1]
+        hx = lerp(lerp(sx, target[0], reach), ix, push)
+        hy = lerp(lerp(sy, target[1], reach), iy, push)
+        if turn > 0.0:
+            # One wrist turn: the hand circles the inserted
+            # point and returns to it (the radius envelope
+            # closes the loop, so the completion pose is the
+            # inserted point, not a point on the circle).
+            _ang = 2.0 * math.pi * turn
+            _r = _s(char, 8) * math.sin(math.pi * turn)
+            hx += _r * math.cos(_ang)
+            hy += _r * math.sin(_ang)
+        char.set_pose(
+            torso_lean=0.08 * push,
+            root_y=_start["root_y"])
+        head_track(char, (ix, iy), max_angle=0.35)
+        _set_hand(char, hand, (hx, hy), _start)
+        return char
+
+    return fn
+
+
 def open_wallet(char, duration, prop=None):
     """Bring both hands together and open the wallet they hold.
 
@@ -2420,6 +2552,12 @@ def hammer_strike(char, strike_point, duration, ground_y=None, hand="r",
                 math.sin(HAMMER_GRIP_ANGLE_RAD)
                 * HAMMER_HANDLE_FRAC * H)
         strike_hand = (sx - grip[0], sy - grip[1])
+        # Round 19 (squash/stretch): the body stretches
+        # slightly on the accelerating downswing, squashes on
+        # impact (peaking ~2 frames after contact), overshoots
+        # into a stretch, and settles by the cycle end. The
+        # envelope is continuous at every phase boundary.
+        squash = 0.0
         if u < HAMMER_CYCLE_RAISE_U:
             v = u / HAMMER_CYCLE_RAISE_U
             e = 1.0 - (1.0 - v) ** 2  # ease-out: decelerate into hold
@@ -2442,6 +2580,7 @@ def hammer_strike(char, strike_point, duration, ground_y=None, hand="r",
                    lerp(raised[1], strike_hand[1], e))
             lean = _start["lean"] + lerp(-0.08, 0.18, e)
             look = _start["look"] + lerp(0.10, 0.30, e)
+            squash = -0.3 * _HAMMER_SQUASH * math.sin(v * math.pi)
         else:
             v = (u - HAMMER_CYCLE_STRIKE_U) / (1.0 - HAMMER_CYCLE_STRIKE_U)
             e = smoothstep(v)
@@ -2452,6 +2591,15 @@ def hammer_strike(char, strike_point, duration, ground_y=None, hand="r",
                    base[1] + rebound * (raised[1] - rest[1]))
             lean = _start["lean"] + lerp(0.18, 0.0, e)
             look = _start["look"] + lerp(0.30, 0.05, e)
+            if v < 0.25:
+                squash = _HAMMER_SQUASH * math.sin(
+                    math.pi / 2.0 * v / 0.25)
+            elif v < 0.60:
+                squash = _HAMMER_SQUASH * math.cos(
+                    math.pi / 2.0 * (v - 0.25) / 0.35)
+            else:
+                squash = (-0.4 * _HAMMER_SQUASH * math.sin(
+                    math.pi * (v - 0.60) / 0.40))
         # Round 8 (R7-D1): the hand never enters the actor's own
         # head disc, in any phase -- the wind-up, the strike path
         # and the recovery all route around the face. The guard is
@@ -2474,7 +2622,7 @@ def hammer_strike(char, strike_point, duration, ground_y=None, hand="r",
             pos = _clear_own_head(pos, _shifted, _head_r, H,
                                   shoulder, _reach)
         _set_hand(char, hand, pos, _start)
-        char.set_pose(torso_lean=lean, head_look=look)
+        char.set_pose(torso_lean=lean, head_look=look, squash=squash)
         return char
     return fn
 
@@ -2499,6 +2647,10 @@ def walk_mud(char, from_x, to_x, duration, ground_y, sink=None,
         gait = dict(MUD_GAIT)
     base = _locomote(char, from_x, to_x, duration, ground_y, gait,
                      phase_name="walk_mud")
+    # R16: the balance sway oscillates along the travel axis, so it
+    # is direction-signed like the base lean (an absolute sway
+    # broke the left/right mirror by ~15 px at the shoulder).
+    direction = 1 if to_x >= from_x else -1
 
     def fn(t):
         base(t)
@@ -2508,7 +2660,7 @@ def walk_mud(char, from_x, to_x, duration, ground_y, sink=None,
                 setattr(char, attr, (tgt[0], ground_y + sink))
         char.set_pose(
             torso_lean=char.pose.get("torso_lean", 0.0)
-            + 0.05 * math.sin(2.0 * math.pi * 1.1 * t))
+            + direction * 0.05 * math.sin(2.0 * math.pi * 1.1 * t))
         return char
     return fn
 
@@ -2802,6 +2954,7 @@ PRIMITIVE_COMPLETION = {
                    "planted on the ground, hands on desk/knees",
     "stand_from_chair": "standing() pose at the chair x",
     "pick_up": "hand at the waist hold, prop grasped",
+    "insert_key": "hand at the inserted point, key in the lock",
     "open_wallet": "hands together at chest height, open_u == 1.0",
     "close_wallet": "hands parted at chest height, open_u == 0.0",
     "hold_pen": "pen tip hovering over the paper line start",
@@ -2928,6 +3081,7 @@ PRIMITIVES = {
     "idle": idle, "bend_pick": bend_pick, "kneel_pick": kneel_pick,
     "sit_at_desk": sit_at_desk, "stand_from_chair": stand_from_chair,
     "pick_up": pick_up, "open_wallet": open_wallet,
+    "insert_key": insert_key,
     "close_wallet": close_wallet, "hold_pen": hold_pen,
     "write_on_paper": write_on_paper, "sign_document": sign_document,
     "hand_over": hand_over, "walk_mud": walk_mud,
@@ -3017,6 +3171,11 @@ def compile_actions(action_list, chars, fps=24):
             fn = pick_up(c, tuple(a["target"]), dur, a["ground_y"],
                          hand=a.get("hand", "r"),
                          source=a.get("source", "ground"))
+            compiled.append((start, dur, lambda t, fn=fn: fn(t)))
+        elif ptype == "insert_key":
+            c = chars[a["char"]]
+            fn = insert_key(c, tuple(a["target"]), dur,
+                            hand=a.get("hand", "r"))
             compiled.append((start, dur, lambda t, fn=fn: fn(t)))
         elif ptype in ("open_wallet", "close_wallet"):
             c = chars[a["char"]]

@@ -509,6 +509,33 @@ class PropStateMachine:
                 self._detail_markers[pid].append(
                     (start, end, "open_u",
                      1.0 if action in ("OPEN_WALLET", "OPEN") else 0.0))
+            elif action == "INSERT_KEY":
+                # Round 16 (L02-D2): the key is IN USE for the
+                # whole insert window (approach + push + turn)
+                # and stays attached to the actor's hand after
+                # it. The event actor's claim WINS over any
+                # holder the earlier markers in this shot set
+                # (a seeded hold from cross-shot memory): the
+                # current shot's event is the ground truth for
+                # who holds the prop DURING the shot -- before
+                # this branch the key stayed at its rest while
+                # the hand drove empty to the lock.
+                if pid in held and held[pid].get("holder") != actor:
+                    self.diagnostics.append({
+                        "prop_id": pid,
+                        "issue": f"INSERT_KEY overrides holder "
+                                 f"{held[pid].get('holder')} with "
+                                 f"{actor} (event "
+                                 f"{event.get('action_id')})",
+                        "action_id": event.get("action_id"),
+                    })
+                held[pid] = {"holder": actor, "hand": hand}
+                self._add(pid, start, "IN_USE",
+                          {"event": event, "hand": hand,
+                           "actor": actor})
+                self._add(pid, end, "ATTACHED_TO_HAND",
+                          {"event": event, "hand": hand,
+                           "actor": actor})
             elif action in ("WRITE", "SIGN", "HAMMER_STRIKE"):
                 # HAMMER_STRIKE: the tool stays gripped and IN_USE for
                 # the whole striking run (the hammer never leaves the
